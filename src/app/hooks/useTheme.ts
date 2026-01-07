@@ -9,8 +9,8 @@ export function useTheme() {
     if (savedTheme) {
       return savedTheme;
     }
-    // Default to dark theme
-    return 'dark';
+    // Default to light theme
+    return 'light';
   });
 
   useEffect(() => {
