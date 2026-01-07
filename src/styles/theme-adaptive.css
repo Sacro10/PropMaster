@@ -1,0 +1,61 @@
+/* Global theme-adaptive styles for components */
+
+/* Light theme overrides for gradient cards */
+.light-theme .bg-gradient-to-br.from-\[#1a1f35\] {
+  background: white !important;
+  background-image: none !important;
+  box-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1);
+}
+
+/* Light theme borders */
+.light-theme .border-white\/10 {
+  border-color: rgb(229 231 235) !important;
+}
+
+/* Light theme text colors */
+.light-theme .text-white\/50 {
+  color: rgb(107 114 128) !important;
+}
+
+.light-theme .text-white\/40 {
+  color: rgb(156 163 175) !important;
+}
+
+.light-theme .text-white\/70 {
+  color: rgb(75 85 99) !important;
+}
+
+/* Light theme backgrounds */
+.light-theme .bg-white\/5 {
+  background-color: rgb(249 250 251) !important;
+}
+
+.light-theme .bg-white\/10 {
+  background-color: rgb(243 244 246) !important;
+}
+
+.light-theme .hover\:bg-white\/10:hover {
+  background-color: rgb(229 231 235) !important;
+}
+
+.light-theme .hover\:bg-white\/5:hover {
+  background-color: rgb(243 244 246) !important;
+}
+
+/* Light theme progress bars */
+.light-theme .bg-white\/10.rounded-full {
+  background-color: rgb(229 231 235) !important;
+}
+
+/* Light theme hover borders */
+.light-theme .hover\:border-white\/10:hover {
+  border-color: rgb(229 231 235) !important;
+}
+
+.light-theme .border-transparent {
+  border-color: transparent !important;
+}
+
+.light-theme .hover\:border-white\/10:hover {
+  border-color: rgb(229 231 235) !important;
+}

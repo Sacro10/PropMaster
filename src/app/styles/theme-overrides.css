@@ -1,0 +1,29 @@
+/* Theme-aware component styles */
+
+/* Light theme overrides for components */
+:not(.dark-theme) .theme-card {
+  background: white !important;
+  background-image: none !important;
+  box-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1);
+}
+
+:not(.dark-theme) .theme-card-inner {
+  background: rgb(249 250 251) !important;
+  background-image: none !important;
+}
+
+:not(.dark-theme) .theme-text-muted {
+  color: rgb(107 114 128) !important;
+}
+
+:not(.dark-theme) .theme-text-inactive {
+  color: rgb(156 163 175) !important;
+}
+
+:not(.dark-theme) .theme-border {
+  border-color: rgb(229 231 235) !important;
+}
+
+:not(.dark-theme) .theme-progress-bg {
+  background: rgb(229 231 235) !important;
+}

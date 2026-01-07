@@ -1,0 +1,33 @@
+import { ReactNode } from 'react'
+import { Navigate, useLocation } from 'react-router-dom'
+import { useAuth } from '../context/AuthContext'
+
+interface ProtectedRouteProps {
+  children: ReactNode
+}
+
+export function ProtectedRoute({ children }: ProtectedRouteProps) {
+  const { user, loading } = useAuth()
+  const location = useLocation()
+
+  // Show loading state while checking auth
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-[#0a0e1a]">
+        <div className="text-center">
+          <div className="w-16 h-16 border-4 border-[#ff6b35] border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+          <p className="text-white text-xl" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
+            Loading...
+          </p>
+        </div>
+      </div>
+    )
+  }
+
+  // Redirect to /auth if not authenticated, preserving the attempted URL
+  if (!user) {
+    return <Navigate to={`/auth?returnTo=${encodeURIComponent(location.pathname)}`} replace />
+  }
+
+  return <>{children}</>
+}
