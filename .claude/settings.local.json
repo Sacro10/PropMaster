@@ -4,7 +4,9 @@
       "Bash(npm install:*)",
       "Bash(tree:*)",
       "Bash(ls:*)",
-      "Bash(cat:*)"
+      "Bash(cat:*)",
+      "Bash(chmod:*)",
+      "Bash(./upgrade-to-premium.sh)"
     ]
   }
 }
