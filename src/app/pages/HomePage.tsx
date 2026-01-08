@@ -110,6 +110,13 @@ export function HomePage() {
             </div>
 
             <div className="flex items-center gap-4">
+              <button
+                onClick={() => navigate('/pricing')}
+                className={`px-6 py-2 rounded-lg font-medium transition-colors ${isDark ? 'hover:bg-white/5' : 'hover:bg-gray-100'}`}
+                style={{ fontFamily: 'Work Sans, sans-serif' }}
+              >
+                Pricing
+              </button>
               <ThemeToggle theme={theme} onToggle={toggleTheme} />
               {user ? (
                 <button

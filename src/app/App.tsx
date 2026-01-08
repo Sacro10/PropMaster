@@ -5,6 +5,7 @@ import { AuthProvider } from './context/AuthContext'
 import { useTheme } from './hooks/useTheme'
 import { HomePage } from './pages/HomePage'
 import { AuthPage } from './pages/AuthPage'
+import { PricingPage } from './pages/PricingPage'
 import { AppLayout } from './pages/AppLayout'
 import { DashboardOverview } from './components/DashboardOverview'
 import { TenantManagement } from './components/TenantManagement'
@@ -14,7 +15,7 @@ import { PropertyShowings } from './components/PropertyShowings'
 import { RentCollection } from './components/RentCollection'
 import { CommunicationHub } from './components/CommunicationHub'
 import { ProtectedRoute } from './components/ProtectedRoute'
-import { SubscriptionSettings } from './components/SubscriptionSettings'
+import { BillingPage } from './pages/BillingPage'
 
 export default function App() {
   const { theme, toggleTheme } = useTheme()
@@ -39,6 +40,7 @@ export default function App() {
           <Route path="/" element={<HomePage />} />
           <Route path="/auth" element={<AuthPage />} />
           <Route path="/auth.html" element={<AuthPage />} /> {/* Support both /auth and /auth.html */}
+          <Route path="/pricing" element={<PricingPage />} />
 
           {/* Protected application routes */}
           <Route
@@ -59,8 +61,9 @@ export default function App() {
             <Route path="rent" element={<RentCollection />} />
             <Route path="communication" element={<CommunicationHub />} />
 
-            {/* Settings page */}
-            <Route path="settings" element={<SettingsPage />} />
+            {/* Billing & Settings pages */}
+            <Route path="billing" element={<BillingPage />} />
+            <Route path="settings" element={<BillingPage />} />
           </Route>
 
           {/* Catch all - redirect to home */}
@@ -68,22 +71,5 @@ export default function App() {
         </Routes>
       </AuthProvider>
     </ThemeProvider>
-  )
-}
-
-// Settings page with subscription management
-function SettingsPage() {
-  return (
-    <div className="space-y-6">
-      <div>
-        <h2 className="text-4xl mb-2" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
-          SETTINGS
-        </h2>
-        <p className="text-white/50" style={{ fontFamily: 'Work Sans, sans-serif' }}>
-          Manage your subscription and account preferences
-        </p>
-      </div>
-      <SubscriptionSettings />
-    </div>
   )
 }
