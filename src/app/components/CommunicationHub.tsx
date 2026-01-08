@@ -1,89 +1,65 @@
-import { MessageSquare, Bell, Search, CircleCheck, Clock } from 'lucide-react';
+import { MessageSquare, Bell, Search, CircleCheck, Clock, RefreshCw } from 'lucide-react';
 import { useHasFeature } from '../hooks/usePlanGating';
+import { useThemeStyles } from '../hooks/useThemeStyles';
 import { FeatureGate } from './UpgradeCTA';
+import { LoadingPage } from './LoadingSpinner';
+import { ErrorState } from './ErrorBoundary';
+import {
+  useRecentMessages,
+  useMessageTemplates,
+  useAutomatedReminders,
+  usePortalActivity,
+  useCommunicationStats,
+} from '../../lib/hooks/useCommunications';
+import { formatRelativeTime } from '../../lib/utils/dateHelpers';
 
 export function CommunicationHub() {
+  const { isDark, text, border } = useThemeStyles();
+
   // Feature checks for plan gating - Communication hub requires Pro
   const communicationHub = useHasFeature('communication_hub');
-  const conversations = [
-    {
-      tenant: 'Sarah Johnson',
-      property: 'Sunset Villa #204',
-      lastMessage: 'Thank you for the quick response!',
-      time: '5 mins ago',
-      unread: 0,
-      status: 'active',
-    },
-    {
-      tenant: 'Michael Chen',
-      property: 'Oak Park #15',
-      lastMessage: 'When is the next HVAC filter delivery?',
-      time: '1 hour ago',
-      unread: 2,
-      status: 'active',
-    },
-    {
-      tenant: 'Emily Rodriguez',
-      property: 'Downtown Loft #8A',
-      lastMessage: 'I\'d like to schedule a lease renewal meeting',
-      time: '3 hours ago',
-      unread: 1,
-      status: 'active',
-    },
-    {
-      tenant: 'David Williams',
-      property: 'Riverside #302',
-      lastMessage: 'Maintenance request completed, thanks!',
-      time: '1 day ago',
-      unread: 0,
-      status: 'resolved',
-    },
-  ];
 
-  const automatedReminders = [
-    {
-      type: 'Rent Due',
-      recipients: 142,
-      nextSend: 'Tomorrow, 9:00 AM',
-      frequency: 'Monthly',
-      status: 'active',
-    },
-    {
-      type: 'Lease Renewal',
-      recipients: 15,
-      nextSend: 'Jan 10, 2026',
-      frequency: 'Custom',
-      status: 'active',
-    },
-    {
-      type: 'HVAC Filter Delivery',
-      recipients: 89,
-      nextSend: 'Jan 13, 2026',
-      frequency: 'Monthly',
-      status: 'active',
-    },
-    {
-      type: 'Property Inspection',
-      recipients: 8,
-      nextSend: 'Jan 12, 2026',
-      frequency: 'Quarterly',
-      status: 'active',
-    },
-  ];
+  // Fetch data
+  const { data: messages, loading: messagesLoading, error: messagesError, refetch: refetchMessages } = useRecentMessages();
+  const { data: templates, loading: templatesLoading } = useMessageTemplates();
+  const { data: reminders, loading: remindersLoading } = useAutomatedReminders();
+  const { data: portalActivity, loading: activityLoading } = usePortalActivity();
+  const { data: stats, loading: statsLoading } = useCommunicationStats();
 
-  const quickTemplates = [
-    { name: 'Rent Reminder', category: 'Payment', uses: 142 },
-    { name: 'Maintenance Update', category: 'Maintenance', uses: 87 },
-    { name: 'Lease Renewal', category: 'Lease', uses: 45 },
-    { name: 'Welcome Message', category: 'Onboarding', uses: 28 },
-  ];
+  // Show loading state
+  if (messagesLoading || statsLoading) {
+    return <LoadingPage />;
+  }
 
-  const communicationStats = [
-    { label: 'Active Conversations', value: '47', change: '+12' },
-    { label: 'Avg. Response Time', value: '18 min', change: '-24%' },
-    { label: 'Automation Rate', value: '78%', change: '+8%' },
-    { label: 'Tenant Satisfaction', value: '96%', change: '+3%' },
-  ];
+  // Show error state
+  if (messagesError) {
+    return <ErrorState error={messagesError} retry={refetchMessages} />;
+  }
+
+  // Prepare stats display
+  const communicationStatsDisplay = stats ? [
+    { label: 'Active Conversations', value: stats.active_conversations.toString(), change: '+12' },
+    { label: 'Avg. Response Time', value: `${stats.avg_response_time_minutes} min`, change: '-24%' },
+    { label: 'Automation Rate', value: `${stats.automation_rate}%`, change: '+8%' },
+    { label: 'Tenant Satisfaction', value: `${stats.tenant_satisfaction}%`, change: '+3%' },
+  ] : [];
+
+  // Transform messages into conversation format
+  const conversations = messages.map((msg) => {
+    const propertyDisplay = msg.unit_number
+      ? `${msg.property_name || 'Unknown'} #${msg.unit_number}`
+      : msg.property_name || 'General';
+
+    return {
+      id: msg.id,
+      tenant: msg.sender_name || 'Unknown',
+      property: propertyDisplay,
+      lastMessage: msg.body.substring(0, 60) + (msg.body.length > 60 ? '...' : ''),
+      time: formatRelativeTime(msg.created_at),
+      unread: msg.is_read ? 0 : 1,
+      status: msg.is_read ? 'resolved' : 'active',
+    };
+  });
 
   return (
     <FeatureGate
@@ -99,23 +75,32 @@ export function CommunicationHub() {
           <h2 className="text-4xl mb-2" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
             COMMUNICATION PORTAL
           </h2>
-          <p className="text-white/50" style={{ fontFamily: 'Work Sans, sans-serif' }}>
+          <p className={text.muted} style={{ fontFamily: 'Work Sans, sans-serif' }}>
             Tenant communication portal with automated reminders
           </p>
         </div>
-        <button className="px-6 py-3 bg-gradient-to-r from-[#ff6b35] to-[#f7931e] rounded-lg font-medium hover:scale-105 transition-transform">
-          + New Message
-        </button>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={refetchMessages}
+            className={`px-4 py-2 ${isDark ? 'bg-white/5 hover:bg-white/10' : 'bg-gray-100 hover:bg-gray-200'} rounded-lg transition-colors flex items-center gap-2`}
+            title="Refresh data"
+          >
+            <RefreshCw className="w-4 h-4" />
+          </button>
+          <button className="px-6 py-3 bg-gradient-to-r from-[#ff6b35] to-[#f7931e] rounded-lg font-medium hover:scale-105 transition-transform">
+            + New Message
+          </button>
+        </div>
       </div>
 
       {/* Stats */}
       <div className="grid grid-cols-4 gap-6">
-        {communicationStats.map((stat, index) => (
+        {communicationStatsDisplay.map((stat, index) => (
           <div
             key={index}
-            className="bg-gradient-to-br from-[#1a1f35] to-[#0f1523] border border-white/10 rounded-xl p-6"
+            className={`${isDark ? 'bg-gradient-to-br from-[#1a1f35] to-[#0f1523]' : 'bg-white shadow-md'} border ${border.default} rounded-xl p-6 hover:border-[#ff6b35]/50 transition-all`}
           >
-            <p className="text-sm text-white/50 mb-2" style={{ fontFamily: 'Work Sans, sans-serif' }}>
+            <p className={`text-sm ${text.muted} mb-2`} style={{ fontFamily: 'Work Sans, sans-serif' }}>
               {stat.label}
             </p>
             <div className="flex items-end justify-between">

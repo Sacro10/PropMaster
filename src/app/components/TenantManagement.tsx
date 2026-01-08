@@ -1,104 +1,77 @@
-import { Search, UserSearch, CircleCheck, TrendingUp, ListFilter } from 'lucide-react';
+import { Search, UserSearch, CircleCheck, TrendingUp, ListFilter, RefreshCw } from 'lucide-react';
 import { useThemeStyles } from '../hooks/useThemeStyles';
 import { useHasFeature } from '../hooks/usePlanGating';
 import { FeatureGate, LockedFeatureCard } from './UpgradeCTA';
+import { useTenants, useRentalApplications, useTenantMetrics } from '../../lib/hooks/useTenants';
+import { LoadingPage } from './LoadingSpinner';
+import { ErrorState } from './ErrorBoundary';
+import { formatCurrency } from '../../lib/utils/currencyHelpers';
+import { formatDisplayDate, formatRelativeTime } from '../../lib/utils/dateHelpers';
+import { useState } from 'react';
 
 export function TenantManagement() {
   const { isDark, bg, text, border } = useThemeStyles();
+  const [isApproving, setIsApproving] = useState<string | null>(null);
 
   // Feature checks for plan gating
   const tenantScreening = useHasFeature('tenant_screening');
   const aiRiskScoring = useHasFeature('ai_risk_scoring');
 
-  const tenants = [
-    {
-      name: 'Sarah Johnson',
-      unit: 'Sunset Villa #204',
-      moveIn: 'Jan 2024',
-      rent: '$2,400',
-      status: 'active',
-      score: 98,
-      paymentHistory: 'Perfect',
-      leaseEnd: 'Dec 2024',
-    },
-    {
-      name: 'Michael Chen',
-      unit: 'Oak Park #15',
-      moveIn: 'Mar 2023',
-      rent: '$1,850',
-      status: 'active',
-      score: 95,
-      paymentHistory: 'Excellent',
-      leaseEnd: 'Feb 2025',
-    },
-    {
-      name: 'Emily Rodriguez',
-      unit: 'Downtown Loft #8A',
-      moveIn: 'Jun 2023',
-      rent: '$3,200',
-      status: 'renewal',
-      score: 92,
-      paymentHistory: 'Good',
-      leaseEnd: 'May 2024',
-    },
-    {
-      name: 'David Williams',
-      unit: 'Riverside #302',
-      moveIn: 'Sep 2022',
-      rent: '$2,100',
-      status: 'active',
-      score: 96,
-      paymentHistory: 'Excellent',
-      leaseEnd: 'Aug 2024',
-    },
-    {
-      name: 'Jessica Martinez',
-      unit: 'Maple Street #12',
-      moveIn: 'Dec 2023',
-      rent: '$1,950',
-      status: 'active',
-      score: 89,
-      paymentHistory: 'Good',
-      leaseEnd: 'Nov 2024',
-    },
-  ];
+  // Fetch data
+  const { data: tenants, loading: tenantsLoading, error: tenantsError, refetch: refetchTenants } = useTenants();
+  const { data: applications, loading: appsLoading, error: appsError, refetch: refetchApps, approve, reject } = useRentalApplications();
+  const { data: metrics, loading: metricsLoading, error: metricsError } = useTenantMetrics();
 
-  const applicants = [
-    {
-      name: 'Robert Thompson',
-      applied: '2 days ago',
-      unit: 'Garden View #7',
-      aiScore: 94,
-      income: '$85K',
-      credit: 745,
-      background: 'Clear',
-    },
-    {
-      name: 'Amanda Garcia',
-      applied: '1 week ago',
-      unit: 'Parkside #22',
-      aiScore: 88,
-      income: '$72K',
-      credit: 710,
-      background: 'Clear',
-    },
-    {
-      name: 'James Wilson',
-      applied: '1 week ago',
-      unit: 'Hillside #5B',
-      aiScore: 91,
-      income: '$95K',
-      credit: 768,
-      background: 'Clear',
-    },
-  ];
+  // Handle approve
+  const handleApprove = async (applicationId: string) => {
+    setIsApproving(applicationId);
+    const result = await approve(applicationId);
+    setIsApproving(null);
 
-  const screeningMetrics = [
-    { label: 'Avg. Screening Time', value: '4.2 hrs', change: '-23%' },
-    { label: 'Acceptance Rate', value: '76%', change: '+5%' },
-    { label: 'AI Accuracy', value: '97.8%', change: '+2%' },
-    { label: 'Eviction Rate', value: '<1%', change: '0%' },
-  ];
+    if (result.success) {
+      // Show success message (you can add toast notification here)
+      console.log('Application approved successfully');
+    } else {
+      // Show error message
+      console.error('Failed to approve application:', result.error);
+    }
+  };
+
+  // Show loading state
+  if (tenantsLoading || appsLoading) {
+    return <LoadingPage />;
+  }
+
+  // Show error state
+  if (tenantsError || appsError) {
+    return <ErrorState error={tenantsError || appsError} retry={() => {
+      refetchTenants();
+      refetchApps();
+    }} />;
+  }
+
+  const screeningMetrics = metrics ? [
+    {
+      label: 'Avg. Screening Time',
+      value: metrics.avg_screening_time > 0 ? `${metrics.avg_screening_time} hrs` : 'N/A',
+      change: '-23%' // TODO: Calculate actual change
+    },
+    {
+      label: 'Acceptance Rate',
+      value: metrics.acceptance_rate > 0 ? `${metrics.acceptance_rate}%` : '0%',
+      change: '+5%' // TODO: Calculate actual change
+    },
+    {
+      label: 'AI Accuracy',
+      value: metrics.ai_accuracy > 0 ? `${metrics.ai_accuracy}%` : 'N/A',
+      change: '+2%' // TODO: Calculate actual change
+    },
+    {
+      label: 'Eviction Rate',
+      value: metrics.eviction_rate < 1 ? '<1%' : `${metrics.eviction_rate}%`,
+      change: '0%'
+    },
+  ] : [];
 
   return (
     <div className="space-y-6">
@@ -108,13 +81,25 @@ export function TenantManagement() {
           <h2 className="text-4xl mb-2" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
             TENANT MANAGEMENT
           </h2>
-          <p className="text-white/50" style={{ fontFamily: 'Work Sans, sans-serif' }}>
+          <p className={text.muted} style={{ fontFamily: 'Work Sans, sans-serif' }}>
             Comprehensive tenant screening with AI risk assessment
           </p>
         </div>
-        <button className="px-6 py-3 bg-gradient-to-r from-[#ff6b35] to-[#f7931e] rounded-lg font-medium hover:scale-105 transition-transform">
-          + Add New Tenant
-        </button>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => {
+              refetchTenants();
+              refetchApps();
+            }}
+            className={`px-4 py-2 ${isDark ? 'bg-white/5 hover:bg-white/10' : 'bg-gray-100 hover:bg-gray-200'} rounded-lg transition-colors flex items-center gap-2`}
+            title="Refresh data"
+          >
+            <RefreshCw className="w-4 h-4" />
+          </button>
+          <button className="px-6 py-3 bg-gradient-to-r from-[#ff6b35] to-[#f7931e] rounded-lg font-medium hover:scale-105 transition-transform">
+            + Add New Tenant
+          </button>
+        </div>
       </div>
 
       {/* Screening Metrics - Gated by Pro plan (tenant_screening) */}
@@ -124,110 +109,146 @@ export function TenantManagement() {
         loading={tenantScreening.loading}
         variant="inline"
       >
-        <div className="grid grid-cols-4 gap-6">
-          {screeningMetrics.map((metric, index) => (
-            <div
-              key={index}
-              className="bg-gradient-to-br from-[#1a1f35] to-[#0f1523] border border-white/10 rounded-xl p-6"
-            >
-              <p className="text-sm text-white/50 mb-2" style={{ fontFamily: 'Work Sans, sans-serif' }}>
-                {metric.label}
-              </p>
-              <div className="flex items-end justify-between">
-                <p className="text-3xl font-bold" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
-                  {metric.value}
-                </p>
-                <span className={`text-sm ${metric.change.startsWith('-') || metric.change === '0%' ? 'text-emerald-400' : 'text-emerald-400'}`}>
-                  {metric.change}
-                </span>
+        {metricsLoading ? (
+          <div className="grid grid-cols-4 gap-6">
+            {[...Array(4)].map((_, i) => (
+              <div key={i} className={`${isDark ? 'bg-gradient-to-br from-[#1a1f35] to-[#0f1523]' : 'bg-gray-100'} border ${border.default} rounded-xl p-6 animate-pulse`}>
+                <div className="h-4 bg-white/10 rounded w-1/2 mb-4"></div>
+                <div className="h-8 bg-white/10 rounded w-3/4"></div>
               </div>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        ) : (
+          <div className="grid grid-cols-4 gap-6">
+            {screeningMetrics.map((metric, index) => (
+              <div
+                key={index}
+                className={`${isDark ? 'bg-gradient-to-br from-[#1a1f35] to-[#0f1523]' : 'bg-white shadow-md'} border ${border.default} rounded-xl p-6`}
+              >
+                <p className={`text-sm ${text.muted} mb-2`} style={{ fontFamily: 'Work Sans, sans-serif' }}>
+                  {metric.label}
+                </p>
+                <div className="flex items-end justify-between">
+                  <p className="text-3xl font-bold" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
+                    {metric.value}
+                  </p>
+                  <span className={`text-sm ${metric.change.startsWith('-') || metric.change === '0%' ? 'text-emerald-400' : 'text-emerald-400'}`}>
+                    {metric.change}
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </FeatureGate>
 
       {/* Main Grid */}
       <div className="grid grid-cols-3 gap-6">
         {/* Active Tenants */}
-        <div className="col-span-2 bg-gradient-to-br from-[#1a1f35] to-[#0f1523] border border-white/10 rounded-xl p-6">
+        <div className={`col-span-2 ${isDark ? 'bg-gradient-to-br from-[#1a1f35] to-[#0f1523]' : 'bg-white shadow-md'} border ${border.default} rounded-xl p-6`}>
           <div className="flex items-center justify-between mb-6">
             <h3 className="text-2xl" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
               ACTIVE TENANTS
             </h3>
             <div className="flex items-center gap-3">
               <div className="relative">
-                <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-white/40" />
+                <Search className={`w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 ${text.muted}`} />
                 <input
                   type="text"
                   placeholder="Search tenants..."
-                  className="pl-10 pr-4 py-2 bg-white/5 border border-white/10 rounded-lg text-sm focus:outline-none focus:border-[#ff6b35]/50"
+                  className={`pl-10 pr-4 py-2 ${isDark ? 'bg-white/5' : 'bg-gray-50'} border ${border.default} rounded-lg text-sm focus:outline-none focus:border-[#ff6b35]/50`}
                   style={{ fontFamily: 'Work Sans, sans-serif' }}
                 />
               </div>
-              <button className="p-2 bg-white/5 hover:bg-white/10 rounded-lg transition-colors">
+              <button className={`p-2 ${isDark ? 'bg-white/5 hover:bg-white/10' : 'bg-gray-50 hover:bg-gray-100'} rounded-lg transition-colors`}>
                 <ListFilter className="w-4 h-4" />
               </button>
             </div>
           </div>
 
           <div className="space-y-3">
-            {tenants.map((tenant, index) => (
-              <div
-                key={index}
-                className="flex items-center justify-between p-4 bg-white/5 rounded-lg hover:bg-white/10 transition-all border border-transparent hover:border-white/10 group"
-              >
-                <div className="flex items-center gap-4">
-                  <div className="w-12 h-12 bg-gradient-to-br from-[#ff6b35] to-[#f7931e] rounded-full flex items-center justify-center font-semibold">
-                    {tenant.name.split(' ').map(n => n[0]).join('')}
-                  </div>
-                  <div>
-                    <p className="font-medium mb-1" style={{ fontFamily: 'Work Sans, sans-serif' }}>
-                      {tenant.name}
-                    </p>
-                    <p className="text-sm text-white/50" style={{ fontFamily: 'Work Sans, sans-serif' }}>
-                      {tenant.unit}
-                    </p>
-                  </div>
-                </div>
+            {tenants.length === 0 ? (
+              <div className="text-center py-12">
+                <Users className={`w-12 h-12 ${text.muted} mx-auto mb-4`} />
+                <p className={`${text.muted} mb-2`} style={{ fontFamily: 'Work Sans, sans-serif' }}>
+                  No active tenants yet
+                </p>
+                <p className={`text-sm ${text.inactive}`} style={{ fontFamily: 'Work Sans, sans-serif' }}>
+                  Add your first tenant to get started
+                </p>
+              </div>
+            ) : (
+              tenants.map((tenant) => {
+                const initials = tenant.full_name
+                  ? tenant.full_name.split(' ').map(n => n[0]).join('').substring(0, 2)
+                  : 'T';
+                const unitDisplay = tenant.unit ? `${tenant.property?.name} #${tenant.unit.unit_number}` : 'No unit';
+                const riskScore = tenant.ai_risk_score || 0;
+                const riskColor = riskScore >= 90 ? 'from-emerald-400 to-emerald-500' :
+                                 riskScore >= 70 ? 'from-amber-400 to-amber-500' :
+                                 'from-red-400 to-red-500';
 
-                <div className="flex items-center gap-8">
-                  <div className="text-right">
-                    <p className="text-sm text-white/50 mb-1">Risk Score</p>
-                    <div className="flex items-center gap-2">
-                      <div className="w-12 h-1 bg-white/10 rounded-full overflow-hidden">
-                        <div
-                          className="h-full bg-gradient-to-r from-emerald-400 to-emerald-500"
-                          style={{ width: `${tenant.score}%` }}
-                        />
+                return (
+                  <div
+                    key={tenant.id}
+                    className={`flex items-center justify-between p-4 ${isDark ? 'bg-white/5 hover:bg-white/10' : 'bg-gray-50 hover:bg-gray-100'} rounded-lg transition-all border ${border.default} hover:border-[#ff6b35]/50 group`}
+                  >
+                    <div className="flex items-center gap-4">
+                      <div className="w-12 h-12 bg-gradient-to-br from-[#ff6b35] to-[#f7931e] rounded-full flex items-center justify-center font-semibold text-white">
+                        {initials}
                       </div>
-                      <span className="text-sm font-medium text-emerald-400">{tenant.score}</span>
+                      <div>
+                        <p className="font-medium mb-1" style={{ fontFamily: 'Work Sans, sans-serif' }}>
+                          {tenant.full_name || 'Unknown Tenant'}
+                        </p>
+                        <p className={`text-sm ${text.muted}`} style={{ fontFamily: 'Work Sans, sans-serif' }}>
+                          {unitDisplay}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-8">
+                      {aiRiskScoring.hasAccess && (
+                        <div className="text-right">
+                          <p className={`text-sm ${text.muted} mb-1`}>Risk Score</p>
+                          <div className="flex items-center gap-2">
+                            <div className={`w-12 h-1 ${isDark ? 'bg-white/10' : 'bg-gray-200'} rounded-full overflow-hidden`}>
+                              <div
+                                className={`h-full bg-gradient-to-r ${riskColor}`}
+                                style={{ width: `${riskScore}%` }}
+                              />
+                            </div>
+                            <span className="text-sm font-medium text-emerald-400">{riskScore}</span>
+                          </div>
+                        </div>
+                      )}
+
+                      <div className="text-right">
+                        <p className={`text-sm ${text.muted} mb-1`}>Monthly Rent</p>
+                        <p className="font-semibold">{formatCurrency(tenant.lease?.rent || 0)}</p>
+                      </div>
+
+                      <div className="text-right">
+                        <p className={`text-sm ${text.muted} mb-1`}>Lease Ends</p>
+                        <p className="text-sm">{tenant.lease?.lease_end ? formatDisplayDate(tenant.lease.lease_end, 'MMM yyyy') : 'N/A'}</p>
+                      </div>
+
+                      <div>
+                        <span
+                          className={`px-3 py-1 rounded-full text-xs font-medium ${
+                            tenant.lease?.status === 'active'
+                              ? 'bg-emerald-500/20 text-emerald-400'
+                              : 'bg-amber-500/20 text-amber-400'
+                          }`}
+                        >
+                          {(tenant.lease?.status || 'unknown').toUpperCase()}
+                        </span>
+                      </div>
                     </div>
                   </div>
-
-                  <div className="text-right">
-                    <p className="text-sm text-white/50 mb-1">Monthly Rent</p>
-                    <p className="font-semibold">{tenant.rent}</p>
-                  </div>
-
-                  <div className="text-right">
-                    <p className="text-sm text-white/50 mb-1">Lease Ends</p>
-                    <p className="text-sm">{tenant.leaseEnd}</p>
-                  </div>
-
-                  <div>
-                    <span
-                      className={`px-3 py-1 rounded-full text-xs font-medium ${
-                        tenant.status === 'active'
-                          ? 'bg-emerald-500/20 text-emerald-400'
-                          : 'bg-amber-500/20 text-amber-400'
-                      }`}
-                    >
-                      {tenant.status.toUpperCase()}
-                    </span>
-                  </div>
-                </div>
-              </div>
-            ))}
+                );
+              })
+            )}
           </div>
         </div>
 
@@ -246,127 +267,152 @@ export function TenantManagement() {
             />
           }
         >
-          <div className="bg-gradient-to-br from-[#1a1f35] to-[#0f1523] border border-white/10 rounded-xl p-6">
+          <div className={`${isDark ? 'bg-gradient-to-br from-[#1a1f35] to-[#0f1523]' : 'bg-white shadow-md'} border ${border.default} rounded-xl p-6`}>
             <div className="flex items-center justify-between mb-6">
               <h3 className="text-2xl" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
                 APPLICATIONS
               </h3>
               <div className="px-2 py-1 bg-[#ff6b35]/20 text-[#ff6b35] rounded-full text-xs font-medium">
-                {applicants.length} PENDING
+                {applications.length} PENDING
               </div>
             </div>
 
             <div className="space-y-4">
-              {applicants.map((applicant, index) => (
-                <div
-                  key={index}
-                  className="p-4 bg-white/5 rounded-lg border border-white/10 hover:border-[#ff6b35]/50 transition-all"
-                >
-                  <div className="flex items-start justify-between mb-3">
-                    <div>
-                      <p className="font-medium mb-1" style={{ fontFamily: 'Work Sans, sans-serif' }}>
-                        {applicant.name}
-                      </p>
-                      <p className="text-xs text-white/40">{applicant.applied}</p>
-                    </div>
-                    {/* AI Score - Gated by Premium (ai_risk_scoring) */}
-                    {aiRiskScoring.hasAccess && (
-                      <div className="text-right">
-                        <p className="text-xs text-white/50 mb-1">AI Score</p>
-                        <p className="text-lg font-bold text-emerald-400" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
-                          {applicant.aiScore}
+              {applications.length === 0 ? (
+                <div className="text-center py-12">
+                  <UserSearch className={`w-12 h-12 ${text.muted} mx-auto mb-4`} />
+                  <p className={`${text.muted} mb-2`} style={{ fontFamily: 'Work Sans, sans-serif' }}>
+                    No pending applications
+                  </p>
+                </div>
+              ) : (
+                applications.slice(0, 3).map((applicant) => (
+                  <div
+                    key={applicant.id}
+                    className={`p-4 ${isDark ? 'bg-white/5' : 'bg-gray-50'} rounded-lg border ${border.default} hover:border-[#ff6b35]/50 transition-all`}
+                  >
+                    <div className="flex items-start justify-between mb-3">
+                      <div>
+                        <p className="font-medium mb-1" style={{ fontFamily: 'Work Sans, sans-serif' }}>
+                          {applicant.full_name}
+                        </p>
+                        <p className={`text-xs ${text.inactive}`}>
+                          {formatRelativeTime(applicant.created_at)}
                         </p>
                       </div>
-                    )}
-                  </div>
-
-                  <p className="text-sm text-white/50 mb-3">{applicant.unit}</p>
-
-                  <div className="grid grid-cols-2 gap-2 mb-4">
-                    <div className="p-2 bg-white/5 rounded">
-                      <p className="text-xs text-white/40 mb-1">Income</p>
-                      <p className="text-sm font-medium">{applicant.income}</p>
+                      {/* AI Score - Gated by Premium (ai_risk_scoring) */}
+                      {aiRiskScoring.hasAccess && applicant.ai_risk_score && (
+                        <div className="text-right">
+                          <p className={`text-xs ${text.muted} mb-1`}>AI Score</p>
+                          <p className="text-lg font-bold text-emerald-400" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
+                            {applicant.ai_risk_score}
+                          </p>
+                        </div>
+                      )}
                     </div>
-                    <div className="p-2 bg-white/5 rounded">
-                      <p className="text-xs text-white/40 mb-1">Credit</p>
-                      <p className="text-sm font-medium">{applicant.credit}</p>
+
+                    <p className={`text-sm ${text.muted} mb-3`}>
+                      {applicant.unit ? `${applicant.property?.name} #${applicant.unit.unit_number}` : 'No unit specified'}
+                    </p>
+
+                    <div className="grid grid-cols-2 gap-2 mb-4">
+                      <div className={`p-2 ${isDark ? 'bg-white/5' : 'bg-white'} rounded`}>
+                        <p className={`text-xs ${text.inactive} mb-1`}>Income</p>
+                        <p className="text-sm font-medium">
+                          {applicant.monthly_income ? formatCurrency(applicant.monthly_income) : 'N/A'}
+                        </p>
+                      </div>
+                      <div className={`p-2 ${isDark ? 'bg-white/5' : 'bg-white'} rounded`}>
+                        <p className={`text-xs ${text.inactive} mb-1`}>Credit</p>
+                        <p className="text-sm font-medium">{applicant.credit_score || 'N/A'}</p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2 mb-3">
+                      <CircleCheck className="w-4 h-4 text-emerald-400" />
+                      <span className="text-xs text-emerald-400">
+                        Background {applicant.background_check_status || 'Pending'}
+                      </span>
+                    </div>
+
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => handleApprove(applicant.id)}
+                        disabled={isApproving === applicant.id}
+                        className="flex-1 px-3 py-2 bg-gradient-to-r from-[#ff6b35] to-[#f7931e] rounded-lg text-sm font-medium hover:scale-105 transition-transform disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        {isApproving === applicant.id ? 'Approving...' : 'Approve'}
+                      </button>
+                      <button className={`px-3 py-2 ${isDark ? 'bg-white/5 hover:bg-white/10' : 'bg-gray-100 hover:bg-gray-200'} rounded-lg text-sm transition-colors`}>
+                        Review
+                      </button>
                     </div>
                   </div>
-
-                  <div className="flex items-center gap-2 mb-3">
-                    <CircleCheck className="w-4 h-4 text-emerald-400" />
-                    <span className="text-xs text-emerald-400">Background {applicant.background}</span>
-                  </div>
-
-                  <div className="flex gap-2">
-                    <button className="flex-1 px-3 py-2 bg-gradient-to-r from-[#ff6b35] to-[#f7931e] rounded-lg text-sm font-medium hover:scale-105 transition-transform">
-                      Approve
-                    </button>
-                    <button className="px-3 py-2 bg-white/5 hover:bg-white/10 rounded-lg text-sm transition-colors">
-                      Review
-                    </button>
-                  </div>
-                </div>
-              ))}
+                ))
+              )}
             </div>
 
-            <button className="w-full mt-4 py-3 bg-white/5 hover:bg-white/10 rounded-lg text-sm font-medium transition-colors flex items-center justify-center gap-2">
-              <UserSearch className="w-4 h-4" />
-              View All Applications
-            </button>
+            {applications.length > 3 && (
+              <button className={`w-full mt-4 py-3 ${isDark ? 'bg-white/5 hover:bg-white/10' : 'bg-gray-100 hover:bg-gray-200'} rounded-lg text-sm font-medium transition-colors flex items-center justify-center gap-2`}>
+                <UserSearch className="w-4 h-4" />
+                View All {applications.length} Applications
+              </button>
+            )}
           </div>
         </FeatureGate>
       </div>
 
       {/* AI Screening Info - Gated by Premium plan (ai_risk_scoring) */}
-      <FeatureGate
-        feature="ai_risk_scoring"
-        hasAccess={aiRiskScoring.hasAccess}
-        loading={aiRiskScoring.loading}
-        variant="inline"
-      >
-        <div className="bg-gradient-to-br from-[#1a1f35] to-[#0f1523] border border-white/10 rounded-xl p-6">
-          <div className="flex items-start gap-6">
-            <div className="p-4 bg-gradient-to-br from-[#ff6b35] to-[#f7931e] rounded-xl">
-              <TrendingUp className="w-8 h-8 text-white" />
-            </div>
-            <div className="flex-1">
-              <h3 className="text-2xl mb-2" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
-                AI-POWERED TENANT SCREENING
-              </h3>
-              <p className="text-white/70 mb-4" style={{ fontFamily: 'Work Sans, sans-serif' }}>
-                Our advanced AI analyzes credit history, income verification, employment status, rental history, and behavioral patterns to provide comprehensive risk assessments in real-time. Less than 1% eviction rate across all screened tenants.
-              </p>
-              <div className="grid grid-cols-4 gap-4">
-                <div className="p-3 bg-white/5 rounded-lg">
-                  <p className="text-2xl font-bold text-emerald-400 mb-1" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
-                    97.8%
-                  </p>
-                  <p className="text-xs text-white/50">Accuracy Rate</p>
-                </div>
-                <div className="p-3 bg-white/5 rounded-lg">
-                  <p className="text-2xl font-bold text-emerald-400 mb-1" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
-                    4.2 hrs
-                  </p>
-                  <p className="text-xs text-white/50">Avg. Process Time</p>
-                </div>
-                <div className="p-3 bg-white/5 rounded-lg">
-                  <p className="text-2xl font-bold text-emerald-400 mb-1" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
-                    &lt;1%
-                  </p>
-                  <p className="text-xs text-white/50">Eviction Rate</p>
-                </div>
-                <div className="p-3 bg-white/5 rounded-lg">
-                  <p className="text-2xl font-bold text-emerald-400 mb-1" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
-                    24/7
-                  </p>
-                  <p className="text-xs text-white/50">Automated Processing</p>
+      {metrics && (
+        <FeatureGate
+          feature="ai_risk_scoring"
+          hasAccess={aiRiskScoring.hasAccess}
+          loading={aiRiskScoring.loading}
+          variant="inline"
+        >
+          <div className={`${isDark ? 'bg-gradient-to-br from-[#1a1f35] to-[#0f1523]' : 'bg-white shadow-md'} border ${border.default} rounded-xl p-6`}>
+            <div className="flex items-start gap-6">
+              <div className="p-4 bg-gradient-to-br from-[#ff6b35] to-[#f7931e] rounded-xl">
+                <TrendingUp className="w-8 h-8 text-white" />
+              </div>
+              <div className="flex-1">
+                <h3 className="text-2xl mb-2" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
+                  AI-POWERED TENANT SCREENING
+                </h3>
+                <p className={`${text.secondary} mb-4`} style={{ fontFamily: 'Work Sans, sans-serif' }}>
+                  Our advanced AI analyzes credit history, income verification, employment status, rental history, and behavioral patterns to provide comprehensive risk assessments in real-time. Less than 1% eviction rate across all screened tenants.
+                </p>
+                <div className="grid grid-cols-4 gap-4">
+                  <div className={`p-3 ${isDark ? 'bg-white/5' : 'bg-gray-50'} rounded-lg`}>
+                    <p className="text-2xl font-bold text-emerald-400 mb-1" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
+                      {metrics.ai_accuracy > 0 ? `${metrics.ai_accuracy}%` : 'N/A'}
+                    </p>
+                    <p className={`text-xs ${text.muted}`}>Accuracy Rate</p>
+                  </div>
+                  <div className={`p-3 ${isDark ? 'bg-white/5' : 'bg-gray-50'} rounded-lg`}>
+                    <p className="text-2xl font-bold text-emerald-400 mb-1" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
+                      {metrics.avg_screening_time > 0 ? `${metrics.avg_screening_time} hrs` : 'N/A'}
+                    </p>
+                    <p className={`text-xs ${text.muted}`}>Avg. Process Time</p>
+                  </div>
+                  <div className={`p-3 ${isDark ? 'bg-white/5' : 'bg-gray-50'} rounded-lg`}>
+                    <p className="text-2xl font-bold text-emerald-400 mb-1" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
+                      {metrics.eviction_rate < 1 ? '<1%' : `${metrics.eviction_rate}%`}
+                    </p>
+                    <p className={`text-xs ${text.muted}`}>Eviction Rate</p>
+                  </div>
+                  <div className={`p-3 ${isDark ? 'bg-white/5' : 'bg-gray-50'} rounded-lg`}>
+                    <p className="text-2xl font-bold text-emerald-400 mb-1" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
+                      24/7
+                    </p>
+                    <p className={`text-xs ${text.muted}`}>Automated Processing</p>
+                  </div>
                 </div>
               </div>
             </div>
           </div>
-        </div>
-      </FeatureGate>
+        </FeatureGate>
+      )}
     </div>
   );
 }

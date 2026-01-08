@@ -235,29 +235,79 @@ export async function getTenantScreeningMetrics() {
 
     if (error) {
       // If RPC doesn't exist, calculate manually
-      const [tenantsResult, applicationsResult] = await Promise.all([
-        supabase
-          .from('tenant_profiles')
-          .select('ai_risk_score, background_check_status', { count: 'exact' })
-          .eq('account_id', accountId),
+      const [applicationsData, tenantsData] = await Promise.all([
+        // Get all applications for screening time and acceptance rate
         supabase
           .from('rental_applications')
-          .select('id, applied_at', { count: 'exact' })
-          .eq('account_id', accountId)
-          .eq('application_status', 'pending')
+          .select('created_at, reviewed_at, status')
+          .eq('account_id', accountId),
+
+        // Get tenant profiles for AI accuracy and eviction rate
+        supabase
+          .from('tenant_profiles')
+          .select('ai_risk_score, background_check_status, move_out_date, screening_notes')
+          .eq('account_id', accountId),
       ]);
 
-      // Calculate metrics manually
-      const avgScreeningTime = 4.2; // Default value
-      const acceptanceRate = 76;
-      const aiAccuracy = 97.8;
-      const evictionRate = 0.8;
+      // Calculate average screening time (hours)
+      let avgScreeningTime = 0;
+      if (applicationsData.data && applicationsData.data.length > 0) {
+        const reviewedApps = applicationsData.data.filter(app => app.reviewed_at);
+        if (reviewedApps.length > 0) {
+          const totalHours = reviewedApps.reduce((sum, app) => {
+            const created = new Date(app.created_at).getTime();
+            const reviewed = new Date(app.reviewed_at!).getTime();
+            const hours = (reviewed - created) / (1000 * 60 * 60);
+            return sum + hours;
+          }, 0);
+          avgScreeningTime = totalHours / reviewedApps.length;
+        }
+      }
+
+      // Calculate acceptance rate
+      let acceptanceRate = 0;
+      if (applicationsData.data && applicationsData.data.length > 0) {
+        const decidedApps = applicationsData.data.filter(app =>
+          app.status === 'approved' || app.status === 'rejected'
+        );
+        if (decidedApps.length > 0) {
+          const approved = decidedApps.filter(app => app.status === 'approved').length;
+          acceptanceRate = (approved / decidedApps.length) * 100;
+        }
+      }
+
+      // Calculate AI accuracy (simplified: % of high-risk scores that passed background check)
+      let aiAccuracy = 0;
+      if (tenantsData.data && tenantsData.data.length > 0) {
+        const tenantsWithScore = tenantsData.data.filter(t =>
+          t.ai_risk_score !== null && t.background_check_status
+        );
+        if (tenantsWithScore.length > 0) {
+          const accurate = tenantsWithScore.filter(t =>
+            (t.ai_risk_score! >= 70 && t.background_check_status === 'approved') ||
+            (t.ai_risk_score! < 70 && t.background_check_status === 'rejected')
+          ).length;
+          aiAccuracy = (accurate / tenantsWithScore.length) * 100;
+        }
+      }
+
+      // Calculate eviction rate
+      let evictionRate = 0;
+      if (tenantsData.data && tenantsData.data.length > 0) {
+        const movedOutTenants = tenantsData.data.filter(t => t.move_out_date);
+        if (movedOutTenants.length > 0) {
+          const evictions = movedOutTenants.filter(t =>
+            t.screening_notes?.toLowerCase().includes('eviction')
+          ).length;
+          evictionRate = (evictions / movedOutTenants.length) * 100;
+        }
+      }
 
       return {
-        avg_screening_time: avgScreeningTime,
-        acceptance_rate: acceptanceRate,
-        ai_accuracy: aiAccuracy,
-        eviction_rate: evictionRate,
+        avg_screening_time: Math.round(avgScreeningTime * 10) / 10,
+        acceptance_rate: Math.round(acceptanceRate * 10) / 10,
+        ai_accuracy: Math.round(aiAccuracy * 10) / 10,
+        eviction_rate: Math.round(evictionRate * 10) / 10,
       };
     }
 

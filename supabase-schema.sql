@@ -582,7 +582,11 @@ CREATE INDEX idx_audit_log_created_at ON audit_log(created_at);
 
 -- Check if user is a member of the account
 CREATE OR REPLACE FUNCTION is_account_member(account_uuid UUID)
-RETURNS BOOLEAN AS $$
+RETURNS BOOLEAN
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
 BEGIN
   RETURN EXISTS (
     SELECT 1 FROM account_members
@@ -591,11 +595,15 @@ BEGIN
     AND is_active = true
   );
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+$$;
 
 -- Check if user has a specific role in the account
 CREATE OR REPLACE FUNCTION has_account_role(account_uuid UUID, required_role TEXT)
-RETURNS BOOLEAN AS $$
+RETURNS BOOLEAN
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
 BEGIN
   RETURN EXISTS (
     SELECT 1 FROM account_members
@@ -605,21 +613,29 @@ BEGIN
     AND is_active = true
   );
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+$$;
 
 -- Get user's role in account
 CREATE OR REPLACE FUNCTION get_user_role(account_uuid UUID)
-RETURNS TEXT AS $$
+RETURNS TEXT
+LANGUAGE sql
+SECURITY DEFINER
+SET search_path = public
+AS $$
   SELECT role FROM account_members
   WHERE account_id = account_uuid
   AND user_id = auth.uid()
   AND is_active = true
   LIMIT 1;
-$$ LANGUAGE sql SECURITY DEFINER;
+$$;
 
 -- Check if user is tenant of a specific unit
 CREATE OR REPLACE FUNCTION is_unit_tenant(unit_uuid UUID)
-RETURNS BOOLEAN AS $$
+RETURNS BOOLEAN
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
 BEGIN
   RETURN EXISTS (
     SELECT 1 FROM leases
@@ -630,11 +646,15 @@ BEGIN
     AND status = 'active'
   );
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+$$;
 
 -- Check if user is assigned vendor for a maintenance request
 CREATE OR REPLACE FUNCTION is_assigned_vendor(request_uuid UUID)
-RETURNS BOOLEAN AS $$
+RETURNS BOOLEAN
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
 BEGIN
   RETURN EXISTS (
     SELECT 1 FROM maintenance_assignments ma
@@ -643,7 +663,7 @@ BEGIN
     AND vp.user_id = auth.uid()
   );
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+$$;
 
 -- ============================================================================
 -- ROW LEVEL SECURITY POLICIES
@@ -853,12 +873,15 @@ CREATE POLICY audit_log_insert ON audit_log FOR INSERT WITH CHECK (true);
 -- ============================================================================
 
 CREATE OR REPLACE FUNCTION update_updated_at_column()
-RETURNS TRIGGER AS $$
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SET search_path = public
+AS $$
 BEGIN
   NEW.updated_at = NOW();
   RETURN NEW;
 END;
-$$ LANGUAGE plpgsql;
+$$;
 
 CREATE TRIGGER update_accounts_updated_at BEFORE UPDATE ON accounts FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 CREATE TRIGGER update_account_members_updated_at BEFORE UPDATE ON account_members FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
@@ -917,13 +940,18 @@ CREATE TRIGGER update_user_profiles_updated_at BEFORE UPDATE ON user_profiles FO
 
 -- Function to automatically create account and membership when user signs up
 CREATE OR REPLACE FUNCTION handle_new_user()
-RETURNS TRIGGER AS $$
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
 DECLARE
   new_account_id UUID;
   user_email TEXT;
 BEGIN
+  PERFORM set_config('row_security', 'off', true);
   -- Get user email from auth.users
-  SELECT email INTO user_email FROM auth.users WHERE id = NEW.id;
+  user_email := COALESCE(NEW.email, (SELECT email FROM auth.users WHERE id = NEW.id));
 
   -- Create user profile (required by frontend)
   INSERT INTO user_profiles (id, email, subscription_tier)
@@ -950,7 +978,7 @@ BEGIN
 
   RETURN NEW;
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+$$;
 
 -- Trigger to run the function after user signup
 CREATE TRIGGER on_auth_user_created
