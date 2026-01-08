@@ -19,6 +19,21 @@ app.use(
   })
 );
 
+// Root endpoint - API info
+app.get('/', (_req, res) => {
+  res.json({
+    name: 'Property Management API',
+    version: '1.0.0',
+    status: 'running',
+    endpoints: {
+      health: '/health',
+      checkout: '/api/checkout',
+      webhook: '/webhooks/stripe'
+    },
+    timestamp: new Date().toISOString(),
+  });
+});
+
 // Health check endpoint (no rate limiting)
 app.get('/health', (_req, res) => {
   res.json({
