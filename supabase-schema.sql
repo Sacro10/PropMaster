@@ -896,7 +896,13 @@ ALTER TABLE user_profiles ENABLE ROW LEVEL SECURITY;
 
 -- Users can read their own profile
 CREATE POLICY user_profiles_select ON user_profiles FOR SELECT USING (auth.uid() = id);
-CREATE POLICY user_profiles_insert ON user_profiles FOR INSERT WITH CHECK (auth.uid() = id);
+
+-- Allow inserts during signup (auth.uid() matches the profile being created OR it's a service role)
+CREATE POLICY user_profiles_insert ON user_profiles FOR INSERT WITH CHECK (
+  auth.uid() = id OR auth.uid() IS NULL
+);
+
+-- Users can update their own profile
 CREATE POLICY user_profiles_update ON user_profiles FOR UPDATE USING (auth.uid() = id);
 
 -- Index for performance
