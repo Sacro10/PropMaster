@@ -143,7 +143,7 @@ export function HomePage() {
       </header>
 
       {/* Hero Section */}
-      <section className="max-w-7xl mx-auto px-8 py-20 text-center relative isolate overflow-hidden rounded-3xl bg-[#0a0e1a]">
+      <section className={`max-w-7xl mx-auto px-8 py-20 text-center relative isolate overflow-hidden rounded-3xl ${isDark ? 'bg-[#0a0e1a]' : 'bg-gradient-to-br from-gray-50 to-gray-100'}`}>
         <div className="absolute inset-0 z-0 pointer-events-none">
           <video
             className="h-full w-full object-cover brightness-125"
@@ -155,8 +155,8 @@ export function HomePage() {
           >
             <source src="/13761467-uhd_3840_2160_30fps.mp4" type="video/mp4" />
           </video>
-          <div className="absolute inset-0 bg-[#0a0e1a]/30" />
-          <div className="absolute inset-0 bg-gradient-to-b from-[#0a0e1a]/35 via-[#0a0e1a]/20 to-[#0a0e1a]/45" />
+          <div className={`absolute inset-0 ${isDark ? 'bg-[#0a0e1a]/30' : 'bg-white/30'}`} />
+          <div className={`absolute inset-0 ${isDark ? 'bg-gradient-to-b from-[#0a0e1a]/35 via-[#0a0e1a]/20 to-[#0a0e1a]/45' : 'bg-gradient-to-b from-white/35 via-white/20 to-white/45'}`} />
         </div>
 
         <div className="relative z-10">
@@ -165,12 +165,12 @@ export function HomePage() {
               AI-Powered Property Management
             </span>
           </div>
-          <h2 className="text-6xl mb-6 text-white" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
+          <h2 className={`text-6xl mb-6 ${isDark ? 'text-white' : 'text-gray-900'}`} style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
             AUTOMATE YOUR PROPERTY
             <br />
             MANAGEMENT WORKFLOW
           </h2>
-          <p className="text-xl max-w-3xl mx-auto mb-8 text-white/80" style={{ fontFamily: 'Work Sans, sans-serif' }}>
+          <p className={`text-xl max-w-3xl mx-auto mb-8 ${isDark ? 'text-white/80' : 'text-gray-700'}`} style={{ fontFamily: 'Work Sans, sans-serif' }}>
             From tenant screening to rent collection, maintenance tracking to analytics —
             manage everything in one intelligent platform.
           </p>

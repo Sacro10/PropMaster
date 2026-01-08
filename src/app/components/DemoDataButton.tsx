@@ -6,11 +6,14 @@
 import React, { useState } from 'react';
 import { Database, Trash2, Loader2, CheckCircle, XCircle } from 'lucide-react';
 import { seedDemoData, deleteDemoData } from '../../lib/demoData';
+import { useThemeContext } from '../context/ThemeContext';
 
 export function DemoDataButton() {
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<{ success: boolean; message: string; counts?: any } | null>(null);
   const [showMenu, setShowMenu] = useState(false);
+  const { theme } = useThemeContext();
+  const isDark = theme === 'dark';
 
   const handleSeedData = async () => {
     setLoading(true);
@@ -64,13 +67,13 @@ export function DemoDataButton() {
       </button>
 
       {showMenu && (
-        <div className="absolute right-0 mt-2 w-80 bg-white dark:bg-gray-800 rounded-lg shadow-xl border border-gray-200 dark:border-gray-700 z-50">
-          <div className="p-4 border-b border-gray-200 dark:border-gray-700">
-            <h3 className="font-semibold text-gray-900 dark:text-white flex items-center gap-2">
+        <div className={`absolute right-0 mt-2 w-80 ${isDark ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'} rounded-lg shadow-xl border z-50`}>
+          <div className={`p-4 border-b ${isDark ? 'border-gray-700' : 'border-gray-200'}`}>
+            <h3 className={`font-semibold ${isDark ? 'text-white' : 'text-gray-900'} flex items-center gap-2`}>
               <Database className="w-5 h-5" />
               Demo Data Tools
             </h3>
-            <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+            <p className={`text-sm ${isDark ? 'text-gray-400' : 'text-gray-600'} mt-1`}>
               Development utilities for testing
             </p>
           </div>
@@ -99,37 +102,37 @@ export function DemoDataButton() {
             {loading && (
               <div className="flex items-center justify-center gap-2 py-8">
                 <Loader2 className="w-6 h-6 animate-spin text-blue-600" />
-                <span className="text-gray-700 dark:text-gray-300">Processing...</span>
+                <span className={isDark ? 'text-gray-300' : 'text-gray-700'}>Processing...</span>
               </div>
             )}
 
             {result && (
-              <div className={`p-4 rounded-lg ${result.success ? 'bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800' : 'bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800'}`}>
+              <div className={`p-4 rounded-lg ${result.success ? (isDark ? 'bg-green-900/20 border-green-800' : 'bg-green-50 border-green-200') : (isDark ? 'bg-red-900/20 border-red-800' : 'bg-red-50 border-red-200')} border`}>
                 <div className="flex items-start gap-3">
                   {result.success ? (
-                    <CheckCircle className="w-5 h-5 text-green-600 dark:text-green-400 flex-shrink-0 mt-0.5" />
+                    <CheckCircle className={`w-5 h-5 ${isDark ? 'text-green-400' : 'text-green-600'} flex-shrink-0 mt-0.5`} />
                   ) : (
-                    <XCircle className="w-5 h-5 text-red-600 dark:text-red-400 flex-shrink-0 mt-0.5" />
+                    <XCircle className={`w-5 h-5 ${isDark ? 'text-red-400' : 'text-red-600'} flex-shrink-0 mt-0.5`} />
                   )}
                   <div className="flex-1">
-                    <p className={`text-sm font-medium ${result.success ? 'text-green-800 dark:text-green-300' : 'text-red-800 dark:text-red-300'}`}>
+                    <p className={`text-sm font-medium ${result.success ? (isDark ? 'text-green-300' : 'text-green-800') : (isDark ? 'text-red-300' : 'text-red-800')}`}>
                       {result.message}
                     </p>
                     {result.success && result.counts && (
                       <div className="mt-2 space-y-1">
-                        <p className="text-xs text-green-700 dark:text-green-400">
+                        <p className={`text-xs ${isDark ? 'text-green-400' : 'text-green-700'}`}>
                           ✓ {result.counts.properties} properties
                         </p>
-                        <p className="text-xs text-green-700 dark:text-green-400">
+                        <p className={`text-xs ${isDark ? 'text-green-400' : 'text-green-700'}`}>
                           ✓ {result.counts.units} units
                         </p>
-                        <p className="text-xs text-green-700 dark:text-green-400">
+                        <p className={`text-xs ${isDark ? 'text-green-400' : 'text-green-700'}`}>
                           ✓ {result.counts.tenants} tenants
                         </p>
-                        <p className="text-xs text-green-700 dark:text-green-400">
+                        <p className={`text-xs ${isDark ? 'text-green-400' : 'text-green-700'}`}>
                           ✓ {result.counts.maintenance} maintenance requests
                         </p>
-                        <p className="text-xs text-green-700 dark:text-green-400">
+                        <p className={`text-xs ${isDark ? 'text-green-400' : 'text-green-700'}`}>
                           ✓ {result.counts.payments} payments
                         </p>
                       </div>
@@ -140,8 +143,8 @@ export function DemoDataButton() {
             )}
           </div>
 
-          <div className="p-3 bg-gray-50 dark:bg-gray-900 border-t border-gray-200 dark:border-gray-700 rounded-b-lg">
-            <p className="text-xs text-gray-600 dark:text-gray-400">
+          <div className={`p-3 ${isDark ? 'bg-gray-900 border-gray-700' : 'bg-gray-50 border-gray-200'} border-t rounded-b-lg`}>
+            <p className={`text-xs ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>
               ⚠️ Use only in development. Seed creates sample data, Delete removes ALL account data.
             </p>
           </div>

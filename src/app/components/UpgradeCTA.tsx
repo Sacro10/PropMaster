@@ -15,6 +15,7 @@ import {
   type PlanTier,
   PLAN_DETAILS,
 } from '../../lib/planGating';
+import { useThemeContext } from '../context/ThemeContext';
 
 // =====================================================
 // TYPES
@@ -95,8 +96,11 @@ interface VariantProps {
 }
 
 function InlineVariant({ planDetails, title, message, onUpgrade, className }: VariantProps) {
+  const { theme } = useThemeContext();
+  const isDark = theme === 'dark';
+
   return (
-    <div className={`bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-6 ${className}`}>
+    <div className={`bg-gradient-to-r ${isDark ? 'from-blue-900/20 to-indigo-900/20 border-blue-800' : 'from-blue-50 to-indigo-50 border-blue-200'} border rounded-lg p-6 ${className}`}>
       <div className="flex items-start gap-4">
         <div className="flex-shrink-0">
           <div className="w-12 h-12 bg-blue-600 rounded-lg flex items-center justify-center">
@@ -104,15 +108,15 @@ function InlineVariant({ planDetails, title, message, onUpgrade, className }: Va
           </div>
         </div>
         <div className="flex-1">
-          <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-1">
+          <h3 className={`text-lg font-semibold ${isDark ? 'text-white' : 'text-gray-900'} mb-1`}>
             {title}
           </h3>
-          <p className="text-gray-600 dark:text-gray-400 mb-4">
+          <p className={`${isDark ? 'text-gray-400' : 'text-gray-600'} mb-4`}>
             {message}
           </p>
           <div className="space-y-2 mb-4">
             {planDetails.features.slice(0, 4).map((feature, index) => (
-              <div key={index} className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+              <div key={index} className={`flex items-center gap-2 text-sm ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>
                 <Check className="w-4 h-4 text-green-600 flex-shrink-0" />
                 <span>{feature}</span>
               </div>
@@ -133,24 +137,27 @@ function InlineVariant({ planDetails, title, message, onUpgrade, className }: Va
 }
 
 function OverlayVariant({ planDetails, title, message, onUpgrade, className }: VariantProps) {
+  const { theme } = useThemeContext();
+  const isDark = theme === 'dark';
+
   return (
     <div className={`relative ${className}`}>
       {/* Blurred background */}
-      <div className="absolute inset-0 bg-white/80 dark:bg-gray-900/80 backdrop-blur-sm z-10 rounded-lg flex items-center justify-center">
-        <div className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl p-8 max-w-md mx-4 border border-gray-200 dark:border-gray-700">
+      <div className={`absolute inset-0 ${isDark ? 'bg-gray-900/80' : 'bg-white/80'} backdrop-blur-sm z-10 rounded-lg flex items-center justify-center`}>
+        <div className={`${isDark ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'} rounded-xl shadow-2xl p-8 max-w-md mx-4 border`}>
           <div className="flex flex-col items-center text-center">
             <div className="w-16 h-16 bg-gradient-to-br from-blue-600 to-indigo-600 rounded-full flex items-center justify-center mb-4">
               <Lock className="w-8 h-8 text-white" />
             </div>
-            <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-2">
+            <h3 className={`text-xl font-bold ${isDark ? 'text-white' : 'text-gray-900'} mb-2`}>
               {title}
             </h3>
-            <p className="text-gray-600 dark:text-gray-400 mb-6">
+            <p className={`${isDark ? 'text-gray-400' : 'text-gray-600'} mb-6`}>
               {message}
             </p>
             <div className="w-full space-y-2 mb-6 text-left">
               {planDetails.features.slice(0, 3).map((feature, index) => (
-                <div key={index} className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+                <div key={index} className={`flex items-center gap-2 text-sm ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>
                   <Check className="w-4 h-4 text-green-600 flex-shrink-0" />
                   <span>{feature}</span>
                 </div>
@@ -164,7 +171,7 @@ function OverlayVariant({ planDetails, title, message, onUpgrade, className }: V
               Upgrade to {planDetails.displayName}
               <ArrowRight className="w-5 h-5" />
             </button>
-            <p className="text-sm text-gray-500 dark:text-gray-400 mt-3">
+            <p className={`text-sm ${isDark ? 'text-gray-400' : 'text-gray-500'} mt-3`}>
               ${planDetails.price}/month
             </p>
           </div>
@@ -175,9 +182,12 @@ function OverlayVariant({ planDetails, title, message, onUpgrade, className }: V
 }
 
 function ModalVariant({ planDetails, title, message, onUpgrade, className }: VariantProps) {
+  const { theme } = useThemeContext();
+  const isDark = theme === 'dark';
+
   return (
     <div className={`fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4 ${className}`}>
-      <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+      <div className={`${isDark ? 'bg-gray-800' : 'bg-white'} rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto`}>
         {/* Header */}
         <div className="bg-gradient-to-r from-blue-600 to-indigo-600 px-8 py-6 rounded-t-2xl">
           <div className="flex items-center gap-4">
@@ -197,7 +207,7 @@ function ModalVariant({ planDetails, title, message, onUpgrade, className }: Var
 
         {/* Content */}
         <div className="p-8">
-          <p className="text-gray-600 dark:text-gray-300 mb-6 text-lg">
+          <p className={`${isDark ? 'text-gray-300' : 'text-gray-600'} mb-6 text-lg`}>
             {message}
           </p>
 
@@ -206,10 +216,10 @@ function ModalVariant({ planDetails, title, message, onUpgrade, className }: Var
             {planDetails.features.map((feature, index) => (
               <div
                 key={index}
-                className="flex items-start gap-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg p-4"
+                className={`flex items-start gap-3 ${isDark ? 'bg-gray-700/50' : 'bg-gray-50'} rounded-lg p-4`}
               >
                 <Check className="w-5 h-5 text-green-600 flex-shrink-0 mt-0.5" />
-                <span className="text-gray-700 dark:text-gray-300 text-sm">
+                <span className={`${isDark ? 'text-gray-300' : 'text-gray-700'} text-sm`}>
                   {feature}
                 </span>
               </div>
@@ -217,15 +227,15 @@ function ModalVariant({ planDetails, title, message, onUpgrade, className }: Var
           </div>
 
           {/* Pricing */}
-          <div className="bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20 border border-blue-200 dark:border-blue-800 rounded-xl p-6 mb-6">
+          <div className={`bg-gradient-to-r ${isDark ? 'from-blue-900/20 to-indigo-900/20 border-blue-800' : 'from-blue-50 to-indigo-50 border-blue-200'} border rounded-xl p-6 mb-6`}>
             <div className="flex items-center justify-between">
               <div>
-                <div className="text-sm text-gray-600 dark:text-gray-400 mb-1">
+                <div className={`text-sm ${isDark ? 'text-gray-400' : 'text-gray-600'} mb-1`}>
                   {planDetails.displayName} Plan
                 </div>
-                <div className="text-4xl font-bold text-gray-900 dark:text-white">
+                <div className={`text-4xl font-bold ${isDark ? 'text-white' : 'text-gray-900'}`}>
                   ${planDetails.price}
-                  <span className="text-lg font-normal text-gray-600 dark:text-gray-400">
+                  <span className={`text-lg font-normal ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>
                     /month
                   </span>
                 </div>
@@ -312,11 +322,14 @@ export function FeatureGate({
   fallback,
   showLoadingSkeleton = false,
 }: FeatureGateProps) {
+  const { theme } = useThemeContext();
+  const isDark = theme === 'dark';
+
   if (loading && showLoadingSkeleton) {
     return (
       <div className="animate-pulse space-y-4">
-        <div className="h-4 bg-gray-200 dark:bg-gray-700 rounded w-3/4"></div>
-        <div className="h-4 bg-gray-200 dark:bg-gray-700 rounded w-1/2"></div>
+        <div className={`h-4 ${isDark ? 'bg-gray-700' : 'bg-gray-200'} rounded w-3/4`}></div>
+        <div className={`h-4 ${isDark ? 'bg-gray-700' : 'bg-gray-200'} rounded w-1/2`}></div>
       </div>
     );
   }
@@ -377,6 +390,8 @@ export function LockedFeatureCard({
 }: LockedFeatureCardProps) {
   const plan = requiredPlan || (feature ? getRequiredPlan(feature) : 'pro');
   const planDetails = getPlanDetails(plan);
+  const { theme } = useThemeContext();
+  const isDark = theme === 'dark';
 
   const handleUpgrade = () => {
     if (onUpgrade) {
@@ -387,7 +402,7 @@ export function LockedFeatureCard({
   };
 
   return (
-    <div className={`relative bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-6 overflow-hidden ${className}`}>
+    <div className={`relative ${isDark ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'} border rounded-lg p-6 overflow-hidden ${className}`}>
       {/* Lock overlay */}
       <div className="absolute top-3 right-3">
         <div className="bg-blue-600 text-white rounded-full p-2">
@@ -399,11 +414,11 @@ export function LockedFeatureCard({
       <div className="opacity-60 mb-4">
         <div className="flex items-center gap-3 mb-3">
           <div className="text-gray-400">{icon}</div>
-          <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
+          <h3 className={`text-lg font-semibold ${isDark ? 'text-white' : 'text-gray-900'}`}>
             {name}
           </h3>
         </div>
-        <p className="text-gray-600 dark:text-gray-400 text-sm">
+        <p className={`${isDark ? 'text-gray-400' : 'text-gray-600'} text-sm`}>
           {description}
         </p>
       </div>

@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import { Routes, Route, Navigate } from 'react-router-dom'
 import { ThemeProvider } from './context/ThemeContext'
 import { AuthProvider } from './context/AuthContext'
@@ -17,6 +18,18 @@ import { SubscriptionSettings } from './components/SubscriptionSettings'
 
 export default function App() {
   const { theme, toggleTheme } = useTheme()
+
+  // Apply theme class to document root for consistent theming
+  useEffect(() => {
+    const root = document.documentElement
+    if (theme === 'dark') {
+      root.classList.add('dark')
+      root.classList.remove('light')
+    } else {
+      root.classList.add('light')
+      root.classList.remove('dark')
+    }
+  }, [theme])
 
   return (
     <ThemeProvider theme={theme} toggleTheme={toggleTheme}>
