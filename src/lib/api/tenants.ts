@@ -19,8 +19,8 @@ export async function getTenants(params: PaginationParams = {}) {
 
     const { from, to, page, pageSize } = getPaginationRange(params);
 
-    // Query tenants with their active leases
-    const { data, error, count } = await supabase
+    // First, get all active leases with unit and property info
+    const { data: leasesData, error: leasesError, count } = await supabase
       .from('leases')
       .select(`
         id,
@@ -50,24 +50,6 @@ export async function getTenants(params: PaginationParams = {}) {
             state,
             zip
           )
-        ),
-        tenant_profiles!leases_tenant_user_id_fkey (
-          id,
-          user_id,
-          full_name,
-          phone,
-          email,
-          employer,
-          employment_status,
-          monthly_income,
-          move_in_date,
-          move_out_date,
-          credit_score,
-          background_check_status,
-          ai_risk_score,
-          screening_notes,
-          created_at,
-          updated_at
         )
       `, { count: 'exact' })
       .eq('account_id', accountId)
@@ -75,13 +57,40 @@ export async function getTenants(params: PaginationParams = {}) {
       .order('lease_start', { ascending: false })
       .range(from, to);
 
-    if (error) {
-      throw handleSupabaseError(error, 'fetch tenants');
+    if (leasesError) {
+      throw handleSupabaseError(leasesError, 'fetch tenants');
     }
 
+    if (!leasesData || leasesData.length === 0) {
+      return {
+        data: [],
+        ...calculatePaginationMeta(0, page, pageSize),
+      };
+    }
+
+    // Get the tenant user IDs
+    const tenantUserIds = leasesData.map((lease: any) => lease.tenant_user_id);
+
+    // Fetch tenant profiles for these users
+    const { data: tenantProfiles, error: profilesError } = await supabase
+      .from('tenant_profiles')
+      .select('*')
+      .eq('account_id', accountId)
+      .in('user_id', tenantUserIds);
+
+    if (profilesError) {
+      throw handleSupabaseError(profilesError, 'fetch tenant profiles');
+    }
+
+    // Create a map of user_id to tenant profile
+    const profileMap = new Map();
+    (tenantProfiles || []).forEach((profile: any) => {
+      profileMap.set(profile.user_id, profile);
+    });
+
     // Transform the data to match our interface
-    const tenants: TenantWithLease[] = (data || []).map((lease: any) => {
-      const tenant = lease.tenant_profiles || {};
+    const tenants: TenantWithLease[] = leasesData.map((lease: any) => {
+      const tenant = profileMap.get(lease.tenant_user_id) || {};
       const unit = lease.units || {};
       const property = unit.properties || {};
 
