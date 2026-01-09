@@ -1,3 +1,4 @@
+import { useRef, useState } from 'react';
 import { MessageSquare, Bell, Search, CircleCheck, Clock, RefreshCw } from 'lucide-react';
 import { useHasFeature } from '../hooks/usePlanGating';
 import { useThemeStyles } from '../hooks/useThemeStyles';
@@ -10,6 +11,8 @@ import {
   useAutomatedReminders,
   usePortalActivity,
   useCommunicationStats,
+  useMessageSuggestion,
+  useSendMessage,
 } from '../../lib/hooks/useCommunications';
 import { formatRelativeTime } from '../../lib/utils/dateHelpers';
 
@@ -25,6 +28,20 @@ export function CommunicationHub() {
   const { data: reminders, loading: remindersLoading } = useAutomatedReminders();
   const { data: portalActivity, loading: activityLoading } = usePortalActivity();
   const { data: stats, loading: statsLoading } = useCommunicationStats();
+  const {
+    suggestion,
+    provider,
+    loading: suggestionLoading,
+    error: suggestionError,
+    generate: generateSuggestion,
+    clear: clearSuggestion,
+  } = useMessageSuggestion();
+  const { send: sendMessage, loading: sendingMessage, error: sendError } = useSendMessage();
+
+  const [composerOpen, setComposerOpen] = useState(false);
+  const [composerRecipientId, setComposerRecipientId] = useState('');
+  const [composerSubject, setComposerSubject] = useState('');
+  const [composerBody, setComposerBody] = useState('');
 
   // Show loading state
   if (messagesLoading || statsLoading) {
@@ -61,6 +78,52 @@ export function CommunicationHub() {
     };
   });
 
+  const primaryConversationId = conversations[0]?.id;
+
+  const aiPanelRef = useRef<HTMLDivElement | null>(null);
+  const primaryConversationId = conversations[0]?.id;
+
+  const handleAiDraft = async () => {
+    setComposerOpen(true);
+    if (!primaryConversationId) {
+      clearSuggestion();
+      return;
+    }
+    const result = await generateSuggestion(primaryConversationId);
+    if (result.success && result.data?.suggestion) {
+      setComposerBody(result.data.suggestion);
+    }
+    aiPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  };
+
+  const openComposer = () => {
+    setComposerOpen(true);
+  };
+
+  const closeComposer = () => {
+    setComposerOpen(false);
+    setComposerRecipientId('');
+    setComposerSubject('');
+    setComposerBody('');
+  };
+
+  const handleSendMessage = async () => {
+    if (!composerRecipientId.trim() || !composerBody.trim()) {
+      return;
+    }
+
+    const result = await sendMessage({
+      recipientId: composerRecipientId.trim(),
+      subject: composerSubject.trim() || undefined,
+      body: composerBody.trim(),
+    });
+
+    if (result.success) {
+      closeComposer();
+      refetchMessages();
+    }
+  };
+
   return (
     <FeatureGate
       feature="communication_hub"
@@ -87,11 +150,102 @@ export function CommunicationHub() {
           >
             <RefreshCw className="w-4 h-4" />
           </button>
-          <button className="px-6 py-3 bg-gradient-to-r from-[#ff6b35] to-[#f7931e] rounded-lg font-medium hover:scale-105 transition-transform">
+          <button
+            onClick={handleAiDraft}
+            className={`px-4 py-2 ${isDark ? 'bg-white/5 hover:bg-white/10' : 'bg-gray-100 hover:bg-gray-200'} rounded-lg transition-colors text-sm font-medium`}
+          >
+            AI Draft
+          </button>
+          <button
+            onClick={openComposer}
+            className="px-6 py-3 bg-gradient-to-r from-[#ff6b35] to-[#f7931e] rounded-lg font-medium hover:scale-105 transition-transform"
+          >
             + New Message
           </button>
         </div>
       </div>
+
+      {composerOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div
+            className="absolute inset-0 bg-black/50"
+            onClick={closeComposer}
+          />
+          <div
+            className={`${isDark ? 'bg-[#0f1523]' : 'bg-white'} relative z-10 w-full max-w-2xl rounded-2xl border ${border.default} shadow-xl`}
+          >
+            <div className="flex items-center justify-between px-6 py-4 border-b border-white/10">
+              <h3 className="text-2xl" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
+                NEW MESSAGE
+              </h3>
+              <button
+                onClick={closeComposer}
+                className={`px-3 py-1 ${isDark ? 'bg-white/5 hover:bg-white/10' : 'bg-gray-100 hover:bg-gray-200'} rounded-lg text-sm`}
+              >
+                Close
+              </button>
+            </div>
+
+            <div className="p-6 space-y-4">
+              <div>
+                <label className={`text-xs uppercase ${text.inactive}`}>Recipient User ID</label>
+                <input
+                  value={composerRecipientId}
+                  onChange={(e) => setComposerRecipientId(e.target.value)}
+                  placeholder="user-id"
+                  className={`mt-2 w-full px-4 py-2 ${isDark ? 'bg-white/5 border-white/10' : 'bg-gray-100 border-gray-200'} border rounded-lg text-sm focus:outline-none focus:border-[#ff6b35]/50`}
+                />
+              </div>
+              <div>
+                <label className={`text-xs uppercase ${text.inactive}`}>Subject (optional)</label>
+                <input
+                  value={composerSubject}
+                  onChange={(e) => setComposerSubject(e.target.value)}
+                  placeholder="Subject"
+                  className={`mt-2 w-full px-4 py-2 ${isDark ? 'bg-white/5 border-white/10' : 'bg-gray-100 border-gray-200'} border rounded-lg text-sm focus:outline-none focus:border-[#ff6b35]/50`}
+                />
+              </div>
+              <div>
+                <label className={`text-xs uppercase ${text.inactive}`}>Message</label>
+                <textarea
+                  value={composerBody}
+                  onChange={(e) => setComposerBody(e.target.value)}
+                  rows={6}
+                  placeholder="Write your message..."
+                  className={`mt-2 w-full px-4 py-2 ${isDark ? 'bg-white/5 border-white/10' : 'bg-gray-100 border-gray-200'} border rounded-lg text-sm focus:outline-none focus:border-[#ff6b35]/50`}
+                />
+                {suggestion && (
+                  <button
+                    onClick={() => setComposerBody(suggestion)}
+                    className={`mt-2 text-xs ${text.inactive} hover:text-[#ff6b35]`}
+                  >
+                    Use AI draft
+                  </button>
+                )}
+              </div>
+              {sendError && (
+                <p className="text-xs text-red-400">{sendError.message}</p>
+              )}
+            </div>
+
+            <div className="flex items-center justify-between px-6 py-4 border-t border-white/10">
+              <button
+                onClick={handleAiDraft}
+                className={`px-4 py-2 ${isDark ? 'bg-white/5 hover:bg-white/10' : 'bg-gray-100 hover:bg-gray-200'} rounded-lg text-sm`}
+              >
+                AI Draft
+              </button>
+              <button
+                onClick={handleSendMessage}
+                className="px-6 py-2 bg-gradient-to-r from-[#ff6b35] to-[#f7931e] rounded-lg text-sm font-medium hover:scale-105 transition-transform"
+                disabled={sendingMessage || !composerRecipientId.trim() || !composerBody.trim()}
+              >
+                {sendingMessage ? 'Sending...' : 'Send Message'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Stats */}
       <div className="grid grid-cols-4 gap-6">
@@ -201,6 +355,54 @@ export function CommunicationHub() {
 
         {/* Right Column */}
         <div className="space-y-6">
+          {/* AI Draft Reply */}
+          <div
+            ref={aiPanelRef}
+            className={`${isDark ? 'bg-gradient-to-br from-[#1a1f35] to-[#0f1523]' : 'bg-white shadow-md'} border ${border.default} rounded-xl p-6`}
+          >
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-xl" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
+                AI DRAFT REPLY
+              </h3>
+              {provider && <span className={`text-xs ${text.inactive}`}>{provider}</span>}
+            </div>
+            {primaryConversationId ? (
+              <>
+                <div className={`${isDark ? 'bg-white/5' : 'bg-gray-100'} rounded-lg p-3 mb-3 border ${border.default}`}>
+                  {suggestionLoading ? (
+                    <p className={`text-sm ${text.muted}`}>Generating suggestion...</p>
+                  ) : suggestion ? (
+                    <p className={`text-sm ${text.secondary}`}>{suggestion}</p>
+                  ) : (
+                    <p className={`text-sm ${text.muted}`}>
+                      Generate a reply suggestion for the most recent conversation.
+                    </p>
+                  )}
+                </div>
+                {suggestionError && (
+                  <p className="text-xs text-red-400 mb-3">{suggestionError.message}</p>
+                )}
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => generateSuggestion(primaryConversationId)}
+                    className="flex-1 py-2 bg-gradient-to-r from-[#ff6b35] to-[#f7931e] rounded-lg text-sm font-medium hover:scale-105 transition-transform"
+                    disabled={suggestionLoading}
+                  >
+                    Generate Reply
+                  </button>
+                  <button
+                    onClick={clearSuggestion}
+                    className={`px-3 py-2 ${isDark ? 'bg-white/5 hover:bg-white/10' : 'bg-gray-100 hover:bg-gray-200'} rounded-lg text-sm transition-colors`}
+                  >
+                    Clear
+                  </button>
+                </div>
+              </>
+            ) : (
+              <p className={`text-sm ${text.muted}`}>No conversations yet.</p>
+            )}
+          </div>
+
           {/* Quick Templates */}
           <div className={`${isDark ? 'bg-gradient-to-br from-[#1a1f35] to-[#0f1523]' : 'bg-white shadow-md'} border ${border.default} rounded-xl p-6`}>
             <h3 className="text-xl mb-6" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>

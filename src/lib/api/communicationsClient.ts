@@ -122,6 +122,11 @@ export interface PortalActivity {
   resolvedToday: number;
 }
 
+export interface MessageSuggestion {
+  suggestion: string;
+  provider: string | null;
+}
+
 // =========================================
 // CONVERSATIONS
 // =========================================
@@ -196,6 +201,16 @@ export async function sendReminderMessage(data: {
   unitId?: string;
 }): Promise<Message> {
   return apiRequest('/communications/send-reminder', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function generateMessageSuggestion(data: {
+  conversationId: string;
+  intent?: string;
+}): Promise<MessageSuggestion> {
+  return apiRequest('/communications/suggestions', {
     method: 'POST',
     body: JSON.stringify(data),
   });

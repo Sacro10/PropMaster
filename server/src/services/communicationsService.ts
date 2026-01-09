@@ -5,6 +5,7 @@
 
 import { supabaseAdmin as supabase } from '../supabase';
 import { logActivityEvent } from './activityService';
+import { AiDisabledError, generateText, getAiStatus } from './aiClient';
 
 // =========================================
 // TYPES
@@ -1066,4 +1067,51 @@ export async function createReminderMessage(
   });
 
   return message;
+}
+
+/**
+ * Generate an AI draft reply for a conversation
+ */
+export async function generateMessageSuggestion(
+  accountId: string,
+  userId: string,
+  data: {
+    conversationId: string;
+    intent?: string;
+  }
+): Promise<{ suggestion: string; provider: string | null }> {
+  const { data: messages } = await supabase
+    .from('messages')
+    .select('id, subject, body, from_user_id, to_user_id, created_at')
+    .eq('account_id', accountId)
+    .eq('conversation_id', data.conversationId)
+    .order('created_at', { ascending: false })
+    .limit(10);
+
+  const aiStatus = getAiStatus();
+
+  try {
+    const suggestion = await generateText(
+      'Draft a concise, professional reply based on the conversation. Keep it under 120 words.',
+      {
+        intent: data.intent || 'general_reply',
+        userId,
+        conversationId: data.conversationId,
+        recentMessages: (messages || []).map((message) => ({
+          subject: message.subject,
+          body: message.body,
+          fromUserId: message.from_user_id,
+          toUserId: message.to_user_id,
+          createdAt: message.created_at,
+        })),
+      }
+    );
+
+    return { suggestion, provider: aiStatus.provider };
+  } catch (error) {
+    if (!(error instanceof AiDisabledError)) {
+      console.warn('[Communications] AI suggestion failed:', error);
+    }
+    return { suggestion: '', provider: aiStatus.provider };
+  }
 }

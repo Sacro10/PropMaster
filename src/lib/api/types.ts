@@ -282,6 +282,11 @@ export interface ExpenseBreakdown {
   color: string;
 }
 
+export interface AnalyticsInsight {
+  summary: string;
+  provider: string | null;
+}
+
 // HVAC Filter Program types
 export interface HVACFilterSubscription {
   id: string;

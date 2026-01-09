@@ -1,5 +1,6 @@
 import { supabaseAdmin as supabase } from '../supabase';
 import { logActivityEvent } from './activityService';
+import { AiDisabledError, generateStructuredJson, getAiStatus } from './aiClient';
 
 export interface MaintenanceRequest {
   id: string;
@@ -180,6 +181,47 @@ export async function createMaintenanceRequest(
 
   if (error) throw error;
 
+  let aiSuggestion: {
+    suggestedPriority?: string;
+    suggestedCategory?: string;
+    summary?: string;
+  } | null = null;
+
+  try {
+    const aiResult = await generateStructuredJson<{
+      suggestedPriority?: string;
+      suggestedCategory?: string;
+      summary?: string;
+    }>(
+      'You triage maintenance requests. Return JSON with suggestedPriority, suggestedCategory, and a one-sentence summary. Do not include extra fields.',
+      {
+        title: data.title,
+        description: data.description,
+        providedPriority: data.priority,
+        providedCategory: data.category,
+      }
+    );
+
+    aiSuggestion = {
+      suggestedPriority:
+        typeof aiResult.suggestedPriority === 'string'
+          ? aiResult.suggestedPriority.trim()
+          : undefined,
+      suggestedCategory:
+        typeof aiResult.suggestedCategory === 'string'
+          ? aiResult.suggestedCategory.trim()
+          : undefined,
+      summary:
+        typeof aiResult.summary === 'string' ? aiResult.summary.trim() : undefined,
+    };
+  } catch (error) {
+    if (!(error instanceof AiDisabledError)) {
+      console.warn('[Maintenance] AI triage failed, using provided values:', error);
+    }
+  }
+
+  const aiStatus = getAiStatus();
+
   // Log activity
   await logActivityEvent(
     accountId,
@@ -189,7 +231,12 @@ export async function createMaintenanceRequest(
     {
       entityType: 'maintenance_request',
       entityId: request.id,
-      metadata: { priority: data.priority, category: data.category },
+      metadata: {
+        priority: data.priority,
+        category: data.category,
+        aiSuggestion,
+        aiProvider: aiStatus.provider,
+      },
     }
   );
 

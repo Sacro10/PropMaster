@@ -16,6 +16,7 @@ import messagesRoutes from './routes/messages';
 import communicationsRoutes from './routes/communications';
 import analyticsRoutes from './routes/analytics';
 import demoRoutes from './routes/demo';
+import systemRoutes from './routes/system';
 import { errorHandler } from './middleware/errorHandler';
 import { rateLimiters } from './middleware/rateLimiter';
 import { startJobs, stopJobs } from './jobs';
@@ -54,6 +55,7 @@ app.get('/', (_req, res) => {
       communications: '/api/communications',
       analytics: '/api/analytics',
       demo: '/api/demo',
+      system: '/api/system',
       checkout: '/api/checkout',
       webhook: '/webhooks/stripe'
     },
@@ -98,6 +100,7 @@ app.use('/api/communications', communicationsRoutes);
 app.use('/api/messages', messagesRoutes);
 app.use('/api/demo', demoRoutes);
 app.use('/api/analytics', analyticsRoutes);
+app.use('/api/system', systemRoutes);
 app.use('/api', checkoutRoutes);
 
 // 404 handler

@@ -10,11 +10,13 @@ import {
   getPropertyPerformance,
   getExpenseBreakdown,
   exportAnalyticsData,
+  getAnalyticsInsights,
   type AnalyticsMetrics,
   type RevenueTrendData,
   type OccupancyTrendData,
   type PropertyPerformanceData,
   type ExpenseBreakdownData,
+  type AnalyticsInsight,
 } from '../api/analytics';
 
 export type TimeframeOption = '7d' | '30d' | '90d' | '1y' | 'all';
@@ -194,4 +196,30 @@ export function useExportAnalytics() {
   }, []);
 
   return { exportData, loading, error };
+}
+
+export function useAnalyticsInsights(timeframe: TimeframeOption = '30d') {
+  const [data, setData] = useState<AnalyticsInsight | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<Error | null>(null);
+
+  const fetchData = useCallback(async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const result = await getAnalyticsInsights(timeframe);
+      setData(result);
+    } catch (err) {
+      console.error('[useAnalyticsInsights] Error fetching insights:', err);
+      setError(err as Error);
+    } finally {
+      setLoading(false);
+    }
+  }, [timeframe]);
+
+  useEffect(() => {
+    fetchData();
+  }, [fetchData]);
+
+  return { data, loading, error, refetch: fetchData };
 }

@@ -108,6 +108,19 @@ Health check endpoint.
 }
 ```
 
+### GET /api/system/ai-status
+
+Returns AI provider status based on environment configuration.
+
+**Response:**
+```json
+{
+  "enabled": true,
+  "provider": "openai",
+  "missingEnvVars": []
+}
+```
+
 ## Environment Variables
 
 See `.env.example` for all required variables.
@@ -118,6 +131,18 @@ See `.env.example` for all required variables.
 - `SUPABASE_SERVICE_ROLE_KEY` - Admin access to database
 - `STRIPE_PRO_PRICE_ID` - Pro plan price ID
 - `STRIPE_PREMIUM_PRICE_ID` - Premium plan price ID
+
+**AI (optional):**
+- `OPENAI_API_KEY` - OpenAI API key (enables AI)
+- `ANTHROPIC_API_KEY` - Anthropic API key (alternate provider)
+- `AI_MODEL_NAME` - Model override (defaults to `gpt-4o-mini` or `claude-3-5-sonnet-20240620`)
+
+**.env.example (AI block):**
+```bash
+OPENAI_API_KEY=your_openai_api_key_here
+ANTHROPIC_API_KEY=your_anthropic_api_key_here
+AI_MODEL_NAME=gpt-4o-mini
+```
 
 ## Project Structure
 
@@ -183,6 +208,11 @@ See [STRIPE_SETUP.md](../STRIPE_SETUP.md) for full deployment instructions.
 1. Create new service with root directory: `server`
 2. Add environment variables
 3. Deploy automatically on push
+
+**Railway AI setup:**
+1. Open your Railway service → Variables
+2. Add `OPENAI_API_KEY` (or `ANTHROPIC_API_KEY`)
+3. Optionally set `AI_MODEL_NAME`
 
 ## Security
 

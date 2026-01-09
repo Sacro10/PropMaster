@@ -24,6 +24,7 @@ import {
   getCommunicationStats,
   getPortalActivity,
   createReminderMessage,
+  generateMessageSuggestion,
 } from '../services/communicationsService';
 
 const router = Router();
@@ -231,6 +232,43 @@ router.put(
       console.error('Mark message as read error:', error);
       res.status(500).json({
         error: 'Failed to mark message as read',
+        details: error instanceof Error ? error.message : 'Unknown error',
+      });
+    }
+  }
+);
+
+/**
+ * POST /api/communications/suggestions
+ * Generate AI draft response for a conversation
+ */
+router.post(
+  '/suggestions',
+  authenticate,
+  Permissions.readMessages,
+  async (req: AuthRequest, res) => {
+    try {
+      if (!req.user?.accountId || !req.user?.id) {
+        res.status(400).json({ error: 'Account ID and User ID required' });
+        return;
+      }
+
+      const { conversationId, intent } = req.body;
+      if (!conversationId) {
+        res.status(400).json({ error: 'Conversation ID required' });
+        return;
+      }
+
+      const result = await generateMessageSuggestion(req.user.accountId, req.user.id, {
+        conversationId,
+        intent,
+      });
+
+      res.json(result);
+    } catch (error) {
+      console.error('Generate message suggestion error:', error);
+      res.status(500).json({
+        error: 'Failed to generate suggestion',
         details: error instanceof Error ? error.message : 'Unknown error',
       });
     }

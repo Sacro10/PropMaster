@@ -5,7 +5,14 @@
 
 import { supabase } from '../supabaseClient';
 import { getCurrentAccountId } from './client';
-import type { AnalyticsMetrics, RevenueData, OccupancyData, PropertyPerformance, ExpenseBreakdown } from './types';
+import type {
+  AnalyticsMetrics,
+  RevenueData,
+  OccupancyData,
+  PropertyPerformance,
+  ExpenseBreakdown,
+  AnalyticsInsight,
+} from './types';
 
 // API base URL
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3001';
@@ -149,6 +156,34 @@ export async function getExpenseBreakdown(timeframe: TimeframeOption = '30d'): P
   } catch (error) {
     console.error('[Analytics API] Failed to fetch expense breakdown:', error);
     throw new Error('Failed to fetch expense breakdown');
+  }
+}
+
+/**
+ * Get AI-generated analytics insights
+ */
+export async function getAnalyticsInsights(timeframe: TimeframeOption = '30d'): Promise<AnalyticsInsight> {
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) {
+      throw new Error('No active session');
+    }
+
+    const response = await fetch(`${API_BASE}/api/analytics/insights?range=${timeframe}`, {
+      headers: {
+        'Authorization': `Bearer ${session.access_token}`,
+        'Content-Type': 'application/json',
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error('Failed to fetch analytics insights');
+    }
+
+    return await response.json();
+  } catch (error) {
+    console.error('[Analytics API] Failed to fetch analytics insights:', error);
+    return { summary: '', provider: null };
   }
 }
 

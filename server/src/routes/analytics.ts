@@ -3,6 +3,7 @@ import { supabaseAdmin as supabase } from '../supabase';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import { rateLimiters } from '../middleware/rateLimiter';
 import { cache } from '../utils/cache';
+import { AiDisabledError, generateText, getAiStatus } from '../services/aiClient';
 
 // Extend Request interface to include user property
 interface AnalyticsRequest extends AuthRequest {}
@@ -69,6 +70,124 @@ async function getUserAccountId(userId: string): Promise<string> {
   return data.account_id;
 }
 
+async function buildSummaryMetrics(accountId: string, range: TimeframeQuery['range']) {
+  const { start, end } = getDateRange(range);
+
+  // Calculate comparison period (same length as current period)
+  const periodLength = end.getTime() - start.getTime();
+  const comparisonEnd = new Date(start);
+  const comparisonStart = new Date(start.getTime() - periodLength);
+
+  const [
+    currentPayments,
+    comparisonPayments,
+    unitsData,
+    activeLeases,
+    currentExpenses,
+  ] = await Promise.all([
+    // Current period revenue
+    supabase
+      .from('payments')
+      .select('amount')
+      .eq('account_id', accountId)
+      .eq('status', 'paid')
+      .gte('paid_at', start.toISOString())
+      .lte('paid_at', end.toISOString()),
+
+    // Comparison period revenue
+    supabase
+      .from('payments')
+      .select('amount')
+      .eq('account_id', accountId)
+      .eq('status', 'paid')
+      .gte('paid_at', comparisonStart.toISOString())
+      .lt('paid_at', comparisonEnd.toISOString()),
+
+    // Units data for occupancy
+    supabase
+      .from('units')
+      .select('status')
+      .eq('account_id', accountId),
+
+    // Active leases for average rent
+    supabase
+      .from('leases')
+      .select('rent')
+      .eq('account_id', accountId)
+      .eq('status', 'active'),
+
+    // Current period expenses
+    supabase
+      .from('maintenance_requests')
+      .select('actual_cost')
+      .eq('account_id', accountId)
+      .eq('status', 'completed')
+      .not('actual_cost', 'is', null)
+      .gte('completed_at', start.toISOString())
+      .lte('completed_at', end.toISOString()),
+  ]);
+
+  if (currentPayments.error || comparisonPayments.error || unitsData.error || activeLeases.error) {
+    throw new Error('Failed to fetch analytics data');
+  }
+
+  // Calculate metrics
+  const currentRevenue =
+    currentPayments.data?.reduce((sum: number, p: any) => sum + Number(p.amount), 0) || 0;
+  const comparisonRevenue =
+    comparisonPayments.data?.reduce((sum: number, p: any) => sum + Number(p.amount), 0) || 0;
+  const revenueChange =
+    comparisonRevenue > 0 ? ((currentRevenue - comparisonRevenue) / comparisonRevenue) * 100 : 0;
+
+  const totalUnits = unitsData.data?.length || 0;
+  const occupiedUnits = unitsData.data?.filter((u: any) => u.status === 'occupied').length || 0;
+  const occupancyRate = totalUnits > 0 ? (occupiedUnits / totalUnits) * 100 : 0;
+
+  const avgRent =
+    activeLeases.data?.length > 0
+      ? activeLeases.data.reduce((sum: number, l: any) => sum + Number(l.rent), 0) /
+        activeLeases.data.length
+      : 0;
+
+  const currentExpenseTotal =
+    currentExpenses.data?.reduce((sum: number, e: any) => sum + Number(e.actual_cost), 0) || 0;
+  const noiMargin = currentRevenue > 0 ? ((currentRevenue - currentExpenseTotal) / currentRevenue) * 100 : 0;
+
+  return {
+    summary: {
+      totalRevenue: {
+        value: currentRevenue,
+        change: revenueChange,
+        trend: revenueChange >= 0 ? 'up' : 'down',
+      },
+      occupancyRate: {
+        value: occupancyRate,
+        change: 0,
+        trend: 'neutral',
+      },
+      avgRentPerUnit: {
+        value: avgRent,
+        change: 0,
+        trend: 'neutral',
+      },
+      noiMargin: {
+        value: noiMargin,
+        change: 0,
+        trend: noiMargin >= 20 ? 'up' : noiMargin >= 10 ? 'neutral' : 'down',
+      },
+    },
+    context: {
+      timeframe: range,
+      currentRevenue,
+      comparisonRevenue,
+      occupancyRate,
+      avgRent,
+      noiMargin,
+      currentExpenseTotal,
+    },
+  };
+}
+
 /**
  * GET /api/analytics/summary
  * Returns KPI summary metrics for the given timeframe
@@ -90,115 +209,8 @@ router.get('/summary', async (req: AnalyticsRequest, res: Response) => {
     }
 
     const accountId = await getUserAccountId(userId);
-    const { start, end } = getDateRange(range);
-
-    // Calculate comparison period (same length as current period)
-    const periodLength = end.getTime() - start.getTime();
-    const comparisonEnd = new Date(start);
-    const comparisonStart = new Date(start.getTime() - periodLength);
-
-    const [
-      currentPayments,
-      comparisonPayments,
-      unitsData,
-      activeLeases,
-      currentExpenses,
-      comparisonExpenses
-    ] = await Promise.all([
-      // Current period revenue
-      supabase
-        .from('payments')
-        .select('amount')
-        .eq('account_id', accountId)
-        .eq('status', 'paid')
-        .gte('paid_at', start.toISOString())
-        .lte('paid_at', end.toISOString()),
-
-      // Comparison period revenue
-      supabase
-        .from('payments')
-        .select('amount')
-        .eq('account_id', accountId)
-        .eq('status', 'paid')
-        .gte('paid_at', comparisonStart.toISOString())
-        .lt('paid_at', comparisonEnd.toISOString()),
-
-      // Units data for occupancy
-      supabase
-        .from('units')
-        .select('status')
-        .eq('account_id', accountId),
-
-      // Active leases for average rent
-      supabase
-        .from('leases')
-        .select('rent')
-        .eq('account_id', accountId)
-        .eq('status', 'active'),
-
-      // Current period expenses
-      supabase
-        .from('maintenance_requests')
-        .select('actual_cost')
-        .eq('account_id', accountId)
-        .eq('status', 'completed')
-        .not('actual_cost', 'is', null)
-        .gte('completed_at', start.toISOString())
-        .lte('completed_at', end.toISOString()),
-
-      // Comparison period expenses
-      supabase
-        .from('maintenance_requests')
-        .select('actual_cost')
-        .eq('account_id', accountId)
-        .eq('status', 'completed')
-        .not('actual_cost', 'is', null)
-        .gte('completed_at', comparisonStart.toISOString())
-        .lt('completed_at', comparisonEnd.toISOString())
-    ]);
-
-    if (currentPayments.error || comparisonPayments.error || unitsData.error || activeLeases.error) {
-      throw new Error('Failed to fetch analytics data');
-    }
-
-    // Calculate metrics
-    const currentRevenue = currentPayments.data?.reduce((sum: number, p: any) => sum + Number(p.amount), 0) || 0;
-    const comparisonRevenue = comparisonPayments.data?.reduce((sum: number, p: any) => sum + Number(p.amount), 0) || 0;
-    const revenueChange = comparisonRevenue > 0 ? ((currentRevenue - comparisonRevenue) / comparisonRevenue) * 100 : 0;
-
-    const totalUnits = unitsData.data?.length || 0;
-    const occupiedUnits = unitsData.data?.filter((u: any) => u.status === 'occupied').length || 0;
-    const occupancyRate = totalUnits > 0 ? (occupiedUnits / totalUnits) * 100 : 0;
-
-    const avgRent = activeLeases.data?.length > 0 
-      ? activeLeases.data.reduce((sum: number, l: any) => sum + Number(l.rent), 0) / activeLeases.data.length 
-      : 0;
-
-    const currentExpenseTotal = currentExpenses.data?.reduce((sum: number, e: any) => sum + Number(e.actual_cost), 0) || 0;
-    const noiMargin = currentRevenue > 0 ? ((currentRevenue - currentExpenseTotal) / currentRevenue) * 100 : 0;
-
-    const result = {
-      totalRevenue: {
-        value: currentRevenue,
-        change: revenueChange,
-        trend: revenueChange >= 0 ? 'up' : 'down'
-      },
-      occupancyRate: {
-        value: occupancyRate,
-        change: 0, // Would need historical data for comparison
-        trend: 'neutral'
-      },
-      avgRentPerUnit: {
-        value: avgRent,
-        change: 0, // Would need historical data for comparison
-        trend: 'neutral'
-      },
-      noiMargin: {
-        value: noiMargin,
-        change: 0, // Would need historical data for comparison
-        trend: noiMargin >= 20 ? 'up' : noiMargin >= 10 ? 'neutral' : 'down'
-      }
-    };
+    const { summary } = await buildSummaryMetrics(accountId, range);
+    const result = summary;
 
     // Cache the result for 3 minutes
     cache.set(cacheKey, result, 3 * 60 * 1000);
@@ -208,6 +220,42 @@ router.get('/summary', async (req: AnalyticsRequest, res: Response) => {
   } catch (error) {
     console.error('Analytics summary error:', error);
     res.status(500).json({ error: 'Failed to fetch analytics summary' });
+  }
+});
+
+/**
+ * GET /api/analytics/insights
+ * Returns AI-generated insights for the given timeframe
+ */
+router.get('/insights', async (req: AnalyticsRequest, res: Response) => {
+  try {
+    const { range = '30d' } = req.query as Partial<TimeframeQuery>;
+    const userId = req.user?.id;
+
+    if (!userId) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
+
+    const accountId = await getUserAccountId(userId);
+    const { summary, context } = await buildSummaryMetrics(accountId, range);
+    const aiStatus = getAiStatus();
+
+    try {
+      const insight = await generateText(
+        'Write 2-3 sentences of concise analytics insights for a property manager. Focus on revenue, occupancy, and NOI trends. Avoid numbers if the change is neutral.',
+        { summary, context }
+      );
+
+      res.json({ summary: insight, provider: aiStatus.provider });
+    } catch (error) {
+      if (!(error instanceof AiDisabledError)) {
+        console.warn('[Analytics] AI insights failed:', error);
+      }
+      res.json({ summary: '', provider: aiStatus.provider });
+    }
+  } catch (error) {
+    console.error('Analytics insights error:', error);
+    res.status(500).json({ error: 'Failed to fetch analytics insights' });
   }
 });
 

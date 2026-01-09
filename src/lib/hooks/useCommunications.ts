@@ -187,3 +187,41 @@ export function useMarkMessageAsRead() {
 
   return { markAsRead, loading, error };
 }
+
+export function useMessageSuggestion() {
+  const [suggestion, setSuggestion] = useState<string>('');
+  const [provider, setProvider] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<Error | null>(null);
+
+  const generate = useCallback(async (conversationId: string, intent?: string) => {
+    try {
+      setLoading(true);
+      setError(null);
+      const result = await api.generateMessageSuggestion({ conversationId, intent });
+      setSuggestion(result.suggestion || '');
+      setProvider(result.provider);
+      return { success: true, data: result };
+    } catch (err) {
+      console.error('[useMessageSuggestion] Error generating suggestion:', err);
+      setError(err as Error);
+      return { success: false, error: err as Error };
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  const clear = useCallback(() => {
+    setSuggestion('');
+    setProvider(null);
+  }, []);
+
+  return {
+    suggestion,
+    provider,
+    loading,
+    error,
+    generate,
+    clear,
+  };
+}

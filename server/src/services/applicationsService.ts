@@ -1,5 +1,6 @@
 import { supabaseAdmin as supabase } from '../supabase';
 import { logActivityEvent } from './activityService';
+import { AiDisabledError, generateStructuredJson, getAiStatus } from './aiClient';
 
 export interface RentalApplication {
   id: string;
@@ -684,21 +685,76 @@ export async function runScreening(
     recommendations = 'Not recommended. Significant risk factors present.';
   }
 
+  let screeningProvider = 'internal';
+  let aiRiskFactors: string[] = [];
+  let aiRecommendations: string | null = null;
+
+  try {
+    const aiResult = await generateStructuredJson<{
+      riskFactors?: string[];
+      recommendations?: string;
+    }>(
+      'You are assisting with rental application screening. Return JSON with riskFactors (array of short strings) and recommendations (one sentence). Do not change the numeric scores.',
+      {
+        applicant: {
+          firstName: application.firstName,
+          lastName: application.lastName,
+          monthlyIncome: application.monthlyIncome,
+          currentEmployer: application.currentEmployer,
+        },
+        rentAmount,
+        incomeToRentRatio,
+        creditScore,
+        backgroundCheckStatus,
+        evictionHistory,
+        criminalHistory,
+        incomeVerificationStatus,
+        riskScore,
+        existingRiskFactors: riskFactors,
+        deterministicRecommendation: recommendations,
+      }
+    );
+
+    aiRiskFactors = Array.isArray(aiResult.riskFactors)
+      ? aiResult.riskFactors
+          .map((factor) => String(factor).trim())
+          .filter((factor) => factor.length > 0)
+      : [];
+    aiRecommendations =
+      typeof aiResult.recommendations === 'string' && aiResult.recommendations.trim()
+        ? aiResult.recommendations.trim()
+        : null;
+
+    const aiStatus = getAiStatus();
+    if (aiStatus.provider) {
+      screeningProvider = `internal+${aiStatus.provider}`;
+    }
+  } catch (error) {
+    if (!(error instanceof AiDisabledError)) {
+      console.warn('[Screening] AI enhancement failed, using deterministic output:', error);
+    }
+  }
+
+  const mergedRiskFactors = Array.from(
+    new Set([...riskFactors, ...aiRiskFactors])
+  );
+  const mergedRecommendations = aiRecommendations || recommendations;
+
   // Store screening result
   const { data, error } = await supabase
     .from('screening_results')
     .insert({
       account_id: accountId,
       application_id: applicationId,
-      provider: 'internal',
+      provider: screeningProvider,
       credit_score: creditScore,
       background_check_status: backgroundCheckStatus,
       eviction_history: evictionHistory,
       criminal_history: criminalHistory,
       income_verification_status: incomeVerificationStatus,
       risk_score: riskScore,
-      risk_factors: riskFactors,
-      recommendations,
+      risk_factors: mergedRiskFactors,
+      recommendations: mergedRecommendations,
       raw_data: {
         income_to_rent_ratio: incomeToRentRatio,
         monthly_income: application.monthlyIncome,

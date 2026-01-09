@@ -13,6 +13,7 @@ import {
   usePropertyPerformance,
   useExpenseBreakdown,
   useExportAnalytics,
+  useAnalyticsInsights,
   type TimeframeOption,
 } from '../../lib/hooks/useAnalytics';
 import { formatCurrencyCompact, formatPercentageChange, formatCurrency } from '../../lib/utils/currencyHelpers';
@@ -33,6 +34,7 @@ export function AnalyticsPanel() {
   const { data: propertyPerformance, loading: propertyLoading } = usePropertyPerformance(timeframe);
   const { data: expenseBreakdown, loading: expenseLoading } = useExpenseBreakdown(timeframe);
   const { exportData, loading: exportLoading } = useExportAnalytics();
+  const { data: insights, loading: insightsLoading } = useAnalyticsInsights(timeframe);
 
   // Show loading state
   if (metricsLoading) {
@@ -451,6 +453,23 @@ export function AnalyticsPanel() {
               <p className={`${text.secondary} mb-4`} style={{ fontFamily: 'Work Sans, sans-serif' }}>
                 AI-powered lease renewal optimization analyzes local market trends, comparable properties, and seasonal demand patterns to recommend optimal pricing strategies.
               </p>
+              <div className={`${isDark ? 'bg-white/5' : 'bg-gray-100'} border ${border.default} rounded-lg p-4 mb-4`}>
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-xs uppercase tracking-wide text-[#ff6b35] font-semibold">
+                    AI Insights
+                  </p>
+                  {insights?.provider && (
+                    <span className={`text-xs ${text.inactive}`}>Provider: {insights.provider}</span>
+                  )}
+                </div>
+                {insightsLoading ? (
+                  <p className={`text-sm ${text.muted}`}>Generating insight...</p>
+                ) : insights?.summary ? (
+                  <p className={`text-sm ${text.secondary}`}>{insights.summary}</p>
+                ) : (
+                  <p className={`text-sm ${text.muted}`}>AI insights unavailable.</p>
+                )}
+              </div>
               <div className="grid grid-cols-5 gap-4">
                 <div className={`p-3 ${isDark ? 'bg-white/5' : 'bg-gray-100'} rounded-lg`}>
                   <p className="text-2xl font-bold text-emerald-400 mb-1" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
