@@ -12,10 +12,13 @@ import {
 } from '../../lib/hooks/useShowings';
 import { sendShowingReminder } from '../../lib/api/showings';
 import { formatRelativeTime } from '../../lib/utils/dateHelpers';
+import { ScheduleShowingModal } from './ScheduleShowingModal';
 
 export function PropertyShowings() {
   const { isDark, text, border } = useThemeStyles();
   const [sendingReminder, setSendingReminder] = useState<string | null>(null);
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [selectedUnitId, setSelectedUnitId] = useState<string | undefined>(undefined);
 
   // Feature checks for plan gating - Electronic showings require Premium
   const electronicShowings = useHasFeature('electronic_showings');
@@ -40,6 +43,32 @@ export function PropertyShowings() {
       setSendingReminder(null);
     }
   };
+
+  // Handle opening modal for scheduling
+  const handleOpenModal = (unitId?: string) => {
+    setSelectedUnitId(unitId);
+    setIsModalOpen(true);
+  };
+
+  // Handle closing modal
+  const handleCloseModal = () => {
+    setIsModalOpen(false);
+    setSelectedUnitId(undefined);
+  };
+
+  // Handle successful showing creation
+  const handleShowingSuccess = () => {
+    refetchShowings();
+  };
+
+  // Transform available properties for modal
+  const modalUnits = availableProperties.map((prop) => ({
+    id: prop.id,
+    name: prop.name,
+    rent: prop.rent,
+    beds: prop.beds,
+    baths: prop.baths,
+  }));
 
   // Show loading state
   if (showingsLoading || statsLoading) {
@@ -86,6 +115,7 @@ export function PropertyShowings() {
               <RefreshCw className="w-4 h-4" />
             </button>
             <button
+              onClick={() => handleOpenModal()}
               className="px-6 py-3 bg-gradient-to-r from-[#ff6b35] to-[#f7931e] rounded-lg font-medium hover:scale-105 transition-transform"
               style={{ fontFamily: 'Work Sans, sans-serif' }}
             >
@@ -358,6 +388,7 @@ export function PropertyShowings() {
                   </div>
 
                   <button
+                    onClick={() => handleOpenModal(property.id)}
                     className="w-full py-2 bg-gradient-to-r from-[#ff6b35] to-[#f7931e] rounded-lg text-sm font-medium hover:scale-105 transition-transform"
                     style={{ fontFamily: 'Work Sans, sans-serif' }}
                   >
@@ -369,6 +400,15 @@ export function PropertyShowings() {
           )}
         </div>
       </div>
+
+      {/* Schedule Showing Modal */}
+      <ScheduleShowingModal
+        isOpen={isModalOpen}
+        onClose={handleCloseModal}
+        onSuccess={handleShowingSuccess}
+        preSelectedUnitId={selectedUnitId}
+        availableUnits={modalUnits}
+      />
     </FeatureGate>
   );
 }

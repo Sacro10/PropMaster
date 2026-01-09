@@ -47,6 +47,7 @@ export function CommunicationHub() {
   const [composerError, setComposerError] = useState<string | null>(null);
   const [recipientSearch, setRecipientSearch] = useState('');
   const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null);
+  const aiPanelRef = useRef<HTMLDivElement | null>(null);
 
   // Show loading state
   if (messagesLoading || statsLoading) {
@@ -105,8 +106,6 @@ export function CommunicationHub() {
 
   const primaryConversationId = conversations[0]?.id;
   const activeConversationId = selectedConversationId || primaryConversationId;
-
-  const aiPanelRef = useRef<HTMLDivElement | null>(null);
 
   const resolveRecipientId = (conversationId: string | null) => {
     if (!conversationId) return '';
