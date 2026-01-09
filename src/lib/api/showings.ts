@@ -34,6 +34,18 @@ export async function getUpcomingShowings(params: PaginationParams = {}) {
     });
 
     if (!response.ok) {
+      // Check if response is HTML (error page) instead of JSON
+      const contentType = response.headers.get('content-type');
+      if (contentType && contentType.includes('text/html')) {
+        console.error('[Showings API] Received HTML instead of JSON - API may not be running');
+        return {
+          data: [],
+          total: 0,
+          page: 1,
+          pageSize: 50,
+          totalPages: 0,
+        };
+      }
       throw new Error(`Failed to fetch showings: ${response.statusText}`);
     }
 
@@ -65,7 +77,14 @@ export async function getUpcomingShowings(params: PaginationParams = {}) {
     };
   } catch (error) {
     console.error('[Showings API] Error fetching showings:', error);
-    throw error;
+    // Return empty data instead of throwing to prevent UI crash
+    return {
+      data: [],
+      total: 0,
+      page: 1,
+      pageSize: 50,
+      totalPages: 0,
+    };
   }
 }
 
@@ -92,6 +111,11 @@ export async function getAvailableProperties() {
     });
 
     if (!response.ok) {
+      const contentType = response.headers.get('content-type');
+      if (contentType && contentType.includes('text/html')) {
+        console.error('[Showings API] Received HTML instead of JSON - API may not be running');
+        return [];
+      }
       throw new Error(`Failed to fetch available units: ${response.statusText}`);
     }
 
@@ -138,6 +162,16 @@ export async function getShowingStats() {
     });
 
     if (!response.ok) {
+      const contentType = response.headers.get('content-type');
+      if (contentType && contentType.includes('text/html')) {
+        console.error('[Showings API] Received HTML instead of JSON - API may not be running');
+        return {
+          scheduled_today: 0,
+          total_this_week: 0,
+          avg_response_time: '0.0',
+          conversion_rate: '0',
+        };
+      }
       throw new Error(`Failed to fetch showing stats: ${response.statusText}`);
     }
 

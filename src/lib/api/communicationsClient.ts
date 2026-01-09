@@ -32,6 +32,12 @@ async function apiRequest<T>(
   });
 
   if (!response.ok) {
+    // Check if response is HTML (error page) instead of JSON
+    const contentType = response.headers.get('content-type');
+    if (contentType && contentType.includes('text/html')) {
+      console.error('[Communications API] Received HTML instead of JSON - API may not be running');
+      throw new Error('API server is not available');
+    }
     const error = await response.json().catch(() => ({}));
     throw new Error(error.error || `API request failed: ${response.statusText}`);
   }
