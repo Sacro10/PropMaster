@@ -178,8 +178,8 @@ export async function getRentalApplications(params: PaginationParams = {}) {
         )
       `, { count: 'exact' })
       .eq('account_id', accountId)
-      .eq('application_status', 'pending')
-      .order('applied_at', { ascending: false })
+      .eq('status', 'submitted')
+      .order('created_at', { ascending: false })
       .range(from, to);
 
     if (error) {
@@ -350,7 +350,7 @@ export async function approveApplication(applicationId: string) {
     const { data, error } = await supabase
       .from('rental_applications')
       .update({
-        application_status: 'approved',
+        status: 'approved',
         reviewed_at: new Date().toISOString(),
       })
       .eq('id', applicationId)
@@ -382,7 +382,7 @@ export async function rejectApplication(applicationId: string, notes?: string) {
     const { data, error } = await supabase
       .from('rental_applications')
       .update({
-        application_status: 'rejected',
+        status: 'rejected',
         reviewed_at: new Date().toISOString(),
         notes: notes || null,
       })
