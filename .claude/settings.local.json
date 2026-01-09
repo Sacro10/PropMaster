@@ -11,7 +11,8 @@
       "Bash(SUPABASE_URL=\"https://orgefuaujqiluulzhzeg.supabase.co\" SUPABASE_SERVICE_ROLE_KEY=\"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9yZ2VmdWF1anFpbHV1bHpoemVnIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc2Nzc5NjcwOCwiZXhwIjoyMDgzMzcyNzA4fQ.ycG37inQesKufMZ_sUhk_WwCjDna8LfMORe6XOCnu9Q\" npx ts-node:*)",
       "Bash(SUPABASE_URL=\"https://orgefuaujqiluulzhzeg.supabase.co\" SUPABASE_SERVICE_ROLE_KEY=\"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9yZ2VmdWF1anFpbHV1bHpoemVnIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc2Nzc5NjcwOCwiZXhwIjoyMDgzMzcyNzA4fQ.ycG37inQesKufMZ_sUhk_WwCjDna8LfMORe6XOCnu9Q\" npx ts-node -e \"import { createClient } from ''@supabase/supabase-js''; import { readFileSync } from ''fs''; const supabase = createClient\\(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!, { auth: { autoRefreshToken: false, persistSession: false } }\\); const sql = readFileSync\\(''supabase/migrations/003_complete_schema.sql'', ''utf8''\\); console.log\\(''Running migration...''\\); supabase.rpc\\(''exec_sql'', { sql_string: sql }\\).then\\(result => { console.log\\(''Migration result:'', result\\); process.exit\\(result.error ? 1 : 0\\); }\\);\")",
       "Bash(npm test:*)",
-      "Bash(grep:*)"
+      "Bash(grep:*)",
+      "Bash(perl:*)"
     ]
   }
 }

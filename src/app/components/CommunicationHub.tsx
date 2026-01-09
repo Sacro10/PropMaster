@@ -59,27 +59,47 @@ export function CommunicationHub() {
   }
 
   // Prepare stats display
-  const communicationStatsDisplay = stats ? [
-    { label: 'Active Conversations', value: stats.active_conversations.toString(), change: '0%' },
-    { label: 'Avg. Response Time', value: `${stats.avg_response_time_minutes} min`, change: '0%' },
-    { label: 'Automation Rate', value: `${stats.automation_rate}%`, change: '0%' },
-    { label: 'Tenant Satisfaction', value: `${stats.tenant_satisfaction}%`, change: '0%' },
+  const normalizedStats = stats ? {
+    activeConversations: Number((stats as any).active_conversations ?? (stats as any).activeConversations ?? 0),
+    avgResponseTimeMinutes: Number((stats as any).avg_response_time_minutes ?? (stats as any).avgResponseTimeMinutes ?? 0),
+    automationRate: Number((stats as any).automation_rate ?? (stats as any).automationRate ?? 0),
+    tenantSatisfaction: Number((stats as any).tenant_satisfaction ?? (stats as any).tenantSatisfaction ?? 0),
+  } : null;
+
+  const communicationStatsDisplay = normalizedStats ? [
+    { label: 'Active Conversations', value: normalizedStats.activeConversations.toString(), change: '0%' },
+    { label: 'Avg. Response Time', value: `${normalizedStats.avgResponseTimeMinutes} min`, change: '0%' },
+    { label: 'Automation Rate', value: `${normalizedStats.automationRate}%`, change: '0%' },
+    { label: 'Tenant Satisfaction', value: `${normalizedStats.tenantSatisfaction}%`, change: '0%' },
   ] : [];
 
   // Transform messages into conversation format
   const conversations = messages.map((msg) => {
-    const propertyDisplay = msg.unit_number
-      ? `${msg.property_name || 'Unknown'} #${msg.unit_number}`
-      : msg.property_name || 'General';
+    const body = typeof (msg as any).body === 'string'
+      ? (msg as any).body
+      : typeof (msg as any).lastMessage === 'string'
+        ? (msg as any).lastMessage
+        : '';
+    const subject = typeof (msg as any).subject === 'string' ? (msg as any).subject : '';
+    const createdAt = (msg as any).created_at || (msg as any).createdAt || (msg as any).lastMessageAt || new Date().toISOString();
+    const tenant = (msg as any).sender_name || (msg as any).senderName || (msg as any).tenant_name || (msg as any).tenant || 'Tenant';
+    const propertyName = (msg as any).property_name || (msg as any).propertyName || (msg as any).property || 'General';
+    const unitNumber = (msg as any).unit_number || (msg as any).unitNumber || (msg as any).unit || '';
+    const propertyDisplay = unitNumber ? `${propertyName} #${unitNumber}` : propertyName;
+    const unreadCount = typeof (msg as any).unreadCount === 'number'
+      ? (msg as any).unreadCount
+      : Number((msg as any).unread_messages ?? ((msg as any).is_read === false ? 1 : 0));
+    const status = (msg as any).status || (unreadCount > 0 ? 'active' : 'resolved');
+    const lastMessageText = (body || subject || 'No message').toString();
 
     return {
-      id: msg.id,
-      tenant: msg.sender_name || 'Unknown',
+      id: (msg as any).id,
+      tenant,
       property: propertyDisplay,
-      lastMessage: msg.body.substring(0, 60) + (msg.body.length > 60 ? '...' : ''),
-      time: formatRelativeTime(msg.created_at),
-      unread: msg.is_read ? 0 : 1,
-      status: msg.is_read ? 'resolved' : 'active',
+      lastMessage: lastMessageText.substring(0, 60) + (lastMessageText.length > 60 ? '...' : ''),
+      time: formatRelativeTime(createdAt),
+      unread: unreadCount || 0,
+      status,
     };
   });
 
@@ -536,22 +556,34 @@ export function CommunicationHub() {
               </div>
             ) : portalActivity && (
               <div className="space-y-4">
+                {(() => {
+                  const normalizedActivity = {
+                    messagesToday: Number((portalActivity as any).messages_today ?? (portalActivity as any).messagesToday ?? 0),
+                    unreadMessages: Number((portalActivity as any).unread_messages ?? (portalActivity as any).unreadMessages ?? 0),
+                    avgResponseTimeMinutes: Number((portalActivity as any).avg_response_time_minutes ?? (portalActivity as any).avgResponseTimeMinutes ?? 0),
+                    resolvedToday: Number((portalActivity as any).resolved_today ?? (portalActivity as any).resolvedToday ?? 0),
+                  };
+                  return (
+                    <>
                 <div className="flex justify-between items-center">
                   <span className={`text-sm ${text.secondary}`}>Messages Today</span>
-                  <span className="text-lg font-bold" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>{portalActivity.messages_today}</span>
+                  <span className="text-lg font-bold" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>{normalizedActivity.messagesToday}</span>
                 </div>
                 <div className="flex justify-between items-center">
                   <span className={`text-sm ${text.secondary}`}>Unread Messages</span>
-                  <span className="text-lg font-bold text-[#ff6b35]" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>{portalActivity.unread_messages}</span>
+                  <span className="text-lg font-bold text-[#ff6b35]" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>{normalizedActivity.unreadMessages}</span>
                 </div>
                 <div className="flex justify-between items-center">
                   <span className={`text-sm ${text.secondary}`}>Avg. Response</span>
-                  <span className="text-lg font-bold text-emerald-400" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>{portalActivity.avg_response_time_minutes}min</span>
+                  <span className="text-lg font-bold text-emerald-400" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>{normalizedActivity.avgResponseTimeMinutes}min</span>
                 </div>
                 <div className="flex justify-between items-center">
                   <span className={`text-sm ${text.secondary}`}>Resolved Today</span>
-                  <span className="text-lg font-bold" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>{portalActivity.resolved_today}</span>
+                  <span className="text-lg font-bold" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>{normalizedActivity.resolvedToday}</span>
                 </div>
+                    </>
+                  );
+                })()}
               </div>
             )}
           </div>
@@ -663,19 +695,19 @@ export function CommunicationHub() {
             <div className="grid grid-cols-5 gap-4">
               <div className={`p-3 ${isDark ? 'bg-white/5' : 'bg-gray-50'} rounded-lg`}>
                 <p className="text-2xl font-bold text-emerald-400 mb-1" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
-                  {stats?.automation_rate || 78}%
+                  {normalizedStats?.automationRate || 78}%
                 </p>
                 <p className={`text-xs ${text.muted}`}>Automation Rate</p>
               </div>
               <div className={`p-3 ${isDark ? 'bg-white/5' : 'bg-gray-50'} rounded-lg`}>
                 <p className="text-2xl font-bold text-emerald-400 mb-1" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
-                  {stats?.avg_response_time_minutes || 18}min
+                  {normalizedStats?.avgResponseTimeMinutes || 18}min
                 </p>
                 <p className={`text-xs ${text.muted}`}>Avg. Response</p>
               </div>
               <div className={`p-3 ${isDark ? 'bg-white/5' : 'bg-gray-50'} rounded-lg`}>
                 <p className="text-2xl font-bold text-emerald-400 mb-1" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
-                  {stats?.tenant_satisfaction || 96}%
+                  {normalizedStats?.tenantSatisfaction || 96}%
                 </p>
                 <p className={`text-xs ${text.muted}`}>Satisfaction</p>
               </div>
@@ -687,7 +719,7 @@ export function CommunicationHub() {
               </div>
               <div className={`p-3 ${isDark ? 'bg-white/5' : 'bg-gray-50'} rounded-lg`}>
                 <p className="text-2xl font-bold text-emerald-400 mb-1" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
-                  {stats?.active_conversations || 142}
+                  {normalizedStats?.activeConversations || 142}
                 </p>
                 <p className={`text-xs ${text.muted}`}>Active Tenants</p>
               </div>

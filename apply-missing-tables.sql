@@ -38,7 +38,25 @@ CREATE TABLE IF NOT EXISTS hvac_delivery_batches (
 
 CREATE INDEX IF NOT EXISTS idx_hvac_batches_account ON hvac_delivery_batches(account_id, delivery_date DESC);
 
--- 3. Automated Reminders (from 008_communication_portal.sql)
+-- 3. Message Templates (from 003_complete_schema.sql)
+CREATE TABLE IF NOT EXISTS message_templates (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  account_id UUID NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  category TEXT NOT NULL CHECK (category IN ('payment', 'maintenance', 'lease', 'onboarding', 'showing', 'general')),
+  subject TEXT,
+  body TEXT NOT NULL,
+  variables TEXT[] DEFAULT '{}',
+  usage_count INTEGER DEFAULT 0,
+  is_active BOOLEAN DEFAULT true,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_message_templates_account ON message_templates(account_id);
+CREATE INDEX IF NOT EXISTS idx_message_templates_category ON message_templates(category);
+
+-- 4. Automated Reminders (from 008_communication_portal.sql)
 CREATE TABLE IF NOT EXISTS automated_reminders (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   account_id UUID NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
@@ -61,7 +79,7 @@ CREATE TABLE IF NOT EXISTS automated_reminders (
 CREATE INDEX IF NOT EXISTS idx_automated_reminders_account ON automated_reminders(account_id);
 CREATE INDEX IF NOT EXISTS idx_automated_reminders_next_send ON automated_reminders(next_send_date) WHERE status = 'active';
 
--- 4. Reminder Schedules (from 008_communication_portal.sql)
+-- 5. Reminder Schedules (from 008_communication_portal.sql)
 CREATE TABLE IF NOT EXISTS reminder_schedules (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   account_id UUID NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
@@ -77,7 +95,7 @@ CREATE TABLE IF NOT EXISTS reminder_schedules (
 CREATE INDEX IF NOT EXISTS idx_reminder_schedules_reminder ON reminder_schedules(reminder_id);
 CREATE INDEX IF NOT EXISTS idx_reminder_schedules_scheduled ON reminder_schedules(scheduled_for) WHERE status = 'pending';
 
--- 5. Reminder Runs (from 008_communication_portal.sql)
+-- 6. Reminder Runs (from 008_communication_portal.sql)
 CREATE TABLE IF NOT EXISTS reminder_runs (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   account_id UUID NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
@@ -94,7 +112,7 @@ CREATE TABLE IF NOT EXISTS reminder_runs (
 
 CREATE INDEX IF NOT EXISTS idx_reminder_runs_reminder ON reminder_runs(reminder_id, run_at DESC);
 
--- 6. Create expire_old_access_codes function (from 005_showings_enhancements.sql)
+-- 7. Create expire_old_access_codes function (from 005_showings_enhancements.sql)
 CREATE OR REPLACE FUNCTION expire_old_access_codes()
 RETURNS INTEGER
 LANGUAGE plpgsql

@@ -47,6 +47,7 @@ export function RentCollection() {
     { label: 'Auto-Pay Enrolled', value: `${stats.auto_pay_enrolled}%` },
     { label: 'Avg. Collection Time', value: `${stats.avg_collection_time} days` },
   ] : [];
+  const autoPayEnrolledPercent = stats ? Number(stats.auto_pay_enrolled) : 0;
 
   // Handle send reminder
   const handleSendReminder = async (paymentId: string) => {
@@ -321,8 +322,8 @@ export function RentCollection() {
 
               <div className="space-y-2">
                 <div className="flex justify-between text-sm">
-                  <span className={text.muted}>Enrolled Tenants</span>
-                  <span className="font-medium">{autoPayEnrolled} / {totalTenants}</span>
+                  <span className={text.muted}>Auto-Pay Enrolled</span>
+                  <span className="font-medium">{autoPayEnrolledPercent}%</span>
                 </div>
                 <div className="flex justify-between text-sm">
                   <span className={text.muted}>Success Rate</span>
