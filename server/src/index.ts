@@ -26,10 +26,43 @@ const app = express();
 // Trust proxy - required for rate limiting and IP detection on Railway
 app.set('trust proxy', 1);
 
+const normalizeOrigin = (value: string) => value.replace(/\/+$/, '');
+const expandOrigin = (origin: string) => {
+  const clean = normalizeOrigin(origin);
+  if (clean.startsWith('http://')) {
+    return [clean, `https://${clean.slice('http://'.length)}`];
+  }
+  if (clean.startsWith('https://')) {
+    return [clean, `http://${clean.slice('https://'.length)}`];
+  }
+  return [clean, `https://${clean}`, `http://${clean}`];
+};
+
+const rawFrontendUrls = [
+  config.frontendUrl,
+  ...((process.env.FRONTEND_URLS || '')
+    .split(',')
+    .map((value) => value.trim())
+    .filter(Boolean)),
+];
+
+const allowedOrigins = new Set(
+  rawFrontendUrls.flatMap((origin) => expandOrigin(origin))
+);
+
 // CORS configuration
 app.use(
   cors({
-    origin: config.frontendUrl,
+    origin: (origin, callback) => {
+      if (!origin) {
+        return callback(null, true);
+      }
+      const normalized = normalizeOrigin(origin);
+      if (allowedOrigins.has(normalized)) {
+        return callback(null, true);
+      }
+      return callback(new Error(`CORS blocked for origin: ${origin}`));
+    },
     credentials: true,
   })
 );

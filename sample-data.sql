@@ -2,6 +2,10 @@
 -- Run this in Supabase SQL Editor after running supabase-schema.sql
 -- This creates realistic sample data for testing and development
 
+-- Ensure UUID extensions are loaded
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+
 -- ============================================================================
 -- 1. CREATE SAMPLE ACCOUNTS
 -- ============================================================================
