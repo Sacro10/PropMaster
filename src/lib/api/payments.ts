@@ -103,7 +103,14 @@ export async function getRecentPayments(limit = 50): Promise<Payment[]> {
       },
     });
 
-    if (!response.ok) throw new Error('Failed to fetch payments');
+    if (!response.ok) {
+      const contentType = response.headers.get('content-type');
+      if (contentType && contentType.includes('text/html')) {
+        console.error('[Payments API] Received HTML instead of JSON - API may not be running');
+        return [];
+      }
+      throw new Error('Failed to fetch payments');
+    }
     const result = await response.json();
     
     // Transform backend data to frontend format
@@ -157,7 +164,14 @@ export async function getOverduePayments(): Promise<Payment[]> {
       },
     });
 
-    if (!response.ok) throw new Error('Failed to fetch overdue payments');
+    if (!response.ok) {
+      const contentType = response.headers.get('content-type');
+      if (contentType && contentType.includes('text/html')) {
+        console.error('[Payments API] Received HTML instead of JSON - API may not be running');
+        return [];
+      }
+      throw new Error('Failed to fetch overdue payments');
+    }
     const result = await response.json();
     
     // Transform backend data to frontend format
@@ -240,7 +254,20 @@ export async function getCollectionStats() {
       },
     });
 
-    if (!response.ok) throw new Error('Failed to fetch stats');
+    if (!response.ok) {
+      const contentType = response.headers.get('content-type');
+      if (contentType && contentType.includes('text/html')) {
+        console.error('[Payments API] Received HTML instead of JSON - API may not be running');
+        return {
+          collected_this_month: 0,
+          collection_rate: '0.0',
+          auto_pay_enrolled: '0',
+          avg_collection_time: '0.0',
+          overdue_count: 0,
+        };
+      }
+      throw new Error('Failed to fetch stats');
+    }
     const stats = await response.json();
     
     // Transform to UI format - handle both numeric and string values

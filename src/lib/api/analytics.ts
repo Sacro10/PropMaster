@@ -37,13 +37,36 @@ export async function getAnalyticsMetrics(timeframe: TimeframeOption = '30d'): P
     });
 
     if (!response.ok) {
+      const contentType = response.headers.get('content-type');
+      if (contentType && contentType.includes('text/html')) {
+        console.error('[Analytics API] Received HTML instead of JSON - API may not be running');
+        return {
+          total_revenue: 0,
+          revenue_change: 0,
+          occupancy_rate: 0,
+          occupancy_change: 0,
+          avg_rent_per_unit: 0,
+          rent_change: 0,
+          noi_margin: 0,
+          noi_change: 0,
+        };
+      }
       throw new Error('Failed to fetch analytics metrics');
     }
 
     return await response.json();
   } catch (error) {
     console.error('[Analytics API] Failed to fetch analytics metrics:', error);
-    throw new Error('Failed to fetch analytics metrics');
+    return {
+      total_revenue: 0,
+      revenue_change: 0,
+      occupancy_rate: 0,
+      occupancy_change: 0,
+      avg_rent_per_unit: 0,
+      rent_change: 0,
+      noi_margin: 0,
+      noi_change: 0,
+    };
   }
 }
 
@@ -65,13 +88,18 @@ export async function getRevenueTrend(timeframe: TimeframeOption = '30d'): Promi
     });
 
     if (!response.ok) {
+      const contentType = response.headers.get('content-type');
+      if (contentType && contentType.includes('text/html')) {
+        console.error('[Analytics API] Received HTML instead of JSON - API may not be running');
+        return [];
+      }
       throw new Error('Failed to fetch revenue trend');
     }
 
     return await response.json();
   } catch (error) {
     console.error('[Analytics API] Failed to fetch revenue trend:', error);
-    throw new Error('Failed to fetch revenue trend');
+    return [];
   }
 }
 
@@ -93,13 +121,18 @@ export async function getOccupancyTrend(timeframe: TimeframeOption = '30d'): Pro
     });
 
     if (!response.ok) {
+      const contentType = response.headers.get('content-type');
+      if (contentType && contentType.includes('text/html')) {
+        console.error('[Analytics API] Received HTML instead of JSON - API may not be running');
+        return [];
+      }
       throw new Error('Failed to fetch occupancy trend');
     }
 
     return await response.json();
   } catch (error) {
     console.error('[Analytics API] Failed to fetch occupancy trend:', error);
-    throw new Error('Failed to fetch occupancy trend');
+    return [];
   }
 }
 
@@ -121,13 +154,18 @@ export async function getPropertyPerformance(timeframe: TimeframeOption = '30d')
     });
 
     if (!response.ok) {
+      const contentType = response.headers.get('content-type');
+      if (contentType && contentType.includes('text/html')) {
+        console.error('[Analytics API] Received HTML instead of JSON - API may not be running');
+        return [];
+      }
       throw new Error('Failed to fetch property performance');
     }
 
     return await response.json();
   } catch (error) {
     console.error('[Analytics API] Failed to fetch property performance:', error);
-    throw new Error('Failed to fetch property performance');
+    return [];
   }
 }
 
@@ -149,13 +187,18 @@ export async function getExpenseBreakdown(timeframe: TimeframeOption = '30d'): P
     });
 
     if (!response.ok) {
+      const contentType = response.headers.get('content-type');
+      if (contentType && contentType.includes('text/html')) {
+        console.error('[Analytics API] Received HTML instead of JSON - API may not be running');
+        return [];
+      }
       throw new Error('Failed to fetch expense breakdown');
     }
 
     return await response.json();
   } catch (error) {
     console.error('[Analytics API] Failed to fetch expense breakdown:', error);
-    throw new Error('Failed to fetch expense breakdown');
+    return [];
   }
 }
 
