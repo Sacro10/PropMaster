@@ -118,4 +118,12 @@ export const rateLimiters = {
     keyGenerator: (req) => `api:${req.ip}`,
     message: 'Too many requests, please slow down',
   }),
+
+  // Analytics endpoints - allow reasonable query frequency
+  analytics: rateLimit({
+    windowMs: 5 * 60 * 1000, // 5 minutes
+    max: 30, // 30 analytics requests per 5 min
+    keyGenerator: (req) => `analytics:${req.ip}`,
+    message: 'Too many analytics requests, please try again later',
+  }),
 };
