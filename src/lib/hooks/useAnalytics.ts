@@ -11,13 +11,16 @@ import {
   getExpenseBreakdown,
   exportAnalyticsData,
   getAnalyticsInsights,
-  type AnalyticsMetrics,
-  type RevenueTrendData,
-  type OccupancyTrendData,
-  type PropertyPerformanceData,
-  type ExpenseBreakdownData,
-  type AnalyticsInsight,
+  type TimeframeOption as ApiTimeframeOption,
 } from '../api/analytics';
+import type {
+  AnalyticsMetrics,
+  RevenueData,
+  OccupancyData,
+  PropertyPerformance as PropertyPerformanceData,
+  ExpenseBreakdown as ExpenseBreakdownData,
+  AnalyticsInsight,
+} from '../api/types';
 
 export type TimeframeOption = '7d' | '30d' | '90d' | '1y' | 'all';
 
@@ -48,7 +51,7 @@ export function useAnalyticsMetrics(timeframe: TimeframeOption = '30d') {
 }
 
 export function useRevenueTrend(timeframe: TimeframeOption = '30d') {
-  const [data, setData] = useState<RevenueTrendData[]>([]);
+  const [data, setData] = useState<RevenueData[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
 
@@ -74,7 +77,7 @@ export function useRevenueTrend(timeframe: TimeframeOption = '30d') {
 }
 
 export function useOccupancyTrend(timeframe: TimeframeOption = '30d') {
-  const [data, setData] = useState<OccupancyTrendData[]>([]);
+  const [data, setData] = useState<OccupancyData[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
 
