@@ -25,6 +25,26 @@ export function ApplicationDetailModal({
   const screening = application.screeningResult || application.screening_result;
   const riskScore = screening?.riskScore || screening?.risk_score || 0;
   const creditScore = screening?.creditScore || screening?.credit_score || 0;
+  const riskLevel =
+    screening?.riskLevel ||
+    screening?.risk_level ||
+    screening?.raw_data?.risk_level ||
+    null;
+  const recommendation =
+    screening?.recommendation ||
+    screening?.raw_data?.recommendation ||
+    screening?.recommendations ||
+    null;
+  const notes =
+    screening?.notes ||
+    screening?.raw_data?.notes ||
+    null;
+  const reasons =
+    screening?.reasons ||
+    screening?.raw_data?.reasons ||
+    screening?.riskFactors ||
+    screening?.risk_factors ||
+    [];
 
   const handleApprove = async () => {
     if (onApprove && !isProcessing) {
@@ -185,6 +205,11 @@ export function ApplicationDetailModal({
                       <p className="text-4xl font-bold text-emerald-400" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
                         {riskScore}/100
                       </p>
+                      {riskLevel && (
+                        <p className={`text-xs ${text.muted} mt-2`}>
+                          Risk Level: <span className="font-semibold text-white">{riskLevel}</span>
+                        </p>
+                      )}
                     </div>
                     <div className="text-right">
                       <p className={`text-sm ${text.muted} mb-1`}>Credit Score</p>
@@ -251,31 +276,38 @@ export function ApplicationDetailModal({
                 </div>
 
                 {/* Recommendations */}
-                {screening.recommendations && (
+                {recommendation && (
                   <div className={`p-4 ${isDark ? 'bg-white/5' : 'bg-gray-50'} rounded-lg border-l-4 ${
                     riskScore >= 85 ? 'border-emerald-400' :
                     riskScore >= 70 ? 'border-amber-400' :
                     'border-red-400'
                   }`}>
                     <p className={`text-sm ${text.muted} mb-2`}>Recommendation</p>
-                    <p className="font-medium">{screening.recommendations}</p>
+                    <p className="font-medium">{recommendation}</p>
                   </div>
                 )}
 
                 {/* Risk Factors */}
-                {screening.riskFactors && screening.riskFactors.length > 0 && (
+                {Array.isArray(reasons) && reasons.length > 0 && (
                   <div className={`p-4 ${isDark ? 'bg-white/5' : 'bg-gray-50'} rounded-lg`}>
                     <p className={`text-sm ${text.muted} mb-3`}>Risk Factors</p>
                     <div className="flex flex-wrap gap-2">
-                      {(screening.riskFactors || screening.risk_factors || []).map((factor: string, idx: number) => (
+                      {reasons.map((factor: string, idx: number) => (
                         <span
                           key={idx}
                           className="px-3 py-1 bg-red-500/20 text-red-400 rounded-full text-xs font-medium"
                         >
-                          {factor.replace(/_/g, ' ').toUpperCase()}
+                          {factor.replace(/_/g, ' ')}
                         </span>
                       ))}
                     </div>
+                  </div>
+                )}
+
+                {notes && (
+                  <div className={`p-4 ${isDark ? 'bg-white/5' : 'bg-gray-50'} rounded-lg`}>
+                    <p className={`text-sm ${text.muted} mb-2`}>Screening Notes</p>
+                    <p className="text-sm">{notes}</p>
                   </div>
                 )}
               </div>

@@ -5,6 +5,7 @@ import { useThemeStyles } from '../hooks/useThemeStyles';
 import { FeatureGate } from './UpgradeCTA';
 import { LoadingPage } from './LoadingSpinner';
 import { ErrorState } from './ErrorBoundary';
+import { useTenants } from '../../lib/hooks/useTenants';
 import {
   useRecentMessages,
   useMessageTemplates,
@@ -28,6 +29,7 @@ export function CommunicationHub() {
   const { data: reminders, loading: remindersLoading } = useAutomatedReminders();
   const { data: portalActivity, loading: activityLoading } = usePortalActivity();
   const { data: stats, loading: statsLoading } = useCommunicationStats();
+  const { data: tenants, loading: tenantsLoading } = useTenants();
   const {
     suggestion,
     provider,
@@ -42,6 +44,9 @@ export function CommunicationHub() {
   const [composerRecipientId, setComposerRecipientId] = useState('');
   const [composerSubject, setComposerSubject] = useState('');
   const [composerBody, setComposerBody] = useState('');
+  const [composerError, setComposerError] = useState<string | null>(null);
+  const [recipientSearch, setRecipientSearch] = useState('');
+  const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null);
 
   // Show loading state
   if (messagesLoading || statsLoading) {
@@ -79,17 +84,35 @@ export function CommunicationHub() {
   });
 
   const primaryConversationId = conversations[0]?.id;
+  const activeConversationId = selectedConversationId || primaryConversationId;
 
   const aiPanelRef = useRef<HTMLDivElement | null>(null);
-  const primaryConversationId = conversations[0]?.id;
+
+  const resolveRecipientId = (conversationId: string | null) => {
+    if (!conversationId) return '';
+    const conversation = conversations.find((item) => item.id === conversationId);
+    if (!conversation) return '';
+    const tenantName = conversation.tenant?.trim();
+    if (!tenantName) return '';
+    const normalized = tenantName.toLowerCase();
+    const match = (tenants || []).find((tenant) => {
+      const name = (tenant.full_name || '').trim().toLowerCase();
+      const email = (tenant.email || '').trim().toLowerCase();
+      return (
+        (name && (name === normalized || name.includes(normalized) || normalized.includes(name))) ||
+        (email && email.includes(normalized))
+      );
+    });
+    return match?.user_id || '';
+  };
 
   const handleAiDraft = async () => {
     setComposerOpen(true);
-    if (!primaryConversationId) {
+    if (!activeConversationId) {
       clearSuggestion();
       return;
     }
-    const result = await generateSuggestion(primaryConversationId);
+    const result = await generateSuggestion(activeConversationId);
     if (result.success && result.data?.suggestion) {
       setComposerBody(result.data.suggestion);
     }
@@ -98,6 +121,16 @@ export function CommunicationHub() {
 
   const openComposer = () => {
     setComposerOpen(true);
+    if (!composerRecipientId.trim()) {
+      const resolvedRecipientId = resolveRecipientId(selectedConversationId);
+      if (resolvedRecipientId) {
+        setComposerRecipientId(resolvedRecipientId);
+        const conversation = conversations.find((item) => item.id === selectedConversationId);
+        if (conversation?.tenant) {
+          setRecipientSearch(conversation.tenant);
+        }
+      }
+    }
   };
 
   const closeComposer = () => {
@@ -105,13 +138,25 @@ export function CommunicationHub() {
     setComposerRecipientId('');
     setComposerSubject('');
     setComposerBody('');
+    setComposerError(null);
+    setRecipientSearch('');
   };
 
   const handleSendMessage = async () => {
-    if (!composerRecipientId.trim() || !composerBody.trim()) {
+    if (!composerRecipientId.trim() && !composerBody.trim()) {
+      setComposerError('Recipient and message are required.');
+      return;
+    }
+    if (!composerRecipientId.trim()) {
+      setComposerError('Recipient is required.');
+      return;
+    }
+    if (!composerBody.trim()) {
+      setComposerError('Message body is required.');
       return;
     }
 
+    setComposerError(null);
     const result = await sendMessage({
       recipientId: composerRecipientId.trim(),
       subject: composerSubject.trim() || undefined,
@@ -188,13 +233,36 @@ export function CommunicationHub() {
 
             <div className="p-6 space-y-4">
               <div>
-                <label className={`text-xs uppercase ${text.inactive}`}>Recipient User ID</label>
-                <input
-                  value={composerRecipientId}
-                  onChange={(e) => setComposerRecipientId(e.target.value)}
-                  placeholder="user-id"
-                  className={`mt-2 w-full px-4 py-2 ${isDark ? 'bg-white/5 border-white/10' : 'bg-gray-100 border-gray-200'} border rounded-lg text-sm focus:outline-none focus:border-[#ff6b35]/50`}
-                />
+                <label className={`text-xs uppercase ${text.inactive}`}>Recipient</label>
+                <div className="mt-2 space-y-2">
+                  <input
+                    value={recipientSearch}
+                    onChange={(e) => setRecipientSearch(e.target.value)}
+                    placeholder="Search tenants by name or email"
+                    className={`w-full px-4 py-2 ${isDark ? 'bg-white/5 border-white/10' : 'bg-gray-100 border-gray-200'} border rounded-lg text-sm focus:outline-none focus:border-[#ff6b35]/50`}
+                  />
+                  <select
+                    value={composerRecipientId}
+                    onChange={(e) => setComposerRecipientId(e.target.value)}
+                    className={`w-full px-4 py-2 ${isDark ? 'bg-white/5 border-white/10' : 'bg-gray-100 border-gray-200'} border rounded-lg text-sm focus:outline-none focus:border-[#ff6b35]/50`}
+                    disabled={tenantsLoading}
+                  >
+                    <option value="">Select a tenant</option>
+                    {(tenants || [])
+                      .filter((tenant) => {
+                        const term = recipientSearch.trim().toLowerCase();
+                        if (!term) return true;
+                        const name = (tenant.full_name || '').toLowerCase();
+                        const email = (tenant.email || '').toLowerCase();
+                        return name.includes(term) || email.includes(term);
+                      })
+                      .map((tenant) => (
+                        <option key={tenant.user_id} value={tenant.user_id}>
+                          {tenant.full_name || 'Unnamed'} {tenant.email ? `(${tenant.email})` : ''}
+                        </option>
+                      ))}
+                  </select>
+                </div>
               </div>
               <div>
                 <label className={`text-xs uppercase ${text.inactive}`}>Subject (optional)</label>
@@ -223,6 +291,9 @@ export function CommunicationHub() {
                   </button>
                 )}
               </div>
+              {composerError && (
+                <p className="text-xs text-red-400">{composerError}</p>
+              )}
               {sendError && (
                 <p className="text-xs text-red-400">{sendError.message}</p>
               )}
@@ -300,7 +371,18 @@ export function CommunicationHub() {
               {conversations.map((conversation, index) => (
               <div
                 key={conversation.id}
-                className={`flex items-center justify-between p-4 ${isDark ? 'bg-white/5 hover:bg-white/10' : 'bg-gray-50 hover:bg-gray-100'} rounded-lg transition-all border ${border.default} hover:border-[#ff6b35]/50 cursor-pointer group`}
+                onClick={() => {
+                  setSelectedConversationId(conversation.id);
+                  const resolvedRecipientId = resolveRecipientId(conversation.id);
+                  if (resolvedRecipientId) {
+                    setComposerRecipientId(resolvedRecipientId);
+                    setRecipientSearch(conversation.tenant);
+                    setComposerError(null);
+                  }
+                }}
+                className={`flex items-center justify-between p-4 ${isDark ? 'bg-white/5 hover:bg-white/10' : 'bg-gray-50 hover:bg-gray-100'} rounded-lg transition-all border ${
+                  selectedConversationId === conversation.id ? 'border-[#ff6b35]/70' : border.default
+                } hover:border-[#ff6b35]/50 cursor-pointer group`}
               >
                 <div className="flex items-center gap-4 flex-1">
                   <div className="relative">
@@ -366,7 +448,7 @@ export function CommunicationHub() {
               </h3>
               {provider && <span className={`text-xs ${text.inactive}`}>{provider}</span>}
             </div>
-            {primaryConversationId ? (
+            {activeConversationId ? (
               <>
                 <div className={`${isDark ? 'bg-white/5' : 'bg-gray-100'} rounded-lg p-3 mb-3 border ${border.default}`}>
                   {suggestionLoading ? (
@@ -375,7 +457,7 @@ export function CommunicationHub() {
                     <p className={`text-sm ${text.secondary}`}>{suggestion}</p>
                   ) : (
                     <p className={`text-sm ${text.muted}`}>
-                      Generate a reply suggestion for the most recent conversation.
+                      Generate a reply suggestion for the selected conversation.
                     </p>
                   )}
                 </div>
@@ -384,7 +466,11 @@ export function CommunicationHub() {
                 )}
                 <div className="flex items-center gap-2">
                   <button
-                    onClick={() => generateSuggestion(primaryConversationId)}
+                    onClick={() => {
+                      if (activeConversationId) {
+                        generateSuggestion(activeConversationId);
+                      }
+                    }}
                     className="flex-1 py-2 bg-gradient-to-r from-[#ff6b35] to-[#f7931e] rounded-lg text-sm font-medium hover:scale-105 transition-transform"
                     disabled={suggestionLoading}
                   >

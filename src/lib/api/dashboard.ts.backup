@@ -93,61 +93,13 @@ async function getAccessToken(): Promise<string | null> {
 }
 
 /**
- * Mock dashboard data for when backend is unavailable
- */
-function getMockDashboardSummary(): DashboardSummary {
-  return {
-    kpis: {
-      totalUnits: 0,
-      occupiedUnits: 0,
-      activeTenants: 0,
-      monthlyRevenue: 0,
-    },
-    properties: {
-      total: 0,
-      active: 0,
-      totalUnits: 0,
-      occupiedUnits: 0,
-      occupancyRate: 0,
-    },
-    revenue: {
-      currentMonth: 0,
-      previousMonth: 0,
-      percentChange: 0,
-      collectionRate: 0,
-    },
-    maintenance: {
-      open: 0,
-      inProgress: 0,
-      urgent: 0,
-      avgResolutionTime: 0,
-    },
-    tenants: {
-      total: 0,
-      moveIns: 0,
-      moveOuts: 0,
-      leasesExpiring: 0,
-    },
-    systemStatus: {
-      supportAvailable: false,
-      avgLeaseTime: 0,
-      evictionRate: 0,
-      occupancyTrend: 'stable',
-    },
-    recentActivity: [],
-    upcomingTasks: [],
-  };
-}
-
-/**
  * Get complete dashboard summary from backend API
  */
 export async function getDashboardSummary(): Promise<DashboardSummary> {
   try {
     const token = await getAccessToken();
     if (!token) {
-      console.warn('[Dashboard API] No auth token - using mock data');
-      return getMockDashboardSummary();
+      throw new Error('Not authenticated');
     }
 
     const response = await fetch(`${API_URL}/api/dashboard/summary`, {
@@ -158,28 +110,15 @@ export async function getDashboardSummary(): Promise<DashboardSummary> {
     });
 
     if (!response.ok) {
-      // Check if response is HTML (error page) instead of JSON
-      const contentType = response.headers.get('content-type');
-      if (contentType && contentType.includes('text/html')) {
-        console.error('[Dashboard API] Received HTML instead of JSON - API server may not be running');
-        console.warn('[Dashboard API] Using fallback mock data. Please start the backend server with: cd server && npm run dev');
-        return getMockDashboardSummary();
-      }
-
       const errorData = await response.json().catch(() => ({}));
-      console.error('[Dashboard API] API error:', errorData);
-      return getMockDashboardSummary();
+      throw new Error(errorData.error || `Failed to fetch dashboard summary: ${response.statusText}`);
     }
 
     const data = await response.json();
     return data;
   } catch (error) {
     console.error('[Dashboard API] Error fetching summary:', error);
-
-    // Return mock data for any error to prevent UI crash
-    console.warn('[Dashboard API] Using fallback mock data - backend server is not available');
-    console.warn('[Dashboard API] To fix: Start the backend server with: cd server && npm run dev');
-    return getMockDashboardSummary();
+    throw error;
   }
 }
 
@@ -194,7 +133,7 @@ export async function getDashboardMetrics(): Promise<DashboardMetrics> {
       total_units: summary.kpis.totalUnits,
       occupied_units: summary.kpis.occupiedUnits,
       occupancy_rate: summary.properties.occupancyRate,
-      occupancy_change: 0,
+      occupancy_change: 0, // Can be calculated from occupancy trend
       active_tenants: summary.kpis.activeTenants,
       tenant_change: summary.tenants.moveIns - summary.tenants.moveOuts,
       monthly_revenue: summary.kpis.monthlyRevenue,
@@ -202,16 +141,7 @@ export async function getDashboardMetrics(): Promise<DashboardMetrics> {
     };
   } catch (error) {
     console.error('[Dashboard API] Error fetching metrics:', error);
-    return {
-      total_units: 0,
-      occupied_units: 0,
-      occupancy_rate: 0,
-      occupancy_change: 0,
-      active_tenants: 0,
-      tenant_change: 0,
-      monthly_revenue: 0,
-      revenue_change: 0,
-    };
+    throw error;
   }
 }
 
@@ -224,7 +154,7 @@ export async function getRecentActivity(limit: number = 10): Promise<RecentActiv
     return summary.recentActivity.slice(0, limit);
   } catch (error) {
     console.error('[Dashboard API] Error fetching recent activity:', error);
-    return [];
+    throw error;
   }
 }
 

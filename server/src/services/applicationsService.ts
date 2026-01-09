@@ -38,6 +38,10 @@ export interface ScreeningResult {
   criminalHistory: boolean;
   incomeVerificationStatus: string | null;
   riskScore: number | null;
+  riskLevel?: 'LOW' | 'MEDIUM' | 'HIGH' | null;
+  recommendation?: 'APPROVE' | 'REVIEW' | 'REJECT' | null;
+  reasons?: string[];
+  notes?: string | null;
   riskFactors: string[];
   recommendations: string | null;
   screenedAt: string;
@@ -132,6 +136,10 @@ export async function getApplications(
               incomeVerificationStatus:
                 app.screening_results[0].income_verification_status,
               riskScore: app.screening_results[0].risk_score,
+              riskLevel: app.screening_results[0].raw_data?.risk_level || null,
+              recommendation: app.screening_results[0].raw_data?.recommendation || null,
+              reasons: app.screening_results[0].raw_data?.reasons || [],
+              notes: app.screening_results[0].raw_data?.notes || null,
               riskFactors: app.screening_results[0].risk_factors || [],
               recommendations: app.screening_results[0].recommendations,
               screenedAt: app.screening_results[0].screened_at,
@@ -204,6 +212,10 @@ export async function getApplicationById(
             criminalHistory: data.screening_results[0].criminal_history,
             incomeVerificationStatus: data.screening_results[0].income_verification_status,
             riskScore: data.screening_results[0].risk_score,
+            riskLevel: data.screening_results[0].raw_data?.risk_level || null,
+            recommendation: data.screening_results[0].raw_data?.recommendation || null,
+            reasons: data.screening_results[0].raw_data?.reasons || [],
+            notes: data.screening_results[0].raw_data?.notes || null,
             riskFactors: data.screening_results[0].risk_factors || [],
             recommendations: data.screening_results[0].recommendations,
             screenedAt: data.screening_results[0].screened_at,
@@ -586,16 +598,16 @@ export async function runScreening(
       criminalHistory: existingScreening.criminal_history,
       incomeVerificationStatus: existingScreening.income_verification_status,
       riskScore: existingScreening.risk_score,
+      riskLevel: existingScreening.raw_data?.risk_level || null,
+      recommendation: existingScreening.raw_data?.recommendation || null,
+      reasons: existingScreening.raw_data?.reasons || [],
+      notes: existingScreening.raw_data?.notes || null,
       riskFactors: existingScreening.risk_factors || [],
       recommendations: existingScreening.recommendations,
       screenedAt: existingScreening.screened_at,
     };
   }
 
-  // Deterministic screening based on application data
-  // This is a stubbed provider that produces consistent scores
-
-  // Get unit rent for income verification
   const { data: unit } = await supabase
     .from('units')
     .select('rent_amount')
@@ -605,140 +617,148 @@ export async function runScreening(
   const rentAmount = unit?.rent_amount || 1000;
   const incomeToRentRatio = application.monthlyIncome / rentAmount;
 
-  // Calculate credit score (deterministic based on name hash for consistency)
   const nameHash = (application.firstName + application.lastName)
     .split('')
     .reduce((acc, char) => acc + char.charCodeAt(0), 0);
   const baseCreditScore = 600 + (nameHash % 200); // 600-800
 
-  // Adjust credit based on income ratio
-  const creditScore = Math.min(850, Math.max(300,
-    baseCreditScore + (incomeToRentRatio > 3 ? 50 : incomeToRentRatio > 2.5 ? 25 : 0)
-  ));
+  const creditScore = Math.min(
+    850,
+    Math.max(
+      300,
+      baseCreditScore + (incomeToRentRatio > 3 ? 50 : incomeToRentRatio > 2.5 ? 25 : 0)
+    )
+  );
 
-  // Income verification
   const incomeVerified = incomeToRentRatio >= 2.5;
   const incomeVerificationStatus = incomeVerified ? 'verified' : 'failed';
 
-  // Background check
   const hasGoodCredit = creditScore >= 650;
   const backgroundCheckStatus = hasGoodCredit ? 'clear' : 'flagged';
 
-  // Eviction and criminal history (based on credit score threshold)
   const evictionHistory = creditScore < 600;
   const criminalHistory = creditScore < 550;
 
-  // Calculate risk score (0-100, higher is better)
-  let riskScore = 50; // Base score
+  const deterministicRiskFactors: string[] = [];
+  if (creditScore < 650) deterministicRiskFactors.push('low_credit_score');
+  if (!incomeVerified) deterministicRiskFactors.push('insufficient_income');
+  if (incomeToRentRatio < 2.5) deterministicRiskFactors.push('low_income_ratio');
+  if (evictionHistory) deterministicRiskFactors.push('eviction_history');
+  if (criminalHistory) deterministicRiskFactors.push('criminal_record');
+  if (!application.currentEmployer) deterministicRiskFactors.push('no_employer_info');
 
-  // Credit score contribution (max 30 points)
-  if (creditScore >= 750) riskScore += 30;
-  else if (creditScore >= 700) riskScore += 25;
-  else if (creditScore >= 650) riskScore += 20;
-  else if (creditScore >= 600) riskScore += 10;
+  const deterministicScore = (() => {
+    let score = 50;
+    if (creditScore >= 750) score += 30;
+    else if (creditScore >= 700) score += 25;
+    else if (creditScore >= 650) score += 20;
+    else if (creditScore >= 600) score += 10;
 
-  // Income ratio contribution (max 25 points)
-  if (incomeToRentRatio >= 4) riskScore += 25;
-  else if (incomeToRentRatio >= 3) riskScore += 20;
-  else if (incomeToRentRatio >= 2.5) riskScore += 15;
-  else if (incomeToRentRatio >= 2) riskScore += 10;
+    if (incomeToRentRatio >= 4) score += 25;
+    else if (incomeToRentRatio >= 3) score += 20;
+    else if (incomeToRentRatio >= 2.5) score += 15;
+    else if (incomeToRentRatio >= 2) score += 10;
 
-  // Background check contribution (max 20 points)
-  if (backgroundCheckStatus === 'clear' && !evictionHistory && !criminalHistory) {
-    riskScore += 20;
-  } else if (backgroundCheckStatus === 'clear') {
-    riskScore += 15;
-  }
+    if (backgroundCheckStatus === 'clear' && !evictionHistory && !criminalHistory) {
+      score += 20;
+    } else if (backgroundCheckStatus === 'clear') {
+      score += 15;
+    }
 
-  // Employment contribution (max 10 points)
-  if (application.currentEmployer && application.currentEmployer.length > 0) {
-    riskScore += 10;
-  }
+    if (application.currentEmployer && application.currentEmployer.length > 0) {
+      score += 10;
+    }
 
-  // Income verification (max 15 points)
-  if (incomeVerified) {
-    riskScore += 15;
-  }
+    if (incomeVerified) {
+      score += 15;
+    }
 
-  riskScore = Math.min(100, Math.max(0, riskScore));
+    return Math.min(100, Math.max(0, score));
+  })();
 
-  // Identify risk factors
-  const riskFactors: string[] = [];
-  if (creditScore < 650) riskFactors.push('low_credit_score');
-  if (!incomeVerified) riskFactors.push('insufficient_income');
-  if (incomeToRentRatio < 2.5) riskFactors.push('low_income_ratio');
-  if (evictionHistory) riskFactors.push('eviction_history');
-  if (criminalHistory) riskFactors.push('criminal_record');
-  if (!application.currentEmployer) riskFactors.push('no_employer_info');
+  const deterministicDecision = (() => {
+    if (deterministicScore >= 85) return 'APPROVE';
+    if (deterministicScore >= 70) return 'REVIEW';
+    return 'REJECT';
+  })();
 
-  // Generate recommendations
-  let recommendations: string;
-  if (riskScore >= 85) {
-    recommendations = 'Highly recommended for approval. Excellent credit and income verification.';
-  } else if (riskScore >= 75) {
-    recommendations = 'Recommended for approval. Good financial profile.';
-  } else if (riskScore >= 65) {
-    recommendations = 'Proceed with caution. Consider additional deposit or guarantor.';
-  } else if (riskScore >= 50) {
-    recommendations = 'High risk. Require guarantor and increased deposit.';
-  } else {
-    recommendations = 'Not recommended. Significant risk factors present.';
-  }
+  const deterministicNotes =
+    deterministicDecision === 'APPROVE'
+      ? 'Applicant meets income and credit requirements.'
+      : deterministicDecision === 'REVIEW'
+        ? 'Applicant shows moderate risk; consider additional verification.'
+        : 'Applicant shows significant risk based on financial indicators.';
 
-  let screeningProvider = 'internal';
-  let aiRiskFactors: string[] = [];
-  let aiRecommendations: string | null = null;
+  let aiOutput: {
+    riskScore: number;
+    riskLevel: 'LOW' | 'MEDIUM' | 'HIGH';
+    recommendation: 'APPROVE' | 'REVIEW' | 'REJECT';
+    reasons: string[];
+    notes: string;
+  } | null = null;
 
   try {
-    const aiResult = await generateStructuredJson<{
-      riskFactors?: string[];
-      recommendations?: string;
+    aiOutput = await generateStructuredJson<{
+      riskScore: number;
+      riskLevel: 'LOW' | 'MEDIUM' | 'HIGH';
+      recommendation: 'APPROVE' | 'REVIEW' | 'REJECT';
+      reasons: string[];
+      notes: string;
     }>(
-      'You are assisting with rental application screening. Return JSON with riskFactors (array of short strings) and recommendations (one sentence). Do not change the numeric scores.',
+      'You are a tenant screening analyst. Return JSON only with riskScore (0-100), riskLevel (LOW|MEDIUM|HIGH), recommendation (APPROVE|REVIEW|REJECT), reasons (array of short strings), and notes (one concise paragraph).',
       {
         applicant: {
           firstName: application.firstName,
           lastName: application.lastName,
+          email: application.email,
+          phone: application.phone,
           monthlyIncome: application.monthlyIncome,
           currentEmployer: application.currentEmployer,
+          currentAddress: application.currentAddress,
         },
-        rentAmount,
-        incomeToRentRatio,
-        creditScore,
-        backgroundCheckStatus,
-        evictionHistory,
-        criminalHistory,
-        incomeVerificationStatus,
-        riskScore,
-        existingRiskFactors: riskFactors,
-        deterministicRecommendation: recommendations,
+        lease: {
+          rentAmount,
+          incomeToRentRatio,
+        },
+        screeningSignals: {
+          creditScore,
+          backgroundCheckStatus,
+          incomeVerificationStatus,
+          evictionHistory,
+          criminalHistory,
+        },
+        deterministicFallback: {
+          riskScore: deterministicScore,
+          recommendation: deterministicDecision,
+          riskFactors: deterministicRiskFactors,
+          notes: deterministicNotes,
+        },
       }
     );
-
-    aiRiskFactors = Array.isArray(aiResult.riskFactors)
-      ? aiResult.riskFactors
-          .map((factor) => String(factor).trim())
-          .filter((factor) => factor.length > 0)
-      : [];
-    aiRecommendations =
-      typeof aiResult.recommendations === 'string' && aiResult.recommendations.trim()
-        ? aiResult.recommendations.trim()
-        : null;
-
-    const aiStatus = getAiStatus();
-    if (aiStatus.provider) {
-      screeningProvider = `internal+${aiStatus.provider}`;
-    }
   } catch (error) {
-    if (!(error instanceof AiDisabledError)) {
-      console.warn('[Screening] AI enhancement failed, using deterministic output:', error);
+    if (error instanceof AiDisabledError) {
+      console.warn('[Screening] AI disabled; using deterministic screening.');
+    } else {
+      console.warn('[Screening] AI screening failed; using deterministic screening.', error);
     }
   }
 
-  const mergedRiskFactors = Array.from(
-    new Set([...riskFactors, ...aiRiskFactors])
-  );
-  const mergedRecommendations = aiRecommendations || recommendations;
+  const riskScore = aiOutput?.riskScore ?? deterministicScore;
+  const riskLevel = aiOutput?.riskLevel ?? (riskScore >= 75 ? 'LOW' : riskScore >= 55 ? 'MEDIUM' : 'HIGH');
+  const recommendation = aiOutput?.recommendation ?? deterministicDecision;
+  const reasons = aiOutput?.reasons?.length ? aiOutput.reasons : deterministicRiskFactors;
+  const notes = aiOutput?.notes || deterministicNotes;
+
+  const recommendations = `Recommendation: ${recommendation}. ${notes}`;
+
+  let screeningProvider = 'internal';
+  const aiStatus = getAiStatus();
+  if (aiStatus.provider) {
+    screeningProvider = `internal+${aiStatus.provider}`;
+  }
+
+  const mergedRiskFactors = reasons;
+  const mergedRecommendations = recommendations;
 
   // Store screening result
   const { data, error } = await supabase
@@ -759,6 +779,10 @@ export async function runScreening(
         income_to_rent_ratio: incomeToRentRatio,
         monthly_income: application.monthlyIncome,
         rent_amount: rentAmount,
+        risk_level: riskLevel,
+        recommendation,
+        reasons,
+        notes,
         calculated_at: new Date().toISOString(),
       },
     })
@@ -789,6 +813,10 @@ export async function runScreening(
     criminalHistory: data.criminal_history,
     incomeVerificationStatus: data.income_verification_status,
     riskScore: data.risk_score,
+    riskLevel: data.raw_data?.risk_level || null,
+    recommendation: data.raw_data?.recommendation || null,
+    reasons: data.raw_data?.reasons || [],
+    notes: data.raw_data?.notes || null,
     riskFactors: data.risk_factors || [],
     recommendations: data.recommendations,
     screenedAt: data.screened_at,
