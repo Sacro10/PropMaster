@@ -142,13 +142,18 @@ export async function getConversations(params?: {
   limit?: number;
   offset?: number;
 }): Promise<{ conversations: Conversation[]; total: number }> {
-  const queryParams = new URLSearchParams();
-  if (params?.status) queryParams.append('status', params.status);
-  if (params?.limit) queryParams.append('limit', params.limit.toString());
-  if (params?.offset) queryParams.append('offset', params.offset.toString());
+  try {
+    const queryParams = new URLSearchParams();
+    if (params?.status) queryParams.append('status', params.status);
+    if (params?.limit) queryParams.append('limit', params.limit.toString());
+    if (params?.offset) queryParams.append('offset', params.offset.toString());
 
-  const query = queryParams.toString();
-  return apiRequest(`/communications/conversations${query ? `?${query}` : ''}`);
+    const query = queryParams.toString();
+    return await apiRequest(`/communications/conversations${query ? `?${query}` : ''}`);
+  } catch (error) {
+    console.error('[Communications API] Error fetching conversations:', error);
+    return { conversations: [], total: 0 };
+  }
 }
 
 export async function getConversation(id: string): Promise<Conversation> {
@@ -230,12 +235,17 @@ export async function getMessageTemplates(params?: {
   category?: string;
   isActive?: boolean;
 }): Promise<MessageTemplate[]> {
-  const queryParams = new URLSearchParams();
-  if (params?.category) queryParams.append('category', params.category);
-  if (params?.isActive !== undefined) queryParams.append('isActive', params.isActive.toString());
-  
-  const query = queryParams.toString();
-  return apiRequest(`/communications/templates${query ? `?${query}` : ''}`);
+  try {
+    const queryParams = new URLSearchParams();
+    if (params?.category) queryParams.append('category', params.category);
+    if (params?.isActive !== undefined) queryParams.append('isActive', params.isActive.toString());
+
+    const query = queryParams.toString();
+    return await apiRequest(`/communications/templates${query ? `?${query}` : ''}`);
+  } catch (error) {
+    console.error('[Communications API] Error fetching templates:', error);
+    return [];
+  }
 }
 
 export async function createMessageTemplate(data: {
@@ -274,8 +284,13 @@ export async function deleteMessageTemplate(templateId: string): Promise<void> {
 export async function getAutomatedReminders(
   status?: 'active' | 'paused' | 'inactive'
 ): Promise<AutomatedReminder[]> {
-  const query = status ? `?status=${status}` : '';
-  return apiRequest(`/communications/reminders${query}`);
+  try {
+    const query = status ? `?status=${status}` : '';
+    return await apiRequest(`/communications/reminders${query}`);
+  } catch (error) {
+    console.error('[Communications API] Error fetching reminders:', error);
+    return [];
+  }
 }
 
 export async function createAutomatedReminder(data: {
@@ -317,10 +332,30 @@ export async function deleteAutomatedReminder(reminderId: string): Promise<void>
 export async function getCommunicationStats(
   timeframeDays?: number
 ): Promise<CommunicationStats> {
-  const query = timeframeDays ? `?days=${timeframeDays}` : '';
-  return apiRequest(`/communications/stats${query}`);
+  try {
+    const query = timeframeDays ? `?days=${timeframeDays}` : '';
+    return await apiRequest(`/communications/stats${query}`);
+  } catch (error) {
+    console.error('[Communications API] Error fetching stats:', error);
+    return {
+      activeConversations: 0,
+      avgResponseTimeMinutes: 0,
+      automationRate: 0,
+      tenantSatisfaction: 0,
+    };
+  }
 }
 
 export async function getPortalActivity(): Promise<PortalActivity> {
-  return apiRequest('/communications/activity');
+  try {
+    return await apiRequest('/communications/activity');
+  } catch (error) {
+    console.error('[Communications API] Error fetching portal activity:', error);
+    return {
+      messagesToday: 0,
+      unreadMessages: 0,
+      avgResponseTimeMinutes: 0,
+      resolvedToday: 0,
+    };
+  }
 }
