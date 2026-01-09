@@ -8,13 +8,17 @@ import express from 'express';
 import tenantsRoutes from '../../src/routes/tenants';
 
 // Mock dependencies
-jest.mock('../../src/supabase');
+jest.mock('../../src/supabase', () => ({
+  supabaseAdmin: {
+    from: jest.fn(),
+  },
+}));
 jest.mock('../../src/middleware/auth');
 jest.mock('../../src/middleware/rbac');
 
 import { authenticate } from '../../src/middleware/auth';
 import { Permissions } from '../../src/middleware/rbac';
-import { supabase } from '../../src/supabase';
+import { supabaseAdmin as supabase } from '../../src/supabase';
 
 const app = express();
 app.use(express.json());

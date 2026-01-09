@@ -11,11 +11,14 @@ import {
   useCollectionStats,
   useSendPaymentReminder,
 } from '../../lib/hooks/usePayments';
+import { processDisbursement } from '../../lib/api/payments';
 import { formatCurrency, formatCurrencyCompact } from '../../lib/utils/currencyHelpers';
 import { formatDisplayDate } from '../../lib/utils/dateHelpers';
+import { useState } from 'react';
 
 export function RentCollection() {
   const { isDark, text, border } = useThemeStyles();
+  const [processingDisbursement, setProcessingDisbursement] = useState<string | null>(null);
 
   // Feature checks for plan gating
   const integratedAccounting = useHasFeature('integrated_accounting');
@@ -23,7 +26,7 @@ export function RentCollection() {
   // Fetch data
   const { data: recentPayments, loading: paymentsLoading, error: paymentsError, refetch: refetchPayments } = useRecentPayments();
   const { data: pendingPayments, loading: pendingLoading, refetch: refetchPending } = usePendingPayments();
-  const { data: disbursements, loading: disbursementsLoading } = useOwnerDisbursements();
+  const { data: disbursements, loading: disbursementsLoading, refetch: refetchDisbursements } = useOwnerDisbursements();
   const { data: stats, loading: statsLoading } = useCollectionStats();
   const { sendReminder, loading: sendingReminder } = useSendPaymentReminder();
 
@@ -56,10 +59,23 @@ export function RentCollection() {
     }
   };
 
-  // Calculate auto-pay stats
-  const autoPayEnrolled = 123; // TODO: Calculate from lease data
-  const totalTenants = 142;
-  const autoPayPercentage = Math.round((autoPayEnrolled / totalTenants) * 100);
+  // Handle process disbursement
+  const handleProcessDisbursement = async (disbursementId: string) => {
+    try {
+      setProcessingDisbursement(disbursementId);
+      const idempotencyKey = `process-${disbursementId}-${Date.now()}`;
+      await processDisbursement(disbursementId, idempotencyKey);
+      console.log('Disbursement processed successfully');
+      refetchDisbursements();
+    } catch (error) {
+      console.error('Failed to process disbursement:', error);
+      alert('Failed to process disbursement. Please try again.');
+    } finally {
+      setProcessingDisbursement(null);
+    }
+  };
+
+  // Note: auto-pay stats come directly from API via stats.auto_pay_enrolled
 
   return (
     <div className="space-y-6">
@@ -82,10 +98,16 @@ export function RentCollection() {
             <RefreshCw className="w-4 h-4" />
           </button>
           <button
-            className="px-6 py-3 bg-gradient-to-r from-[#ff6b35] to-[#f7931e] rounded-lg font-medium hover:scale-105 transition-transform"
+            onClick={() => {
+              if (disbursements.length > 0) {
+                handleProcessDisbursement(disbursements[0].id);
+              }
+            }}
+            disabled={disbursements.length === 0 || processingDisbursement !== null}
+            className="px-6 py-3 bg-gradient-to-r from-[#ff6b35] to-[#f7931e] rounded-lg font-medium hover:scale-105 transition-transform disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
             style={{ fontFamily: 'Work Sans, sans-serif' }}
           >
-            Process Disbursement
+            {processingDisbursement ? 'Processing...' : 'Process Disbursement'}
           </button>
         </div>
       </div>
@@ -377,10 +399,12 @@ export function RentCollection() {
                 </div>
 
                 <button
-                  className="w-full py-2 bg-gradient-to-r from-[#ff6b35] to-[#f7931e] rounded-lg text-sm font-medium hover:scale-105 transition-transform"
+                  onClick={() => handleProcessDisbursement(disbursement.id)}
+                  disabled={processingDisbursement === disbursement.id}
+                  className="w-full py-2 bg-gradient-to-r from-[#ff6b35] to-[#f7931e] rounded-lg text-sm font-medium hover:scale-105 transition-transform disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
                   style={{ fontFamily: 'Work Sans, sans-serif' }}
                 >
-                  View Details
+                  {processingDisbursement === disbursement.id ? 'Processing...' : 'Process Now'}
                 </button>
               </div>
             ))}

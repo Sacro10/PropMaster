@@ -7,6 +7,9 @@ import { supabase } from '../supabaseClient';
 import { getCurrentAccountId, handleSupabaseError, getPaginationRange, calculatePaginationMeta, type PaginationParams } from './client';
 import type { ShowingWithDetails, PaginatedResponse } from './types';
 
+// API base URL
+const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+
 /**
  * Get upcoming showings
  */
@@ -17,61 +20,49 @@ export async function getUpcomingShowings(params: PaginationParams = {}) {
       throw new Error('No account ID found');
     }
 
-    const { from, to, page, pageSize } = getPaginationRange(params);
-    const now = new Date().toISOString();
-
-    const { data, error, count } = await supabase
-      .from('showings')
-      .select(`
-        *,
-        units (
-          id,
-          unit_number,
-          property_id,
-          bedrooms,
-          bathrooms,
-          sqft,
-          rent_amount,
-          status,
-          properties (
-            id,
-            name,
-            address1,
-            address2,
-            city,
-            state,
-            zip
-          )
-        )
-      `, { count: 'exact' })
-      .eq('account_id', accountId)
-      .gte('showing_date', now)
-      .in('status', ['scheduled', 'confirmed'])
-      .order('showing_date', { ascending: true })
-      .range(from, to);
-
-    if (error) {
-      throw handleSupabaseError(error, 'fetch showings');
+    // Get current user session for auth token
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) {
+      throw new Error('No active session');
     }
 
-    // Transform data
-    const showings: ShowingWithDetails[] = (data || []).map((showing: any) => {
-      const unit = showing.units || {};
-      const property = unit.properties || {};
-
-      return {
-        ...showing,
-        unit,
-        property,
-      };
+    const response = await fetch(`${API_BASE}/api/showings?status=scheduled,confirmed&limit=50`, {
+      headers: {
+        'Authorization': `Bearer ${session.access_token}`,
+        'Content-Type': 'application/json',
+      },
     });
 
-    const result: PaginatedResponse<ShowingWithDetails> = {
-      data: showings,
-      ...calculatePaginationMeta(count || 0, page, pageSize),
-    };
+    if (!response.ok) {
+      throw new Error(`Failed to fetch showings: ${response.statusText}`);
+    }
 
-    return result;
+    const result = await response.json();
+    
+    // Transform to expected format
+    const showings: ShowingWithDetails[] = (result.showings || []).map((showing: any) => ({
+      id: showing.id,
+      showing_date: showing.showingDate || showing.scheduledDate,
+      showing_type: showing.showingType || 'agent_assisted',
+      visitor_name: showing.visitorName || showing.prospectName,
+      visitor_email: showing.visitorEmail || showing.prospectEmail,
+      visitor_phone: showing.visitorPhone || showing.prospectPhone,
+      status: showing.status,
+      access_code: showing.accessCode,
+      access_code_expires_at: showing.accessCodeExpiresAt,
+      reminder_sent_at: showing.reminderSentAt,
+      notes: showing.notes,
+      unit: showing.unit,
+      property: showing.property,
+    }));
+
+    return {
+      data: showings,
+      total: result.total || showings.length,
+      page: 1,
+      pageSize: 50,
+      totalPages: 1,
+    };
   } catch (error) {
     console.error('[Showings API] Error fetching showings:', error);
     throw error;
@@ -88,52 +79,36 @@ export async function getAvailableProperties() {
       throw new Error('No account ID found');
     }
 
-    const { data, error } = await supabase
-      .from('units')
-      .select(`
-        *,
-        properties (
-          id,
-          name,
-          address1,
-          address2,
-          city,
-          state,
-          zip
-        ),
-        showings (
-          id,
-          status
-        )
-      `)
-      .eq('account_id', accountId)
-      .eq('status', 'vacant')
-      .order('unit_number', { ascending: true });
-
-    if (error) {
-      throw handleSupabaseError(error, 'fetch available properties');
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) {
+      throw new Error('No active session');
     }
 
-    // Transform and aggregate showing stats
-    return (data || []).map((unit: any) => {
-      const property = unit.properties || {};
-      const showings = unit.showings || [];
-
-      // Calculate showing stats (mock for now)
-      const views = Math.floor(Math.random() * 60) + 20;
-      const scheduled = showings.filter((s: any) => s.status === 'scheduled' || s.status === 'confirmed').length;
-
-      return {
-        name: `${property.name} #${unit.unit_number}`,
-        rent: `$${unit.rent_amount}/mo`,
-        beds: unit.bedrooms,
-        baths: unit.bathrooms,
-        sqft: unit.sqft,
-        available: unit.available_date || 'Now',
-        views,
-        scheduled,
-      };
+    const response = await fetch(`${API_BASE}/api/showings/available-units`, {
+      headers: {
+        'Authorization': `Bearer ${session.access_token}`,
+        'Content-Type': 'application/json',
+      },
     });
+
+    if (!response.ok) {
+      throw new Error(`Failed to fetch available units: ${response.statusText}`);
+    }
+
+    const units = await response.json();
+
+    // Transform to match expected format
+    return units.map((unit: any) => ({
+      id: unit.id,
+      name: `${unit.property.name} #${unit.unit_number}`,
+      rent: `$${unit.rent_amount}/mo`,
+      beds: unit.bedrooms,
+      baths: unit.bathrooms,
+      sqft: unit.sqft || 'N/A',
+      available: unit.available_date || 'Now',
+      views: 0, // Mock for now
+      scheduled: 0, // Mock for now
+    }));
   } catch (error) {
     console.error('[Showings API] Error fetching available properties:', error);
     return [];
@@ -150,61 +125,29 @@ export async function getShowingStats() {
       throw new Error('No account ID found');
     }
 
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const startOfWeek = new Date(today);
-    startOfWeek.setDate(today.getDate() - today.getDay());
-
-    const [todayResult, weekResult, allShowings] = await Promise.all([
-      supabase
-        .from('showings')
-        .select('id', { count: 'exact', head: true })
-        .eq('account_id', accountId)
-        .gte('showing_date', today.toISOString())
-        .lt('showing_date', new Date(today.getTime() + 24 * 60 * 60 * 1000).toISOString()),
-
-      supabase
-        .from('showings')
-        .select('id', { count: 'exact', head: true })
-        .eq('account_id', accountId)
-        .gte('showing_date', startOfWeek.toISOString()),
-
-      supabase
-        .from('showings')
-        .select('status, created_at, showing_date')
-        .eq('account_id', accountId)
-        .order('created_at', { ascending: false })
-        .limit(100)
-    ]);
-
-    // Calculate average response time (time from creation to showing)
-    let avgResponseHours = 2.4;
-    if (allShowings.data && allShowings.data.length > 0) {
-      const responseTimes = allShowings.data.map((showing: any) => {
-        const created = new Date(showing.created_at);
-        const scheduled = new Date(showing.showing_date);
-        return (scheduled.getTime() - created.getTime()) / (1000 * 60 * 60);
-      });
-      avgResponseHours = responseTimes.reduce((a, b) => a + b, 0) / responseTimes.length;
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) {
+      throw new Error('No active session');
     }
 
-    // Calculate conversion rate (completed to applications)
-    const completedShowings = allShowings.data?.filter((s: any) => s.status === 'completed').length || 0;
-    const totalShowings = allShowings.data?.length || 1;
-    const conversionRate = (completedShowings / totalShowings) * 100;
+    const response = await fetch(`${API_BASE}/api/showings/stats`, {
+      headers: {
+        'Authorization': `Bearer ${session.access_token}`,
+        'Content-Type': 'application/json',
+      },
+    });
 
-    return {
-      scheduled_today: todayResult.count || 0,
-      total_this_week: weekResult.count || 0,
-      avg_response_time: avgResponseHours.toFixed(1),
-      conversion_rate: conversionRate.toFixed(0),
-    };
+    if (!response.ok) {
+      throw new Error(`Failed to fetch showing stats: ${response.statusText}`);
+    }
+
+    return await response.json();
   } catch (error) {
     console.error('[Showings API] Error fetching stats:', error);
     return {
       scheduled_today: 0,
       total_this_week: 0,
-      avg_response_time: '0',
+      avg_response_time: '0.0',
       conversion_rate: '0',
     };
   }
@@ -228,28 +171,34 @@ export async function createShowing(data: {
       throw new Error('No account ID found');
     }
 
-    // Generate access code for self-guided showings
-    let accessCode = null;
-    if (data.showing_type === 'self_guided') {
-      accessCode = Math.random().toString(36).substring(2, 10).toUpperCase();
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) {
+      throw new Error('No active session');
     }
 
-    const { data: showing, error } = await supabase
-      .from('showings')
-      .insert({
-        account_id: accountId,
-        ...data,
-        access_code: accessCode,
-        status: 'scheduled',
-      })
-      .select()
-      .single();
+    const response = await fetch(`${API_BASE}/api/showings`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${session.access_token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        unitId: data.unit_id,
+        showingDate: data.showing_date,
+        showingType: data.showing_type,
+        visitorName: data.visitor_name,
+        visitorEmail: data.visitor_email,
+        visitorPhone: data.visitor_phone,
+        notes: data.notes,
+      }),
+    });
 
-    if (error) {
-      throw handleSupabaseError(error, 'create showing');
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.error || 'Failed to create showing');
     }
 
-    return showing;
+    return await response.json();
   } catch (error) {
     console.error('[Showings API] Error creating showing:', error);
     throw error;
@@ -266,21 +215,98 @@ export async function updateShowingStatus(showingId: string, status: string) {
       throw new Error('No account ID found');
     }
 
-    const { data, error } = await supabase
-      .from('showings')
-      .update({ status })
-      .eq('id', showingId)
-      .eq('account_id', accountId)
-      .select()
-      .single();
-
-    if (error) {
-      throw handleSupabaseError(error, 'update showing');
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) {
+      throw new Error('No active session');
     }
 
-    return data;
+    const response = await fetch(`${API_BASE}/api/showings/${showingId}/status`, {
+      method: 'PATCH',
+      headers: {
+        'Authorization': `Bearer ${session.access_token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ status }),
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.error || 'Failed to update showing status');
+    }
+
+    return await response.json();
   } catch (error) {
     console.error('[Showings API] Error updating showing:', error);
+    throw error;
+  }
+}
+
+/**
+ * Send showing reminder
+ */
+export async function sendShowingReminder(showingId: string) {
+  try {
+    const accountId = await getCurrentAccountId();
+    if (!accountId) {
+      throw new Error('No account ID found');
+    }
+
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) {
+      throw new Error('No active session');
+    }
+
+    const response = await fetch(`${API_BASE}/api/showings/${showingId}/send-reminder`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${session.access_token}`,
+        'Content-Type': 'application/json',
+      },
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.error || 'Failed to send reminder');
+    }
+
+    return await response.json();
+  } catch (error) {
+    console.error('[Showings API] Error sending reminder:', error);
+    throw error;
+  }
+}
+
+/**
+ * Regenerate access code
+ */
+export async function regenerateAccessCode(showingId: string) {
+  try {
+    const accountId = await getCurrentAccountId();
+    if (!accountId) {
+      throw new Error('No account ID found');
+    }
+
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) {
+      throw new Error('No active session');
+    }
+
+    const response = await fetch(`${API_BASE}/api/showings/${showingId}/regenerate-code`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${session.access_token}`,
+        'Content-Type': 'application/json',
+      },
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.error || 'Failed to regenerate access code');
+    }
+
+    return await response.json();
+  } catch (error) {
+    console.error('[Showings API] Error regenerating access code:', error);
     throw error;
   }
 }

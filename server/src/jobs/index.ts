@@ -9,7 +9,7 @@
  * - Cleaning up old data
  */
 
-import { supabase } from '../supabase';
+import { supabaseAdmin as supabase } from '../supabase';
 
 export interface Job {
   name: string;
@@ -313,7 +313,18 @@ async function updatePropertyStats(): Promise<void> {
 // Register Jobs
 // ============================================================================
 
-// Process reminders every 5 minutes
+import { accessCodeExpirationJob } from './accessCodeExpirationJob';
+import { processReminders as processAutomatedReminders } from './remindersJob';
+
+// Process automated reminders every 5 minutes
+registerJob({
+  name: 'process-automated-reminders',
+  interval: 5 * 60 * 1000, // 5 minutes
+  handler: processAutomatedReminders,
+  enabled: true,
+});
+
+// Process legacy reminders every 5 minutes
 registerJob({
   name: 'process-reminders',
   interval: 5 * 60 * 1000, // 5 minutes
@@ -344,3 +355,6 @@ registerJob({
   handler: updatePropertyStats,
   enabled: true,
 });
+
+// Expire old access codes every 5 minutes
+registerJob(accessCodeExpirationJob);

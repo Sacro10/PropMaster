@@ -6,6 +6,10 @@ import {
   createShowing,
   updateShowingStatus,
   recordShowingOutcome,
+  getShowingStatistics,
+  regenerateAccessCode,
+  sendShowingReminder,
+  getAvailableUnits,
   CreateShowingData,
 } from '../services/showingsService';
 
@@ -56,32 +60,29 @@ router.post('/', authenticate, Permissions.createShowings, async (req: AuthReque
 
     const data: CreateShowingData = {
       unitId: req.body.unitId,
-      scheduledDate: req.body.scheduledDate,
+      showingDate: req.body.showingDate,
       duration: req.body.duration,
+      showingType: req.body.showingType || 'agent_assisted',
+      visitorName: req.body.visitorName,
+      visitorEmail: req.body.visitorEmail,
+      visitorPhone: req.body.visitorPhone,
       agentName: req.body.agentName,
-      prospectName: req.body.prospectName,
-      prospectEmail: req.body.prospectEmail,
-      prospectPhone: req.body.prospectPhone,
       notes: req.body.notes,
     };
 
     if (
       !data.unitId ||
-      !data.scheduledDate ||
-      !data.duration ||
-      !data.prospectName ||
-      !data.prospectEmail ||
-      !data.prospectPhone
+      !data.showingDate ||
+      !data.visitorName ||
+      !data.visitorEmail
     ) {
       res.status(400).json({
         error: 'Missing required fields',
         required: [
           'unitId',
-          'scheduledDate',
-          'duration',
-          'prospectName',
-          'prospectEmail',
-          'prospectPhone',
+          'showingDate',
+          'visitorName',
+          'visitorEmail',
         ],
       });
       return;
@@ -171,6 +172,108 @@ router.post(
       console.error('Record showing outcome error:', error);
       res.status(500).json({
         error: 'Failed to record showing outcome',
+        details: error instanceof Error ? error.message : 'Unknown error',
+      });
+    }
+  }
+);
+
+/**
+ * GET /api/showings/stats
+ * Get showing statistics for dashboard KPIs
+ */
+router.get('/stats', authenticate, Permissions.readShowings, async (req: AuthRequest, res) => {
+  try {
+    if (!req.user?.accountId) {
+      res.status(400).json({ error: 'Account ID required' });
+      return;
+    }
+
+    const stats = await getShowingStatistics(req.user.accountId);
+    res.json(stats);
+  } catch (error) {
+    console.error('Get showing stats error:', error);
+    res.status(500).json({
+      error: 'Failed to fetch showing statistics',
+      details: error instanceof Error ? error.message : 'Unknown error',
+    });
+  }
+});
+
+/**
+ * GET /api/showings/available-units
+ * Get available units for scheduling showings
+ */
+router.get('/available-units', authenticate, Permissions.readShowings, async (req: AuthRequest, res) => {
+  try {
+    if (!req.user?.accountId) {
+      res.status(400).json({ error: 'Account ID required' });
+      return;
+    }
+
+    const units = await getAvailableUnits(req.user.accountId);
+    res.json(units);
+  } catch (error) {
+    console.error('Get available units error:', error);
+    res.status(500).json({
+      error: 'Failed to fetch available units',
+      details: error instanceof Error ? error.message : 'Unknown error',
+    });
+  }
+});
+
+/**
+ * POST /api/showings/:id/regenerate-code
+ * Regenerate access code for a showing
+ */
+router.post(
+  '/:id/regenerate-code',
+  authenticate,
+  Permissions.updateShowings,
+  async (req: AuthRequest, res) => {
+    try {
+      if (!req.user?.accountId) {
+        res.status(400).json({ error: 'Account ID required' });
+        return;
+      }
+
+      const result = await regenerateAccessCode(
+        req.user.accountId,
+        req.user.id,
+        req.params.id
+      );
+      res.json(result);
+    } catch (error) {
+      console.error('Regenerate access code error:', error);
+      res.status(500).json({
+        error: 'Failed to regenerate access code',
+        details: error instanceof Error ? error.message : 'Unknown error',
+      });
+    }
+  }
+);
+
+/**
+ * POST /api/showings/:id/send-reminder
+ * Send reminder for a showing
+ */
+router.post(
+  '/:id/send-reminder',
+  authenticate,
+  Permissions.updateShowings,
+  async (req: AuthRequest, res) => {
+    try {
+      if (!req.user?.accountId) {
+        res.status(400).json({ error: 'Account ID required' });
+        return;
+      }
+
+      await sendShowingReminder(req.user.accountId, req.user.id, req.params.id);
+      res.json({ success: true, message: 'Reminder sent successfully' });
+    } catch (error) {
+      console.error('Send reminder error:', error);
+      res.status(500).json({
+        error: 'Failed to send reminder',
         details: error instanceof Error ? error.message : 'Unknown error',
       });
     }

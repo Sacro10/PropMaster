@@ -76,9 +76,9 @@ export function MaintenancePanel() {
   };
 
   const maintenanceStats = metrics ? [
-    { label: 'Active Requests', value: metrics.active_requests.toString(), change: '-15%', icon: Wrench },
-    { label: 'Avg. Response Time', value: `${metrics.avg_response_time_hours} hrs`, change: '-18%', icon: Activity },
-    { label: 'Completion Rate', value: `${metrics.completion_rate}%`, change: '+3%', icon: CheckCircle },
+    { label: 'Active Requests', value: metrics.active_requests.toString(), change: '0%', icon: Wrench },
+    { label: 'Avg. Response Time', value: `${metrics.avg_response_time_hours} hrs`, change: '0%', icon: Activity },
+    { label: 'Completion Rate', value: `${metrics.completion_rate}%`, change: '0%', icon: CheckCircle },
     { label: 'Emergency Support', value: metrics.emergency_support_status, change: metrics.emergency_support_status === '24/7' ? 'Active' : 'Limited', icon: Bell },
   ] : [];
 

@@ -119,17 +119,17 @@ export function TenantManagement() {
     {
       label: 'Avg. Screening Time',
       value: metrics.avg_screening_time > 0 ? `${metrics.avg_screening_time} hrs` : 'N/A',
-      change: '-23%' // TODO: Calculate actual change
+      change: '0%' // Backend trend calculation needed
     },
     {
       label: 'Acceptance Rate',
       value: metrics.acceptance_rate > 0 ? `${metrics.acceptance_rate}%` : '0%',
-      change: '+5%' // TODO: Calculate actual change
+      change: '0%' // Backend trend calculation needed
     },
     {
       label: 'AI Accuracy',
       value: metrics.ai_accuracy > 0 ? `${metrics.ai_accuracy}%` : 'N/A',
-      change: '+2%' // TODO: Calculate actual change
+      change: '0%' // Backend trend calculation needed
     },
     {
       label: 'Eviction Rate',

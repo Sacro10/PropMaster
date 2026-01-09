@@ -10,8 +10,12 @@ import maintenanceRoutes from './routes/maintenance';
 import applicationsRoutes from './routes/applications';
 import hvacRoutes from './routes/hvac';
 import showingsRoutes from './routes/showings';
+import paymentsRoutes from './routes/payments';
+import disbursementsRoutes from './routes/disbursements';
 import messagesRoutes from './routes/messages';
+import communicationsRoutes from './routes/communications';
 import analyticsRoutes from './routes/analytics';
+import demoRoutes from './routes/demo';
 import { errorHandler } from './middleware/errorHandler';
 import { rateLimiters } from './middleware/rateLimiter';
 import { startJobs, stopJobs } from './jobs';
@@ -44,8 +48,12 @@ app.get('/', (_req, res) => {
       applications: '/api/applications',
       hvac: '/api/hvac',
       showings: '/api/showings',
+      payments: '/api/payments',
+      disbursements: '/api/disbursements',
       messages: '/api/messages',
+      communications: '/api/communications',
       analytics: '/api/analytics',
+      demo: '/api/demo',
       checkout: '/api/checkout',
       webhook: '/webhooks/stripe'
     },
@@ -84,7 +92,11 @@ app.use('/api/maintenance', maintenanceRoutes);
 app.use('/api/applications', applicationsRoutes);
 app.use('/api/hvac', hvacRoutes);
 app.use('/api/showings', showingsRoutes);
+app.use('/api/payments', paymentsRoutes);
+app.use('/api/disbursements', disbursementsRoutes);
+app.use('/api/communications', communicationsRoutes);
 app.use('/api/messages', messagesRoutes);
+app.use('/api/demo', demoRoutes);
 app.use('/api/analytics', analyticsRoutes);
 app.use('/api', checkoutRoutes);
 

@@ -1,6 +1,6 @@
 import { Response, NextFunction } from 'express';
 import { AuthRequest } from './auth';
-import { supabase } from '../supabase';
+import { supabaseAdmin as supabase } from '../supabase';
 
 /**
  * Permission cache to avoid repeated database queries
@@ -158,9 +158,21 @@ export const Permissions = {
   createShowings: requirePermission('showings', 'create'),
   updateShowings: requirePermission('showings', 'update'),
 
+  // Payments
+  readPayments: requirePermission('payments', 'read'),
+  createPayments: requirePermission('payments', 'create'),
+  updatePayments: requirePermission('payments', 'update'),
+
+  // Disbursements
+  readDisbursements: requirePermission('disbursements', 'read'),
+  createDisbursements: requirePermission('disbursements', 'create'),
+  updateDisbursements: requirePermission('disbursements', 'update'),
+
   // Messages
   readMessages: requirePermission('messages', 'read'),
   createMessages: requirePermission('messages', 'create'),
+  updateMessages: requirePermission('messages', 'update'),
+  deleteMessages: requirePermission('messages', 'delete'),
 
   // Analytics
   readAnalytics: requirePermission('analytics', 'read'),

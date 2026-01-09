@@ -27,8 +27,8 @@ export function DashboardOverview() {
     {
       label: 'Total Units',
       value: formatNumber(metrics.total_units),
-      change: metrics.total_units > 0 ? '+12%' : '0%', // TODO: Calculate actual change
-      trend: 'up' as const,
+      change: formatPercentageChange(metrics.occupancy_change), // Use occupancy change as proxy for units
+      trend: metrics.occupancy_change >= 0 ? 'up' as const : 'down' as const,
       icon: Activity,
     },
     {

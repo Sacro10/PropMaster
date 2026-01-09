@@ -7,12 +7,25 @@ import { getDashboardSummary } from '../../src/services/dashboardService';
 
 // Mock Supabase client
 jest.mock('../../src/supabase', () => ({
-  supabase: {
+  supabaseAdmin: {
     from: jest.fn(),
   },
 }));
 
-import { supabase } from '../../src/supabase';
+import { supabaseAdmin as supabase } from '../../src/supabase';
+
+const createChain = () => ({
+  select: jest.fn().mockReturnThis(),
+  eq: jest.fn().mockReturnThis(),
+  in: jest.fn().mockReturnThis(),
+  gte: jest.fn().mockReturnThis(),
+  lte: jest.fn().mockReturnThis(),
+  order: jest.fn().mockReturnThis(),
+  limit: jest.fn().mockReturnThis(),
+  ilike: jest.fn().mockReturnThis(),
+  single: jest.fn().mockResolvedValue({ data: [], error: null }),
+  then: (resolve: any) => resolve({ data: [], error: null, count: 0 }),
+});
 
 describe('Dashboard Service - org_id Scoping', () => {
   const mockAccountId = 'test-account-123';
@@ -24,55 +37,22 @@ describe('Dashboard Service - org_id Scoping', () => {
 
   it('should scope all queries to the provided account_id', async () => {
     // Mock chain for properties query
-    const mockPropertiesChain = {
-      select: jest.fn().mockReturnThis(),
-      eq: jest.fn().mockResolvedValue({
-        data: [],
-        error: null,
-      }),
-    };
+    const mockPropertiesChain = createChain();
 
     // Mock chain for payments queries
-    const mockPaymentsChain = {
-      select: jest.fn().mockReturnThis(),
-      eq: jest.fn().mockReturnThis(),
-      gte: jest.fn().mockReturnThis(),
-      lte: jest.fn().mockResolvedValue({
-        data: [],
-        error: null,
-      }),
-    };
+    const mockPaymentsChain = createChain();
 
     // Mock chain for maintenance queries
-    const mockMaintenanceChain = {
-      select: jest.fn().mockReturnThis(),
-      eq: jest.fn().mockReturnThis(),
-      in: jest.fn().mockReturnThis(),
-      gte: jest.fn().mockResolvedValue({
-        data: [],
-        error: null,
-      }),
-    };
+    const mockMaintenanceChain = createChain();
 
     // Mock chain for tenants query
-    const mockTenantsChain = {
-      select: jest.fn().mockReturnThis(),
-      eq: jest.fn().mockResolvedValue({
-        data: [],
-        error: null,
-      }),
-    };
+    const mockTenantsChain = createChain();
 
     // Mock chain for activity query
-    const mockActivityChain = {
-      select: jest.fn().mockReturnThis(),
-      eq: jest.fn().mockReturnThis(),
-      order: jest.fn().mockReturnThis(),
-      limit: jest.fn().mockResolvedValue({
-        data: [],
-        error: null,
-      }),
-    };
+    const mockActivityChain = createChain();
+    const mockAccountsChain = createChain();
+    const mockHvacChain = createChain();
+    const mockRemindersChain = createChain();
 
     // Set up the from() mock to return different chains based on table name
     mockSupabase.from.mockImplementation((table: string) => {
@@ -87,6 +67,12 @@ describe('Dashboard Service - org_id Scoping', () => {
           return mockTenantsChain as any;
         case 'activity_events':
           return mockActivityChain as any;
+        case 'accounts':
+          return mockAccountsChain as any;
+        case 'hvac_program_enrollments':
+          return mockHvacChain as any;
+        case 'reminder_schedules':
+          return mockRemindersChain as any;
         default:
           return mockPropertiesChain as any;
       }
@@ -120,20 +106,14 @@ describe('Dashboard Service - org_id Scoping', () => {
     const accountA = 'account-aaa';
     const accountB = 'account-bbb';
 
-    const mockChain = {
-      select: jest.fn().mockReturnThis(),
-      eq: jest.fn().mockResolvedValue({
-        data: [
-          { id: '1', account_id: accountA, name: 'Property A' },
-        ],
+    const mockChain = createChain();
+    mockChain.then = jest.fn((resolve: any) =>
+      resolve({
+        data: [{ id: '1', account_id: accountA, name: 'Property A' }],
         error: null,
-      }),
-      in: jest.fn().mockReturnThis(),
-      gte: jest.fn().mockResolvedValue({ data: [], error: null }),
-      lte: jest.fn().mockResolvedValue({ data: [], error: null }),
-      order: jest.fn().mockReturnThis(),
-      limit: jest.fn().mockResolvedValue({ data: [], error: null }),
-    };
+        count: 0,
+      })
+    );
 
     mockSupabase.from.mockReturnValue(mockChain as any);
 
@@ -151,18 +131,7 @@ describe('Dashboard Service - org_id Scoping', () => {
   it('should handle account_id parameter correctly in all subqueries', async () => {
     const mockAccountId = 'test-account-xyz';
 
-    const mockChain = {
-      select: jest.fn().mockReturnThis(),
-      eq: jest.fn().mockReturnThis(),
-      gte: jest.fn().mockReturnThis(),
-      lte: jest.fn().mockReturnThis(),
-      in: jest.fn().mockReturnThis(),
-      order: jest.fn().mockReturnThis(),
-      limit: jest.fn().mockResolvedValue({
-        data: [],
-        error: null,
-      }),
-    };
+    const mockChain = createChain();
 
     mockSupabase.from.mockReturnValue(mockChain as any);
 

@@ -9,24 +9,21 @@ import {
   getOwnerDisbursements,
   getCollectionStats,
   sendPaymentReminder,
-  type PaymentWithDetails,
-  type OwnerDisbursement,
-  type PaginatedResponse,
+  type Payment,
+  type Disbursement,
 } from '../api/payments';
 
 export function useRecentPayments() {
-  const [data, setData] = useState<PaymentWithDetails[]>([]);
+  const [data, setData] = useState<Payment[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
-  const [total, setTotal] = useState(0);
 
   const fetchData = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
       const result = await getRecentPayments();
-      setData(result.data);
-      setTotal(result.total);
+      setData(result);
     } catch (err) {
       console.error('[useRecentPayments] Error fetching payments:', err);
       setError(err as Error);
@@ -39,7 +36,7 @@ export function useRecentPayments() {
     fetchData();
   }, [fetchData]);
 
-  return { data, loading, error, total, refetch: fetchData };
+  return { data, loading, error, refetch: fetchData };
 }
 
 export function usePendingPayments() {
@@ -69,18 +66,16 @@ export function usePendingPayments() {
 }
 
 export function useOwnerDisbursements() {
-  const [data, setData] = useState<OwnerDisbursement[]>([]);
+  const [data, setData] = useState<Disbursement[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
-  const [total, setTotal] = useState(0);
 
   const fetchData = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
       const result = await getOwnerDisbursements();
-      setData(result.data);
-      setTotal(result.total);
+      setData(result);
     } catch (err) {
       console.error('[useOwnerDisbursements] Error fetching disbursements:', err);
       setError(err as Error);
@@ -93,7 +88,7 @@ export function useOwnerDisbursements() {
     fetchData();
   }, [fetchData]);
 
-  return { data, loading, error, total, refetch: fetchData };
+  return { data, loading, error, refetch: fetchData };
 }
 
 export function useCollectionStats() {

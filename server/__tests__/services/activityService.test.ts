@@ -7,12 +7,12 @@ import { getActivityEvents, getActivityStats } from '../../src/services/activity
 
 // Mock Supabase client
 jest.mock('../../src/supabase', () => ({
-  supabase: {
+  supabaseAdmin: {
     from: jest.fn(),
   },
 }));
 
-import { supabase } from '../../src/supabase';
+import { supabaseAdmin as supabase } from '../../src/supabase';
 
 describe('Activity Service - Event Filtering', () => {
   const mockAccountId = 'test-account-123';
@@ -62,7 +62,7 @@ describe('Activity Service - Event Filtering', () => {
       expect(mockChain.eq).toHaveBeenCalledWith('account_id', mockAccountId);
       expect(mockChain.eq).toHaveBeenCalledWith('event_type', 'payment_received');
       expect(result.events).toHaveLength(1);
-      expect(result.events[0].event_type).toBe('payment_received');
+      expect(result.events[0].eventType).toBe('payment_received');
     });
 
     it('should filter by date range', async () => {
@@ -231,10 +231,10 @@ describe('Activity Service - Event Filtering', () => {
 
       const result = await getActivityStats(mockAccountId);
 
-      expect(result.byEventType).toBeDefined();
-      expect(result.byEventType['payment_received']).toBe(2);
-      expect(result.byEventType['maintenance_created']).toBe(1);
-      expect(result.byEventType['tenant_added']).toBe(1);
+      expect(result.eventsByType).toBeDefined();
+      expect(result.eventsByType['payment_received']).toBe(2);
+      expect(result.eventsByType['maintenance_created']).toBe(1);
+      expect(result.eventsByType['tenant_added']).toBe(1);
     });
 
     it('should respect date range filters', async () => {

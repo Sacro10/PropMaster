@@ -1,4 +1,4 @@
-import { supabase } from '../supabase';
+import { supabaseAdmin as supabase } from '../supabase';
 import { logActivityEvent } from './activityService';
 
 export interface MaintenanceRequest {
@@ -537,7 +537,7 @@ export async function createEmergencyRequest(
   // Create request with emergency priority
   const request = await createMaintenanceRequest(accountId, userId, {
     ...data,
-    priority: 'emergency',
+    priority: 'urgent' as const,
   });
 
   // Update is_emergency flag
@@ -579,7 +579,7 @@ export async function createEmergencyRequest(
     );
   }
 
-  return { ...request, is_emergency: true };
+  return request;
 }
 
 /**

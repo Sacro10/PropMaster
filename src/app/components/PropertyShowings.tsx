@@ -1,4 +1,5 @@
 import { Key, Clock, CircleCheck, Calendar, RefreshCw } from 'lucide-react';
+import { useState } from 'react';
 import { useHasFeature } from '../hooks/usePlanGating';
 import { useThemeStyles } from '../hooks/useThemeStyles';
 import { FeatureGate } from './UpgradeCTA';
@@ -9,10 +10,12 @@ import {
   useAvailableProperties,
   useShowingStats,
 } from '../../lib/hooks/useShowings';
+import { sendShowingReminder } from '../../lib/api/showings';
 import { formatRelativeTime } from '../../lib/utils/dateHelpers';
 
 export function PropertyShowings() {
   const { isDark, text, border } = useThemeStyles();
+  const [sendingReminder, setSendingReminder] = useState<string | null>(null);
 
   // Feature checks for plan gating - Electronic showings require Premium
   const electronicShowings = useHasFeature('electronic_showings');
@@ -21,6 +24,22 @@ export function PropertyShowings() {
   const { data: showings, loading: showingsLoading, error: showingsError, refetch: refetchShowings } = useUpcomingShowings();
   const { data: availableProperties, loading: propertiesLoading } = useAvailableProperties();
   const { data: stats, loading: statsLoading } = useShowingStats();
+
+  // Handle sending reminder
+  const handleSendReminder = async (showingId: string) => {
+    try {
+      setSendingReminder(showingId);
+      await sendShowingReminder(showingId);
+      // Refetch to update reminder_sent_at
+      await refetchShowings();
+      alert('Reminder sent successfully!');
+    } catch (error) {
+      console.error('Error sending reminder:', error);
+      alert('Failed to send reminder. Please try again.');
+    } finally {
+      setSendingReminder(null);
+    }
+  };
 
   // Show loading state
   if (showingsLoading || statsLoading) {
@@ -180,10 +199,12 @@ export function PropertyShowings() {
                           </div>
                           <div className="flex gap-2">
                             <button
-                              className={`px-4 py-2 ${isDark ? 'bg-white/5 hover:bg-white/10' : 'bg-gray-200 hover:bg-gray-300'} rounded-lg text-sm transition-colors`}
+                              onClick={() => handleSendReminder(showing.id)}
+                              disabled={sendingReminder === showing.id}
+                              className={`px-4 py-2 ${isDark ? 'bg-white/5 hover:bg-white/10' : 'bg-gray-200 hover:bg-gray-300'} rounded-lg text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed`}
                               style={{ fontFamily: 'Work Sans, sans-serif' }}
                             >
-                              Send Reminder
+                              {sendingReminder === showing.id ? 'Sending...' : 'Send Reminder'}
                             </button>
                             <button
                               className={`px-4 py-2 ${isDark ? 'bg-white/5 hover:bg-white/10' : 'bg-gray-200 hover:bg-gray-300'} rounded-lg text-sm transition-colors`}

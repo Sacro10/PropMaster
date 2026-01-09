@@ -38,10 +38,10 @@ export function CommunicationHub() {
 
   // Prepare stats display
   const communicationStatsDisplay = stats ? [
-    { label: 'Active Conversations', value: stats.active_conversations.toString(), change: '+12' },
-    { label: 'Avg. Response Time', value: `${stats.avg_response_time_minutes} min`, change: '-24%' },
-    { label: 'Automation Rate', value: `${stats.automation_rate}%`, change: '+8%' },
-    { label: 'Tenant Satisfaction', value: `${stats.tenant_satisfaction}%`, change: '+3%' },
+    { label: 'Active Conversations', value: stats.active_conversations.toString(), change: '0%' },
+    { label: 'Avg. Response Time', value: `${stats.avg_response_time_minutes} min`, change: '0%' },
+    { label: 'Automation Rate', value: `${stats.automation_rate}%`, change: '0%' },
+    { label: 'Tenant Satisfaction', value: `${stats.tenant_satisfaction}%`, change: '0%' },
   ] : [];
 
   // Transform messages into conversation format

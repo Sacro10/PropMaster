@@ -3,24 +3,10 @@
  */
 
 import { useState, useEffect, useCallback } from 'react';
-import {
-  getRecentMessages,
-  getMessageTemplates,
-  getAutomatedReminders,
-  getPortalActivity,
-  getCommunicationStats,
-  sendMessage,
-  markMessageAsRead,
-  type MessageWithDetails,
-  type MessageTemplate,
-  type AutomatedReminder,
-  type PortalActivity,
-  type CommunicationStats,
-  type PaginatedResponse,
-} from '../api/communications';
+import * as api from '../api/communicationsClient';
 
 export function useRecentMessages() {
-  const [data, setData] = useState<MessageWithDetails[]>([]);
+  const [data, setData] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
   const [total, setTotal] = useState(0);
@@ -29,8 +15,8 @@ export function useRecentMessages() {
     try {
       setLoading(true);
       setError(null);
-      const result = await getRecentMessages();
-      setData(result.data);
+      const result = await api.getConversations({ limit: 10 });
+      setData(result.conversations || []);
       setTotal(result.total);
     } catch (err) {
       console.error('[useRecentMessages] Error fetching messages:', err);
@@ -48,7 +34,7 @@ export function useRecentMessages() {
 }
 
 export function useMessageTemplates() {
-  const [data, setData] = useState<MessageTemplate[]>([]);
+  const [data, setData] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
 
@@ -56,7 +42,7 @@ export function useMessageTemplates() {
     try {
       setLoading(true);
       setError(null);
-      const result = await getMessageTemplates();
+      const result = await api.getMessageTemplates();
       setData(result);
     } catch (err) {
       console.error('[useMessageTemplates] Error fetching templates:', err);
@@ -74,7 +60,7 @@ export function useMessageTemplates() {
 }
 
 export function useAutomatedReminders() {
-  const [data, setData] = useState<AutomatedReminder[]>([]);
+  const [data, setData] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
 
@@ -82,7 +68,7 @@ export function useAutomatedReminders() {
     try {
       setLoading(true);
       setError(null);
-      const result = await getAutomatedReminders();
+      const result = await api.getAutomatedReminders();
       setData(result);
     } catch (err) {
       console.error('[useAutomatedReminders] Error fetching reminders:', err);
@@ -100,7 +86,7 @@ export function useAutomatedReminders() {
 }
 
 export function usePortalActivity() {
-  const [data, setData] = useState<PortalActivity | null>(null);
+  const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
 
@@ -108,7 +94,7 @@ export function usePortalActivity() {
     try {
       setLoading(true);
       setError(null);
-      const result = await getPortalActivity();
+      const result = await api.getPortalActivity();
       setData(result);
     } catch (err) {
       console.error('[usePortalActivity] Error fetching portal activity:', err);
@@ -126,7 +112,7 @@ export function usePortalActivity() {
 }
 
 export function useCommunicationStats() {
-  const [data, setData] = useState<CommunicationStats | null>(null);
+  const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
 
@@ -134,7 +120,7 @@ export function useCommunicationStats() {
     try {
       setLoading(true);
       setError(null);
-      const result = await getCommunicationStats();
+      const result = await api.getCommunicationStats();
       setData(result);
     } catch (err) {
       console.error('[useCommunicationStats] Error fetching communication stats:', err);
@@ -156,19 +142,17 @@ export function useSendMessage() {
   const [error, setError] = useState<Error | null>(null);
 
   const send = useCallback(async (messageData: {
-    to_user_id: string;
+    recipientId: string;
     subject?: string;
     body: string;
-    unit_id?: string;
-    property_id?: string;
-    maintenance_request_id?: string;
-    parent_message_id?: string;
-    thread_id?: string;
+    conversationId?: string;
+    propertyId?: string;
+    unitId?: string;
   }) => {
     try {
       setLoading(true);
       setError(null);
-      const result = await sendMessage(messageData);
+      const result = await api.sendMessage(messageData);
       return { success: true, data: result };
     } catch (err) {
       console.error('[useSendMessage] Error sending message:', err);
@@ -190,7 +174,7 @@ export function useMarkMessageAsRead() {
     try {
       setLoading(true);
       setError(null);
-      await markMessageAsRead(messageId);
+      await api.markMessageAsRead(messageId);
       return { success: true };
     } catch (err) {
       console.error('[useMarkMessageAsRead] Error marking message as read:', err);

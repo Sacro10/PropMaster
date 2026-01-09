@@ -3,7 +3,7 @@
  * Runs monthly to generate delivery batches for enrolled units
  */
 
-import { supabase } from '../supabase';
+import { supabaseAdmin as supabase } from '../supabase';
 import { logActivityEvent } from '../services/activityService';
 import { generateDeliveryBatch } from '../services/hvacService';
 

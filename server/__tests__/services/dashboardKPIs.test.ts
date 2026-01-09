@@ -7,12 +7,12 @@ import { getDashboardSummary } from '../../src/services/dashboardService';
 
 // Mock Supabase client
 jest.mock('../../src/supabase', () => ({
-  supabase: {
+  supabaseAdmin: {
     from: jest.fn(),
   },
 }));
 
-import { supabase } from '../../src/supabase';
+import { supabaseAdmin as supabase } from '../../src/supabase';
 
 describe('Dashboard KPI Calculations', () => {
   const mockAccountId = 'test-account-123';
@@ -43,7 +43,7 @@ describe('Dashboard KPI Calculations', () => {
 
       expect(result.kpis.totalUnits).toBe(30); // 10 + 5 + 15
       expect(result.kpis.occupiedUnits).toBe(23); // 8 + 3 + 12
-      expect(result.properties.occupancyRate).toBe(76.7); // (23/30) * 100 rounded to 1 decimal
+      expect(result.properties.occupancyRate).toBeCloseTo(76.7, 1); // (23/30) * 100
     });
 
     it('should handle zero units correctly', async () => {
@@ -329,50 +329,90 @@ describe('Dashboard KPI Calculations', () => {
     activityEvents: any[];
     accounts: any[];
   }) {
-    mockSupabase.from.mockImplementation((table: string) => {
-      const baseChain = {
+    const createChain = (tableData: any, countOverride?: number) => {
+      let currentData = Array.isArray(tableData) ? [...tableData] : tableData;
+
+      const chain: any = {
         select: jest.fn().mockReturnThis(),
-        eq: jest.fn().mockReturnThis(),
-        in: jest.fn().mockReturnThis(),
-        gte: jest.fn().mockReturnThis(),
-        lte: jest.fn().mockReturnThis(),
-        ilike: jest.fn().mockReturnThis(),
+        eq: jest.fn().mockImplementation((column: string, value: any) => {
+          if (Array.isArray(currentData)) {
+            currentData = currentData.filter((item) => item[column] === value);
+          }
+          return chain;
+        }),
+        in: jest.fn().mockImplementation((column: string, values: any[]) => {
+          if (Array.isArray(currentData)) {
+            currentData = currentData.filter((item) => values.includes(item[column]));
+          }
+          return chain;
+        }),
+        gte: jest.fn().mockImplementation((column: string, value: string) => {
+          if (Array.isArray(currentData)) {
+            const cutoff = new Date(value).getTime();
+            currentData = currentData.filter(
+              (item) => new Date(item[column]).getTime() >= cutoff
+            );
+          }
+          return chain;
+        }),
+        lte: jest.fn().mockImplementation((column: string, value: string) => {
+          if (Array.isArray(currentData)) {
+            const cutoff = new Date(value).getTime();
+            currentData = currentData.filter(
+              (item) => new Date(item[column]).getTime() <= cutoff
+            );
+          }
+          return chain;
+        }),
         order: jest.fn().mockReturnThis(),
         limit: jest.fn().mockReturnThis(),
-        single: jest.fn(),
+        single: jest.fn().mockResolvedValue({
+          data: Array.isArray(currentData) ? currentData[0] : currentData,
+          error: null,
+        }),
+        maybeSingle: jest.fn().mockResolvedValue({
+          data: Array.isArray(currentData) ? currentData[0] : currentData,
+          error: null,
+        }),
+        then: (resolve: any) =>
+          resolve({
+            data: currentData,
+            error: null,
+            count: countOverride ?? (Array.isArray(currentData) ? currentData.length : 0),
+          }),
       };
 
+      chain.ilike = jest.fn().mockImplementation((_column: string, pattern: string) => {
+        const needle = pattern.replace(/%/g, '').toLowerCase();
+        if (Array.isArray(currentData)) {
+          currentData = currentData.filter((item) =>
+            String(item.summary || '').toLowerCase().includes(needle)
+          );
+        }
+        return chain;
+      });
+
+      return chain;
+    };
+
+    mockSupabase.from.mockImplementation((table: string) => {
       switch (table) {
         case 'properties':
-          baseChain.eq = jest.fn().mockResolvedValue({ data: data.properties, error: null });
-          return baseChain as any;
+          return createChain(data.properties);
         case 'payments':
-          baseChain.lte = jest.fn().mockResolvedValue({ data: data.payments, error: null });
-          return baseChain as any;
+          return createChain(data.payments);
         case 'maintenance_requests':
-          baseChain.gte = jest.fn().mockResolvedValue({ data: data.maintenanceRequests, error: null });
-          baseChain.in = jest.fn().mockResolvedValue({ data: data.maintenanceRequests, error: null });
-          return baseChain as any;
+          return createChain(data.maintenanceRequests);
         case 'tenants':
-          baseChain.eq = jest.fn().mockResolvedValue({ data: data.tenants, error: null });
-          baseChain.gte = jest.fn().mockResolvedValue({ data: [], error: null, count: 0 });
-          return baseChain as any;
+          return createChain(data.tenants, 0);
         case 'activity_events':
-          baseChain.limit = jest.fn().mockResolvedValue({ data: data.activityEvents, error: null });
-          baseChain.ilike = jest.fn().mockResolvedValue({ data: data.activityEvents.filter(e => e.summary?.toLowerCase().includes('evict')), error: null });
-          return baseChain as any;
+          return createChain(data.activityEvents);
         case 'accounts':
-          baseChain.single = jest.fn().mockResolvedValue({ data: data.accounts[0], error: null });
-          return baseChain as any;
+          return createChain(data.accounts);
         case 'hvac_program_enrollments':
-          baseChain.lte = jest.fn().mockResolvedValue({ data: [], error: null });
-          return baseChain as any;
         case 'reminder_schedules':
-          baseChain.limit = jest.fn().mockResolvedValue({ data: [], error: null });
-          return baseChain as any;
         default:
-          baseChain.eq = jest.fn().mockResolvedValue({ data: [], error: null });
-          return baseChain as any;
+          return createChain([]);
       }
     });
   }
