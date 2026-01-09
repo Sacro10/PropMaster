@@ -25,9 +25,10 @@ export interface UseDashboardDataResult {
 }
 
 /**
- * Hook to fetch all dashboard data
+ * Hook to fetch all dashboard data with auto-refresh
+ * @param autoRefreshInterval - Optional interval in milliseconds for auto-refresh (default: 60000ms = 1 minute)
  */
-export function useDashboardData(): UseDashboardDataResult {
+export function useDashboardData(autoRefreshInterval: number = 60000): UseDashboardDataResult {
   const [metrics, setMetrics] = useState<DashboardMetrics | null>(null);
   const [recentActivity, setRecentActivity] = useState<RecentActivity[]>([]);
   const [systemMetrics, setSystemMetrics] = useState<SystemMetrics | null>(null);
@@ -60,9 +61,21 @@ export function useDashboardData(): UseDashboardDataResult {
     }
   }, []);
 
+  // Initial fetch
   useEffect(() => {
     fetchData();
   }, [fetchData]);
+
+  // Auto-refresh interval
+  useEffect(() => {
+    if (autoRefreshInterval > 0) {
+      const intervalId = setInterval(() => {
+        fetchData();
+      }, autoRefreshInterval);
+
+      return () => clearInterval(intervalId);
+    }
+  }, [autoRefreshInterval, fetchData]);
 
   return {
     metrics,

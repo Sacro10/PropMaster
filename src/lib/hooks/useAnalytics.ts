@@ -153,22 +153,35 @@ export function useExportAnalytics() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
 
-  const exportData = useCallback(async (format: 'csv' | 'pdf', timeframe: TimeframeOption = '30d') => {
+  const exportData = useCallback(async (format: 'csv' | 'json' = 'csv', timeframe: TimeframeOption = '30d') => {
     try {
       setLoading(true);
       setError(null);
       const result = await exportAnalyticsData(format, timeframe);
 
-      // Create download link
-      const blob = new Blob([result.data], { type: result.mimeType });
-      const url = window.URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = result.filename;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      window.URL.revokeObjectURL(url);
+      if (format === 'csv' && result instanceof Blob) {
+        // Create download link for CSV
+        const url = window.URL.createObjectURL(result);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `analytics_${timeframe}_${new Date().toISOString().split('T')[0]}.csv`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        window.URL.revokeObjectURL(url);
+      } else if (format === 'json') {
+        // For JSON, create downloadable file
+        const jsonStr = JSON.stringify(result, null, 2);
+        const blob = new Blob([jsonStr], { type: 'application/json' });
+        const url = window.URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `analytics_${timeframe}_${new Date().toISOString().split('T')[0]}.json`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        window.URL.revokeObjectURL(url);
+      }
 
       return { success: true };
     } catch (err) {

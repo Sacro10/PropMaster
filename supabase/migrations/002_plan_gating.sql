@@ -382,7 +382,7 @@ CREATE POLICY tenant_profiles_select_policy ON tenant_profiles
       JOIN leases l ON l.unit_id = u.id
       JOIN lease_tenants lt ON lt.lease_id = l.id
       WHERE am.user_id = auth.uid()
-        AND lt.tenant_id = tenant_profiles.id
+        AND lt.tenant_user_id = tenant_profiles.id
     )
     OR
     id = auth.uid()

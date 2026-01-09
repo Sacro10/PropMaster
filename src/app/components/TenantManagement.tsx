@@ -1,4 +1,4 @@
-import { Search, UserSearch, CircleCheck, TrendingUp, ListFilter, RefreshCw } from 'lucide-react';
+import { Search, UserSearch, CircleCheck, TrendingUp, ListFilter, RefreshCw, Users } from 'lucide-react';
 import { useThemeStyles } from '../hooks/useThemeStyles';
 import { useHasFeature } from '../hooks/usePlanGating';
 import { FeatureGate, LockedFeatureCard } from './UpgradeCTA';
@@ -8,10 +8,17 @@ import { ErrorState } from './ErrorBoundary';
 import { formatCurrency } from '../../lib/utils/currencyHelpers';
 import { formatDisplayDate, formatRelativeTime } from '../../lib/utils/dateHelpers';
 import { useState } from 'react';
+import { ApplicationDetailModal } from './ApplicationDetailModal';
+import { NewApplicationForm, type ApplicationFormData } from './NewApplicationForm';
+import { createApplication } from '../../lib/api/applications';
+import { runScreening } from '../../lib/api/applications';
 
 export function TenantManagement() {
   const { isDark, bg, text, border } = useThemeStyles();
   const [isApproving, setIsApproving] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [selectedApplication, setSelectedApplication] = useState<any>(null);
+  const [showNewApplicationForm, setShowNewApplicationForm] = useState(false);
 
   // Feature checks for plan gating
   const tenantScreening = useHasFeature('tenant_screening');
@@ -22,6 +29,17 @@ export function TenantManagement() {
   const { data: applications, loading: appsLoading, error: appsError, refetch: refetchApps, approve, reject } = useRentalApplications();
   const { data: metrics, loading: metricsLoading, error: metricsError } = useTenantMetrics();
 
+  // Filter tenants based on search query
+  const filteredTenants = searchQuery.trim()
+    ? tenants.filter(tenant => {
+        const searchLower = searchQuery.toLowerCase();
+        const fullName = (tenant.full_name || '').toLowerCase();
+        const email = (tenant.email || '').toLowerCase();
+        const phone = (tenant.phone || '').toLowerCase();
+        return fullName.includes(searchLower) || email.includes(searchLower) || phone.includes(searchLower);
+      })
+    : tenants;
+
   // Handle approve
   const handleApprove = async (applicationId: string) => {
     setIsApproving(applicationId);
@@ -29,11 +47,58 @@ export function TenantManagement() {
     setIsApproving(null);
 
     if (result.success) {
-      // Show success message (you can add toast notification here)
+      await refetchTenants();
+      await refetchApps();
       console.log('Application approved successfully');
     } else {
-      // Show error message
       console.error('Failed to approve application:', result.error);
+      alert('Failed to approve application: ' + (result.error?.message || 'Unknown error'));
+    }
+  };
+
+  // Handle reject
+  const handleReject = async (applicationId: string, reason?: string) => {
+    const result = await reject(applicationId, reason);
+    if (result.success) {
+      await refetchApps();
+      console.log('Application rejected');
+    } else {
+      console.error('Failed to reject application:', result.error);
+      alert('Failed to reject application: ' + (result.error?.message || 'Unknown error'));
+    }
+  };
+
+  // Handle new application submission
+  const handleNewApplication = async (data: ApplicationFormData) => {
+    try {
+      const newApp = await createApplication(data);
+      // Automatically run screening
+      if (newApp.id) {
+        await runScreening(newApp.id);
+      }
+      await refetchApps();
+    } catch (error) {
+      console.error('Failed to create application:', error);
+      throw error;
+    }
+  };
+
+  // Handle opening application detail
+  const handleReviewApplication = async (application: any) => {
+    // If no screening result, try to run screening first
+    if (!application.screeningResult && !application.hasScreeningResult) {
+      try {
+        await runScreening(application.id);
+        await refetchApps();
+        // Find updated application
+        const updated = applications.find(a => a.id === application.id);
+        setSelectedApplication(updated || application);
+      } catch (error) {
+        console.error('Failed to run screening:', error);
+        setSelectedApplication(application);
+      }
+    } else {
+      setSelectedApplication(application);
     }
   };
 
@@ -96,7 +161,10 @@ export function TenantManagement() {
           >
             <RefreshCw className="w-4 h-4" />
           </button>
-          <button className="px-6 py-3 bg-gradient-to-r from-[#ff6b35] to-[#f7931e] rounded-lg font-medium hover:scale-105 transition-transform">
+          <button
+            onClick={() => setShowNewApplicationForm(true)}
+            className="px-6 py-3 bg-gradient-to-r from-[#ff6b35] to-[#f7931e] rounded-lg font-medium hover:scale-105 transition-transform"
+          >
             + Add New Tenant
           </button>
         </div>
@@ -156,6 +224,8 @@ export function TenantManagement() {
                 <input
                   type="text"
                   placeholder="Search tenants..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
                   className={`pl-10 pr-4 py-2 ${isDark ? 'bg-white/5' : 'bg-gray-50'} border ${border.default} rounded-lg text-sm focus:outline-none focus:border-[#ff6b35]/50`}
                   style={{ fontFamily: 'Work Sans, sans-serif' }}
                 />
@@ -167,18 +237,18 @@ export function TenantManagement() {
           </div>
 
           <div className="space-y-3">
-            {tenants.length === 0 ? (
+            {filteredTenants.length === 0 ? (
               <div className="text-center py-12">
                 <Users className={`w-12 h-12 ${text.muted} mx-auto mb-4`} />
                 <p className={`${text.muted} mb-2`} style={{ fontFamily: 'Work Sans, sans-serif' }}>
-                  No active tenants yet
+                  {searchQuery ? 'No tenants found' : 'No active tenants yet'}
                 </p>
                 <p className={`text-sm ${text.inactive}`} style={{ fontFamily: 'Work Sans, sans-serif' }}>
-                  Add your first tenant to get started
+                  {searchQuery ? 'Try a different search term' : 'Add your first tenant to get started'}
                 </p>
               </div>
             ) : (
-              tenants.map((tenant) => {
+              filteredTenants.map((tenant) => {
                 const initials = tenant.full_name
                   ? tenant.full_name.split(' ').map(n => n[0]).join('').substring(0, 2)
                   : 'T';
@@ -343,7 +413,10 @@ export function TenantManagement() {
                       >
                         {isApproving === applicant.id ? 'Approving...' : 'Approve'}
                       </button>
-                      <button className={`px-3 py-2 ${isDark ? 'bg-white/5 hover:bg-white/10' : 'bg-gray-100 hover:bg-gray-200'} rounded-lg text-sm transition-colors`}>
+                      <button
+                        onClick={() => handleReviewApplication(applicant)}
+                        className={`px-3 py-2 ${isDark ? 'bg-white/5 hover:bg-white/10' : 'bg-gray-100 hover:bg-gray-200'} rounded-lg text-sm transition-colors`}
+                      >
                         Review
                       </button>
                     </div>
@@ -412,6 +485,24 @@ export function TenantManagement() {
             </div>
           </div>
         </FeatureGate>
+      )}
+
+      {/* Modals */}
+      {selectedApplication && (
+        <ApplicationDetailModal
+          application={selectedApplication}
+          onClose={() => setSelectedApplication(null)}
+          onApprove={handleApprove}
+          onReject={handleReject}
+          isProcessing={isApproving === selectedApplication.id}
+        />
+      )}
+
+      {showNewApplicationForm && (
+        <NewApplicationForm
+          onClose={() => setShowNewApplicationForm(false)}
+          onSubmit={handleNewApplication}
+        />
       )}
     </div>
   );

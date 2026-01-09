@@ -116,29 +116,37 @@ export function CommunicationHub() {
       {/* Main Grid */}
       <div className="grid grid-cols-3 gap-6">
         {/* Conversations */}
-        <div className="col-span-2 bg-gradient-to-br from-[#1a1f35] to-[#0f1523] border border-white/10 rounded-xl p-6">
+        <div className={`col-span-2 ${isDark ? 'bg-gradient-to-br from-[#1a1f35] to-[#0f1523]' : 'bg-white shadow-md'} border ${border.default} rounded-xl p-6`}>
           <div className="flex items-center justify-between mb-6">
             <h3 className="text-2xl" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
               CONVERSATIONS
             </h3>
             <div className="flex items-center gap-3">
               <div className="relative">
-                <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-white/40" />
+                <Search className={`w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 ${text.inactive}`} />
                 <input
                   type="text"
                   placeholder="Search messages..."
-                  className="pl-10 pr-4 py-2 bg-white/5 border border-white/10 rounded-lg text-sm focus:outline-none focus:border-[#ff6b35]/50"
+                  className={`pl-10 pr-4 py-2 ${isDark ? 'bg-white/5 border-white/10' : 'bg-gray-100 border-gray-200'} border rounded-lg text-sm focus:outline-none focus:border-[#ff6b35]/50`}
                   style={{ fontFamily: 'Work Sans, sans-serif' }}
                 />
               </div>
             </div>
           </div>
 
-          <div className="space-y-3">
-            {conversations.map((conversation, index) => (
+          {conversations.length === 0 ? (
+            <div className="text-center py-12">
+              <MessageSquare className={`w-12 h-12 mx-auto mb-4 ${text.inactive}`} />
+              <p className={text.muted} style={{ fontFamily: 'Work Sans, sans-serif' }}>
+                No conversations yet
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {conversations.map((conversation, index) => (
               <div
-                key={index}
-                className="flex items-center justify-between p-4 bg-white/5 rounded-lg hover:bg-white/10 transition-all border border-transparent hover:border-white/10 cursor-pointer group"
+                key={conversation.id}
+                className={`flex items-center justify-between p-4 ${isDark ? 'bg-white/5 hover:bg-white/10' : 'bg-gray-50 hover:bg-gray-100'} rounded-lg transition-all border ${border.default} hover:border-[#ff6b35]/50 cursor-pointer group`}
               >
                 <div className="flex items-center gap-4 flex-1">
                   <div className="relative">
@@ -160,23 +168,23 @@ export function CommunicationHub() {
                         className={`px-2 py-0.5 rounded-full text-xs font-medium ${
                           conversation.status === 'active'
                             ? 'bg-emerald-500/20 text-emerald-400'
-                            : 'bg-white/20 text-white/60'
+                            : isDark ? 'bg-white/20 text-white/60' : 'bg-gray-200 text-gray-600'
                         }`}
                       >
                         {conversation.status.toUpperCase()}
                       </span>
                     </div>
-                    <p className="text-sm text-white/50 mb-1" style={{ fontFamily: 'Work Sans, sans-serif' }}>
+                    <p className={`text-sm ${text.muted} mb-1`} style={{ fontFamily: 'Work Sans, sans-serif' }}>
                       {conversation.property}
                     </p>
-                    <p className="text-sm text-white/70" style={{ fontFamily: 'Work Sans, sans-serif' }}>
+                    <p className={`text-sm ${text.secondary}`} style={{ fontFamily: 'Work Sans, sans-serif' }}>
                       {conversation.lastMessage}
                     </p>
                   </div>
                 </div>
 
                 <div className="text-right ml-4">
-                  <p className="text-xs text-white/40 mb-2">{conversation.time}</p>
+                  <p className={`text-xs ${text.inactive} mb-2`}>{conversation.time}</p>
                   <button className="opacity-0 group-hover:opacity-100 px-3 py-1 bg-gradient-to-r from-[#ff6b35] to-[#f7931e] rounded text-xs font-medium transition-opacity">
                     Reply
                   </button>
@@ -184,8 +192,9 @@ export function CommunicationHub() {
               </div>
             ))}
           </div>
+          )}
 
-          <button className="w-full mt-4 py-3 bg-white/5 hover:bg-white/10 rounded-lg text-sm font-medium transition-colors">
+          <button className={`w-full mt-4 py-3 ${isDark ? 'bg-white/5 hover:bg-white/10' : 'bg-gray-100 hover:bg-gray-200'} rounded-lg text-sm font-medium transition-colors`}>
             View All Conversations
           </button>
         </div>
@@ -193,62 +202,76 @@ export function CommunicationHub() {
         {/* Right Column */}
         <div className="space-y-6">
           {/* Quick Templates */}
-          <div className="bg-gradient-to-br from-[#1a1f35] to-[#0f1523] border border-white/10 rounded-xl p-6">
+          <div className={`${isDark ? 'bg-gradient-to-br from-[#1a1f35] to-[#0f1523]' : 'bg-white shadow-md'} border ${border.default} rounded-xl p-6`}>
             <h3 className="text-xl mb-6" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
               QUICK TEMPLATES
             </h3>
 
-            <div className="space-y-3">
-              {quickTemplates.map((template, index) => (
-                <button
-                  key={index}
-                  className="w-full p-3 bg-white/5 hover:bg-white/10 rounded-lg transition-all border border-white/10 hover:border-[#ff6b35]/50 text-left group"
-                >
-                  <div className="flex items-center justify-between mb-2">
-                    <p className="font-medium text-sm" style={{ fontFamily: 'Work Sans, sans-serif' }}>
-                      {template.name}
-                    </p>
-                    <span className="text-xs text-white/40">{template.uses} uses</span>
-                  </div>
-                  <p className="text-xs text-white/50">{template.category}</p>
-                </button>
-              ))}
-            </div>
+            {templatesLoading ? (
+              <div className="text-center py-4">
+                <div className={`w-6 h-6 border-2 border-[#ff6b35] border-t-transparent rounded-full animate-spin mx-auto`} />
+              </div>
+            ) : templates.length === 0 ? (
+              <p className={`text-sm ${text.muted} text-center py-4`}>No templates yet</p>
+            ) : (
+              <div className="space-y-3">
+                {templates.map((template) => (
+                  <button
+                    key={template.id}
+                    className={`w-full p-3 ${isDark ? 'bg-white/5 hover:bg-white/10' : 'bg-gray-50 hover:bg-gray-100'} rounded-lg transition-all border ${border.default} hover:border-[#ff6b35]/50 text-left group`}
+                  >
+                    <div className="flex items-center justify-between mb-2">
+                      <p className="font-medium text-sm" style={{ fontFamily: 'Work Sans, sans-serif' }}>
+                        {template.name}
+                      </p>
+                      <span className={`text-xs ${text.inactive}`}>{template.usage_count} uses</span>
+                    </div>
+                    <p className={`text-xs ${text.muted}`}>{template.category}</p>
+                  </button>
+                ))}
+              </div>
+            )}
 
             <button className="w-full mt-4 py-3 bg-gradient-to-r from-[#ff6b35] to-[#f7931e] rounded-lg text-sm font-medium hover:scale-105 transition-transform">
               Create Template
             </button>
           </div>
 
-          {/* Communication Stats */}
-          <div className="bg-gradient-to-br from-[#1a1f35] to-[#0f1523] border border-white/10 rounded-xl p-6">
+          {/* Portal Activity */}
+          <div className={`${isDark ? 'bg-gradient-to-br from-[#1a1f35] to-[#0f1523]' : 'bg-white shadow-md'} border ${border.default} rounded-xl p-6`}>
             <h3 className="text-xl mb-6" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
               PORTAL ACTIVITY
             </h3>
-            <div className="space-y-4">
-              <div className="flex justify-between items-center">
-                <span className="text-sm text-white/70">Messages Today</span>
-                <span className="text-lg font-bold" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>34</span>
+            {activityLoading ? (
+              <div className="text-center py-4">
+                <div className={`w-6 h-6 border-2 border-[#ff6b35] border-t-transparent rounded-full animate-spin mx-auto`} />
               </div>
-              <div className="flex justify-between items-center">
-                <span className="text-sm text-white/70">Unread Messages</span>
-                <span className="text-lg font-bold text-[#ff6b35]" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>7</span>
+            ) : portalActivity && (
+              <div className="space-y-4">
+                <div className="flex justify-between items-center">
+                  <span className={`text-sm ${text.secondary}`}>Messages Today</span>
+                  <span className="text-lg font-bold" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>{portalActivity.messages_today}</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className={`text-sm ${text.secondary}`}>Unread Messages</span>
+                  <span className="text-lg font-bold text-[#ff6b35]" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>{portalActivity.unread_messages}</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className={`text-sm ${text.secondary}`}>Avg. Response</span>
+                  <span className="text-lg font-bold text-emerald-400" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>{portalActivity.avg_response_time_minutes}min</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className={`text-sm ${text.secondary}`}>Resolved Today</span>
+                  <span className="text-lg font-bold" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>{portalActivity.resolved_today}</span>
+                </div>
               </div>
-              <div className="flex justify-between items-center">
-                <span className="text-sm text-white/70">Avg. Response</span>
-                <span className="text-lg font-bold text-emerald-400" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>18min</span>
-              </div>
-              <div className="flex justify-between items-center">
-                <span className="text-sm text-white/70">Resolved Today</span>
-                <span className="text-lg font-bold" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>12</span>
-              </div>
-            </div>
+            )}
           </div>
         </div>
       </div>
 
       {/* Automated Reminders */}
-      <div className="bg-gradient-to-br from-[#1a1f35] to-[#0f1523] border border-white/10 rounded-xl p-6">
+      <div className={`${isDark ? 'bg-gradient-to-br from-[#1a1f35] to-[#0f1523]' : 'bg-white shadow-md'} border ${border.default} rounded-xl p-6`}>
         <div className="flex items-center justify-between mb-6">
           <div className="flex items-center gap-3">
             <div className="p-2 bg-gradient-to-br from-[#10b981] to-[#06b6d4] rounded-lg">
@@ -258,7 +281,7 @@ export function CommunicationHub() {
               <h3 className="text-2xl" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
                 AUTOMATED REMINDERS
               </h3>
-              <p className="text-sm text-white/50">Schedule and manage automated tenant communications</p>
+              <p className={`text-sm ${text.muted}`}>Schedule and manage automated tenant communications</p>
             </div>
           </div>
           <button className="px-6 py-3 bg-gradient-to-r from-[#ff6b35] to-[#f7931e] rounded-lg font-medium hover:scale-105 transition-transform">
@@ -266,50 +289,78 @@ export function CommunicationHub() {
           </button>
         </div>
 
-        <div className="grid grid-cols-4 gap-4">
-          {automatedReminders.map((reminder, index) => (
-            <div
-              key={index}
-              className="p-5 bg-white/5 rounded-lg border border-white/10 hover:border-[#ff6b35]/50 transition-all"
-            >
-              <div className="flex items-start justify-between mb-4">
-                <h4 className="font-semibold" style={{ fontFamily: 'Work Sans, sans-serif' }}>
-                  {reminder.type}
-                </h4>
-                <span className="px-2 py-1 rounded-full text-xs font-medium bg-emerald-500/20 text-emerald-400">
-                  {reminder.status.toUpperCase()}
-                </span>
-              </div>
-
-              <div className="space-y-3 mb-4">
-                <div className="flex items-center justify-between text-sm">
-                  <span className="text-white/50">Recipients</span>
-                  <span className="font-medium">{reminder.recipients}</span>
-                </div>
-                <div className="flex items-center justify-between text-sm">
-                  <span className="text-white/50">Frequency</span>
-                  <span className="font-medium">{reminder.frequency}</span>
-                </div>
-              </div>
-
-              <div className="p-3 bg-blue-500/10 border border-blue-500/20 rounded-lg mb-3">
-                <div className="flex items-center gap-2 mb-1">
-                  <Clock className="w-4 h-4 text-blue-400" />
-                  <span className="text-xs text-blue-400 font-medium">Next Send</span>
-                </div>
-                <p className="text-sm text-white/70">{reminder.nextSend}</p>
-              </div>
-
-              <button className="w-full py-2 bg-white/5 hover:bg-white/10 rounded-lg text-sm transition-colors">
-                Edit Schedule
-              </button>
+        {remindersLoading ? (
+          <div className="flex items-center justify-center py-12">
+            <div className="text-center">
+              <div className={`w-8 h-8 border-2 border-[#ff6b35] border-t-transparent rounded-full animate-spin mx-auto mb-2`} />
+              <p className={`text-sm ${text.muted}`}>Loading reminders...</p>
             </div>
-          ))}
-        </div>
+          </div>
+        ) : reminders.length === 0 ? (
+          <div className="text-center py-12">
+            <Bell className={`w-12 h-12 mx-auto mb-4 ${text.inactive}`} />
+            <p className={text.muted} style={{ fontFamily: 'Work Sans, sans-serif' }}>
+              No automated reminders configured
+            </p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-4 gap-4">
+            {reminders.map((reminder) => (
+              <div
+                key={reminder.id}
+                className={`p-5 ${isDark ? 'bg-white/5' : 'bg-gray-50'} rounded-lg border ${border.default} hover:border-[#ff6b35]/50 transition-all`}
+              >
+                <div className="flex items-start justify-between mb-4">
+                  <h4 className="font-semibold" style={{ fontFamily: 'Work Sans, sans-serif' }}>
+                    {reminder.reminder_type}
+                  </h4>
+                  <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                    reminder.status === 'active'
+                      ? 'bg-emerald-500/20 text-emerald-400'
+                      : 'bg-gray-500/20 text-gray-400'
+                  }`}>
+                    {reminder.status.toUpperCase()}
+                  </span>
+                </div>
+
+                <div className="space-y-3 mb-4">
+                  <div className="flex items-center justify-between text-sm">
+                    <span className={text.muted}>Recipients</span>
+                    <span className="font-medium">{reminder.recipient_count}</span>
+                  </div>
+                  <div className="flex items-center justify-between text-sm">
+                    <span className={text.muted}>Frequency</span>
+                    <span className="font-medium capitalize">{reminder.frequency}</span>
+                  </div>
+                </div>
+
+                <div className="p-3 bg-blue-500/10 border border-blue-500/20 rounded-lg mb-3">
+                  <div className="flex items-center gap-2 mb-1">
+                    <Clock className="w-4 h-4 text-blue-400" />
+                    <span className="text-xs text-blue-400 font-medium">Next Send</span>
+                  </div>
+                  <p className={`text-sm ${text.secondary}`}>
+                    {new Date(reminder.next_send_date).toLocaleString('en-US', {
+                      month: 'short',
+                      day: 'numeric',
+                      year: 'numeric',
+                      hour: 'numeric',
+                      minute: '2-digit',
+                    })}
+                  </p>
+                </div>
+
+                <button className={`w-full py-2 ${isDark ? 'bg-white/5 hover:bg-white/10' : 'bg-gray-100 hover:bg-gray-200'} rounded-lg text-sm transition-colors`}>
+                  Edit Schedule
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Communication Features */}
-      <div className="bg-gradient-to-br from-[#1a1f35] to-[#0f1523] border border-white/10 rounded-xl p-6">
+      <div className={`${isDark ? 'bg-gradient-to-br from-[#1a1f35] to-[#0f1523]' : 'bg-white shadow-md'} border ${border.default} rounded-xl p-6`}>
         <div className="flex items-start gap-6">
           <div className="p-4 bg-gradient-to-br from-[#ff6b35] to-[#f7931e] rounded-xl">
             <MessageSquare className="w-8 h-8 text-white" />
@@ -318,39 +369,39 @@ export function CommunicationHub() {
             <h3 className="text-2xl mb-2" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
               COMPREHENSIVE COMMUNICATION PLATFORM
             </h3>
-            <p className="text-white/70 mb-4" style={{ fontFamily: 'Work Sans, sans-serif' }}>
+            <p className={`${text.secondary} mb-4`} style={{ fontFamily: 'Work Sans, sans-serif' }}>
               Built-in messaging system with automated reminders for rent payments, lease renewals, maintenance updates, and property inspections. Smart templates and AI-powered responses reduce communication time by 78%. All conversations are automatically logged and searchable.
             </p>
             <div className="grid grid-cols-5 gap-4">
-              <div className="p-3 bg-white/5 rounded-lg">
+              <div className={`p-3 ${isDark ? 'bg-white/5' : 'bg-gray-50'} rounded-lg`}>
                 <p className="text-2xl font-bold text-emerald-400 mb-1" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
-                  78%
+                  {stats?.automation_rate || 78}%
                 </p>
-                <p className="text-xs text-white/50">Automation Rate</p>
+                <p className={`text-xs ${text.muted}`}>Automation Rate</p>
               </div>
-              <div className="p-3 bg-white/5 rounded-lg">
+              <div className={`p-3 ${isDark ? 'bg-white/5' : 'bg-gray-50'} rounded-lg`}>
                 <p className="text-2xl font-bold text-emerald-400 mb-1" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
-                  18min
+                  {stats?.avg_response_time_minutes || 18}min
                 </p>
-                <p className="text-xs text-white/50">Avg. Response</p>
+                <p className={`text-xs ${text.muted}`}>Avg. Response</p>
               </div>
-              <div className="p-3 bg-white/5 rounded-lg">
+              <div className={`p-3 ${isDark ? 'bg-white/5' : 'bg-gray-50'} rounded-lg`}>
                 <p className="text-2xl font-bold text-emerald-400 mb-1" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
-                  96%
+                  {stats?.tenant_satisfaction || 96}%
                 </p>
-                <p className="text-xs text-white/50">Satisfaction</p>
+                <p className={`text-xs ${text.muted}`}>Satisfaction</p>
               </div>
-              <div className="p-3 bg-white/5 rounded-lg">
+              <div className={`p-3 ${isDark ? 'bg-white/5' : 'bg-gray-50'} rounded-lg`}>
                 <p className="text-2xl font-bold text-emerald-400 mb-1" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
                   24/7
                 </p>
-                <p className="text-xs text-white/50">Portal Access</p>
+                <p className={`text-xs ${text.muted}`}>Portal Access</p>
               </div>
-              <div className="p-3 bg-white/5 rounded-lg">
+              <div className={`p-3 ${isDark ? 'bg-white/5' : 'bg-gray-50'} rounded-lg`}>
                 <p className="text-2xl font-bold text-emerald-400 mb-1" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
-                  142
+                  {stats?.active_conversations || 142}
                 </p>
-                <p className="text-xs text-white/50">Active Tenants</p>
+                <p className={`text-xs ${text.muted}`}>Active Tenants</p>
               </div>
             </div>
           </div>

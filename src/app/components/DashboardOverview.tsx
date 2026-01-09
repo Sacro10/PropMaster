@@ -1,4 +1,5 @@
-import { TrendingUp, TrendingDown, Users, Wrench, DollarSign, CircleCheck, Activity, Bell, ListFilter, RefreshCw } from 'lucide-react';
+import { TrendingUp, TrendingDown, Users, Wrench, DollarSign, CircleCheck, Activity, Bell, ListFilter, RefreshCw, FileText } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { useThemeStyles } from '../hooks/useThemeStyles';
 import { useDashboardData } from '../../lib/hooks/useDashboardData';
 import { LoadingPage } from './LoadingSpinner';
@@ -7,7 +8,8 @@ import { formatCurrencyCompact, formatPercentageChange, formatNumber } from '../
 import { formatRelativeTime } from '../../lib/utils/dateHelpers';
 
 export function DashboardOverview() {
-  const { isDark, bg, text, border } = useThemeStyles();
+  const { isDark, text, border } = useThemeStyles();
+  const navigate = useNavigate();
   const { metrics, recentActivity, systemMetrics, upcomingTasks, loading, error, refetch } = useDashboardData();
 
   // Show loading state
@@ -53,10 +55,10 @@ export function DashboardOverview() {
   ];
 
   const quickActions = [
-    { label: 'Screen New Tenant', icon: Users, color: 'from-[#ff6b35] to-[#f7931e]' },
-    { label: 'Create Maintenance Request', icon: Wrench, color: 'from-[#3b82f6] to-[#8b5cf6]' },
-    { label: 'Generate Report', icon: Activity, color: 'from-[#10b981] to-[#06b6d4]' },
-    { label: 'Schedule Showing', icon: Bell, color: 'from-[#f59e0b] to-[#ef4444]' },
+    { label: 'Screen New Tenant', icon: Users, color: 'from-[#ff6b35] to-[#f7931e]', path: '/app/tenants' },
+    { label: 'Create Maintenance Request', icon: Wrench, color: 'from-[#3b82f6] to-[#8b5cf6]', path: '/app/maintenance' },
+    { label: 'Generate Report', icon: FileText, color: 'from-[#10b981] to-[#06b6d4]', path: '/app/analytics' },
+    { label: 'Schedule Showing', icon: Bell, color: 'from-[#f59e0b] to-[#ef4444]', path: '/app/showings' },
   ];
 
   return (
@@ -139,31 +141,35 @@ export function DashboardOverview() {
                 </p>
               </div>
             ) : (
-              recentActivity.map((activity) => (
-                <div
-                  key={activity.id}
-                  className={`flex items-center justify-between p-4 ${isDark ? 'bg-white/5 hover:bg-white/10 border-transparent hover:border-white/10' : 'bg-gray-50 hover:bg-gray-100 border-gray-200 hover:border-gray-300'} rounded-lg transition-colors border`}
-                >
-                  <div className="flex items-center gap-4">
-                    <div className={`w-2 h-2 rounded-full ${
-                      activity.status === 'completed' ? 'bg-emerald-400' :
-                      activity.status === 'urgent' ? 'bg-red-400' :
-                      'bg-amber-400'
-                    }`} />
-                    <div>
-                      <p className="font-medium mb-1" style={{ fontFamily: 'Work Sans, sans-serif' }}>
-                        {activity.title}
-                      </p>
-                      <p className={`text-sm ${text.muted}`} style={{ fontFamily: 'Work Sans, sans-serif' }}>
-                        {activity.property}
-                      </p>
+              recentActivity.map((activity) => {
+                // Determine status color based on event type
+                const statusColor =
+                  activity.type.includes('payment') || activity.type.includes('completed') ? 'bg-emerald-400' :
+                  activity.type.includes('urgent') || activity.type.includes('emergency') ? 'bg-red-400' :
+                  'bg-amber-400';
+
+                return (
+                  <div
+                    key={activity.id}
+                    className={`flex items-center justify-between p-4 ${isDark ? 'bg-white/5 hover:bg-white/10 border-transparent hover:border-white/10' : 'bg-gray-50 hover:bg-gray-100 border-gray-200 hover:border-gray-300'} rounded-lg transition-colors border`}
+                  >
+                    <div className="flex items-center gap-4">
+                      <div className={`w-2 h-2 rounded-full ${statusColor}`} />
+                      <div>
+                        <p className="font-medium mb-1" style={{ fontFamily: 'Work Sans, sans-serif' }}>
+                          {activity.summary}
+                        </p>
+                        <p className={`text-sm ${text.muted}`} style={{ fontFamily: 'Work Sans, sans-serif' }}>
+                          {activity.type.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
+                        </p>
+                      </div>
                     </div>
+                    <span className={`text-sm ${text.inactive}`} style={{ fontFamily: 'Work Sans, sans-serif' }}>
+                      {formatRelativeTime(activity.timestamp)}
+                    </span>
                   </div>
-                  <span className={`text-sm ${text.inactive}`} style={{ fontFamily: 'Work Sans, sans-serif' }}>
-                    {formatRelativeTime(activity.time)}
-                  </span>
-                </div>
-              ))
+                );
+              })
             )}
           </div>
         </div>
@@ -180,6 +186,7 @@ export function DashboardOverview() {
                 return (
                   <button
                     key={index}
+                    onClick={() => navigate(action.path)}
                     className={`w-full flex items-center gap-3 p-4 ${isDark ? 'bg-white/5 hover:bg-white/10 border-transparent hover:border-white/10' : 'bg-gray-50 hover:bg-gray-100 border-gray-200 hover:border-gray-300'} rounded-lg transition-all group border`}
                   >
                     <div className={`p-2 rounded-lg bg-gradient-to-br ${action.color} group-hover:scale-110 transition-transform`}>
@@ -265,31 +272,51 @@ export function DashboardOverview() {
           </div>
         ) : (
           <div className="grid grid-cols-4 gap-4">
-            {upcomingTasks.map((task, index) => (
-              <div
-                key={index}
-                className={`p-4 ${isDark ? 'bg-white/5' : 'bg-gray-50'} rounded-lg border ${border.default} hover:border-[#ff6b35]/50 transition-all group`}
-              >
-                <div className="flex items-start justify-between mb-3">
-                  <div className={`px-2 py-1 rounded text-xs font-medium ${
-                    task.priority === 'high' ? 'bg-red-500/20 text-red-400' :
-                    task.priority === 'medium' ? 'bg-amber-500/20 text-amber-400' :
-                    'bg-blue-500/20 text-blue-400'
-                  }`}>
-                    {task.priority.toUpperCase()}
+            {upcomingTasks.map((task) => {
+              // Format due date
+              const dueDate = new Date(task.dueDate);
+              const now = new Date();
+              const daysUntilDue = Math.ceil((dueDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+
+              let dueDateDisplay = '';
+              if (daysUntilDue < 0) {
+                dueDateDisplay = 'Overdue';
+              } else if (daysUntilDue === 0) {
+                dueDateDisplay = 'Today';
+              } else if (daysUntilDue === 1) {
+                dueDateDisplay = 'Tomorrow';
+              } else if (daysUntilDue <= 7) {
+                dueDateDisplay = `${daysUntilDue} days`;
+              } else {
+                dueDateDisplay = dueDate.toLocaleDateString();
+              }
+
+              return (
+                <div
+                  key={task.id}
+                  className={`p-4 ${isDark ? 'bg-white/5' : 'bg-gray-50'} rounded-lg border ${border.default} hover:border-[#ff6b35]/50 transition-all group`}
+                >
+                  <div className="flex items-start justify-between mb-3">
+                    <div className={`px-2 py-1 rounded text-xs font-medium ${
+                      task.priority === 'urgent' || task.priority === 'high' ? 'bg-red-500/20 text-red-400' :
+                      task.priority === 'medium' ? 'bg-amber-500/20 text-amber-400' :
+                      'bg-blue-500/20 text-blue-400'
+                    }`}>
+                      {task.priority.toUpperCase()}
+                    </div>
                   </div>
+                  <p className="font-medium mb-2" style={{ fontFamily: 'Work Sans, sans-serif' }}>
+                    {task.title}
+                  </p>
+                  <p className={`text-sm ${text.muted} mb-2`} style={{ fontFamily: 'Work Sans, sans-serif' }}>
+                    {task.type.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
+                  </p>
+                  <p className={`text-xs ${text.inactive}`} style={{ fontFamily: 'Work Sans, sans-serif' }}>
+                    Due: {dueDateDisplay}
+                  </p>
                 </div>
-                <p className="font-medium mb-2" style={{ fontFamily: 'Work Sans, sans-serif' }}>
-                  {task.task}
-                </p>
-                <p className={`text-sm ${text.muted} mb-2`} style={{ fontFamily: 'Work Sans, sans-serif' }}>
-                  {task.property}
-                </p>
-                <p className={`text-xs ${text.inactive}`} style={{ fontFamily: 'Work Sans, sans-serif' }}>
-                  Due: {task.due}
-                </p>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>

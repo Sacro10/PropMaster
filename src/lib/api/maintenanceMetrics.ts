@@ -270,36 +270,122 @@ export async function assignMaintenanceRequest(requestId: string, vendorProfileI
       throw new Error('No account ID found');
     }
 
-    // Create assignment
-    const { error: assignError } = await supabase
-      .from('maintenance_assignments')
-      .insert({
-        account_id: accountId,
-        request_id: requestId,
-        vendor_profile_id: vendorProfileId,
-        status: 'pending',
-        assigned_at: new Date().toISOString(),
-      });
+    // Use backend endpoint for assignment logic
+    const response = await fetch(`/api/maintenance/${requestId}/assign`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ vendorProfileId }),
+    });
 
-    if (assignError) {
-      throw handleSupabaseError(assignError, 'assign vendor');
-    }
-
-    // Update request status
-    const { error: updateError } = await supabase
-      .from('maintenance_requests')
-      .update({
-        status: 'assigned',
-        assigned_at: new Date().toISOString(),
-      })
-      .eq('id', requestId)
-      .eq('account_id', accountId);
-
-    if (updateError) {
-      throw handleSupabaseError(updateError, 'update request status');
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.error || 'Failed to assign vendor');
     }
   } catch (error) {
     console.error('[Maintenance Metrics API] Error assigning vendor:', error);
+    throw error;
+  }
+}
+
+/**
+ * Get available vendors for a maintenance request
+ */
+export async function getAvailableVendors(requestId: string): Promise<Array<{
+  id: string;
+  businessName: string;
+  rating: number;
+  jobsCompleted: number;
+  hourlyRate: number;
+}>> {
+  try {
+    const response = await fetch(`/api/maintenance/${requestId}/vendors`);
+
+    if (!response.ok) {
+      throw new Error('Failed to fetch available vendors');
+    }
+
+    return await response.json();
+  } catch (error) {
+    console.error('[Maintenance Metrics API] Error fetching vendors:', error);
+    return [];
+  }
+}
+
+/**
+ * Create emergency maintenance request
+ */
+export async function createEmergencyRequest(data: {
+  title: string;
+  description: string;
+  category: string;
+  unitId: string;
+}): Promise<any> {
+  try {
+    const response = await fetch('/api/maintenance/emergency', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(data),
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.error || 'Failed to create emergency request');
+    }
+
+    return await response.json();
+  } catch (error) {
+    console.error('[Maintenance Metrics API] Error creating emergency request:', error);
+    throw error;
+  }
+}
+
+/**
+ * Generate HVAC delivery batch
+ */
+export async function generateHVACBatch(): Promise<any> {
+  try {
+    const response = await fetch('/api/hvac/batches/generate', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.error || 'Failed to generate HVAC batch');
+    }
+
+    return await response.json();
+  } catch (error) {
+    console.error('[Maintenance Metrics API] Error generating HVAC batch:', error);
+    throw error;
+  }
+}
+
+/**
+ * Mark HVAC delivery as delivered
+ */
+export async function markHVACDelivered(deliveryId: string, trackingNumber?: string): Promise<void> {
+  try {
+    const response = await fetch(`/api/hvac/deliveries/${deliveryId}/delivered`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ trackingNumber }),
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.error || 'Failed to mark delivery as delivered');
+    }
+  } catch (error) {
+    console.error('[Maintenance Metrics API] Error marking delivery delivered:', error);
     throw error;
   }
 }

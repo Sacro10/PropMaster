@@ -1,14 +1,20 @@
-import { Wrench, CircleCheck, Activity, Bell, ListFilter, RefreshCw } from 'lucide-react';
+import { Wrench, CircleCheck, Activity, Bell, ListFilter, RefreshCw, AlertTriangle, CheckCircle } from 'lucide-react';
+import { useState } from 'react';
 import { useThemeStyles } from '../hooks/useThemeStyles';
 import { useHasFeature } from '../hooks/usePlanGating';
 import { FeatureGate, LockedFeatureCard } from './UpgradeCTA';
-import { useMaintenanceRequests, useMaintenanceMetrics, useHVACProgram, useRoutingMetrics } from '../../lib/hooks/useMaintenance';
+import { useMaintenanceRequests, useMaintenanceMetrics, useHVACProgram, useRoutingMetrics, useAssignVendor } from '../../lib/hooks/useMaintenance';
+import { getAvailableVendors, generateHVACBatch, createEmergencyRequest } from '../../lib/api/maintenanceMetrics';
 import { LoadingPage } from './LoadingSpinner';
 import { ErrorState } from './ErrorBoundary';
 import { formatRelativeTime, formatDisplayDate } from '../../lib/utils/dateHelpers';
 
 export function MaintenancePanel() {
   const { isDark, bg, text, border } = useThemeStyles();
+  const [assigningRequestId, setAssigningRequestId] = useState<string | null>(null);
+  const [availableVendors, setAvailableVendors] = useState<any[]>([]);
+  const [generatingBatch, setGeneratingBatch] = useState(false);
+  const { assign, isAssigning } = useAssignVendor();
 
   // Feature checks for plan gating
   const maintenanceRouting = useHasFeature('maintenance_routing');
@@ -31,11 +37,49 @@ export function MaintenancePanel() {
     return <ErrorState error={requestsError || metricsError} retry={refetchRequests} />;
   }
 
+  // Handle vendor assignment
+  const handleAssignClick = async (requestId: string) => {
+    setAssigningRequestId(requestId);
+    const vendors = await getAvailableVendors(requestId);
+    setAvailableVendors(vendors);
+  };
+
+  const handleVendorSelect = async (vendorId: string) => {
+    if (!assigningRequestId) return;
+
+    const result = await assign(assigningRequestId, vendorId);
+    if (result.success) {
+      setAssigningRequestId(null);
+      setAvailableVendors([]);
+      refetchRequests();
+    }
+  };
+
+  // Handle HVAC batch generation
+  const handleGenerateBatch = async () => {
+    setGeneratingBatch(true);
+    try {
+      await generateHVACBatch();
+      alert('HVAC delivery batch generated successfully!');
+    } catch (error) {
+      console.error('Failed to generate batch:', error);
+      alert('Failed to generate batch. Please try again.');
+    } finally {
+      setGeneratingBatch(false);
+    }
+  };
+
+  // Handle emergency request
+  const handleEmergencyClick = () => {
+    // In a real app, this would open a modal with a form
+    alert('Emergency request feature - would open form to create emergency maintenance request');
+  };
+
   const maintenanceStats = metrics ? [
-    { label: 'Active Requests', value: metrics.active_requests.toString(), change: '-15%' },
-    { label: 'Avg. Response Time', value: `${metrics.avg_response_time_hours} hrs`, change: '-18%' },
-    { label: 'Completion Rate', value: `${metrics.completion_rate}%`, change: '+3%' },
-    { label: 'Emergency Support', value: metrics.emergency_support_status, change: 'Active' },
+    { label: 'Active Requests', value: metrics.active_requests.toString(), change: '-15%', icon: Wrench },
+    { label: 'Avg. Response Time', value: `${metrics.avg_response_time_hours} hrs`, change: '-18%', icon: Activity },
+    { label: 'Completion Rate', value: `${metrics.completion_rate}%`, change: '+3%', icon: CheckCircle },
+    { label: 'Emergency Support', value: metrics.emergency_support_status, change: metrics.emergency_support_status === '24/7' ? 'Active' : 'Limited', icon: Bell },
   ] : [];
 
   return (
@@ -66,22 +110,32 @@ export function MaintenancePanel() {
 
       {/* Stats */}
       <div className="grid grid-cols-4 gap-6">
-        {maintenanceStats.map((stat, index) => (
-          <div
-            key={index}
-            className={`${isDark ? 'bg-gradient-to-br from-[#1a1f35] to-[#0f1523]' : 'bg-white shadow-md'} border ${border.default} rounded-xl p-6`}
-          >
-            <p className={`text-sm ${text.muted} mb-2`} style={{ fontFamily: 'Work Sans, sans-serif' }}>
-              {stat.label}
-            </p>
-            <div className="flex items-end justify-between">
-              <p className="text-3xl font-bold" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
-                {stat.value}
-              </p>
-              <span className="text-sm text-emerald-400">{stat.change}</span>
+        {maintenanceStats.map((stat, index) => {
+          const Icon = stat.icon;
+          return (
+            <div
+              key={index}
+              className={`${isDark ? 'bg-gradient-to-br from-[#1a1f35] to-[#0f1523]' : 'bg-white shadow-md'} border ${border.default} rounded-xl p-6`}
+            >
+              <div className="flex items-center gap-3 mb-3">
+                <div className={`p-2 ${isDark ? 'bg-white/5' : 'bg-gray-100'} rounded-lg`}>
+                  <Icon className="w-4 h-4 text-[#ff6b35]" />
+                </div>
+                <p className={`text-sm ${text.muted}`} style={{ fontFamily: 'Work Sans, sans-serif' }}>
+                  {stat.label}
+                </p>
+              </div>
+              <div className="flex items-end justify-between">
+                <p className="text-3xl font-bold" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
+                  {stat.value}
+                </p>
+                <span className={`text-sm ${stat.change.includes('Active') || stat.change.includes('+') ? 'text-emerald-400' : stat.change.includes('-') ? 'text-red-400' : 'text-gray-400'}`}>
+                  {stat.change}
+                </span>
+              </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
 
       {/* Main Grid */}
@@ -186,9 +240,43 @@ export function MaintenancePanel() {
                             )}
                           </>
                         ) : (
-                          <button className="px-4 py-2 bg-gradient-to-r from-[#ff6b35] to-[#f7931e] rounded-lg text-sm font-medium hover:scale-105 transition-transform">
-                            Assign
-                          </button>
+                          <>
+                            {assigningRequestId === request.id ? (
+                              <div className={`p-3 ${isDark ? 'bg-white/10' : 'bg-gray-100'} rounded-lg min-w-[200px]`}>
+                                <p className="text-xs mb-2">Select Vendor:</p>
+                                {availableVendors.length === 0 ? (
+                                  <p className="text-xs text-gray-400">Loading vendors...</p>
+                                ) : (
+                                  <div className="space-y-1 max-h-32 overflow-y-auto">
+                                    {availableVendors.map((vendor) => (
+                                      <button
+                                        key={vendor.id}
+                                        onClick={() => handleVendorSelect(vendor.id)}
+                                        disabled={isAssigning}
+                                        className={`w-full text-left p-2 ${isDark ? 'hover:bg-white/5' : 'hover:bg-gray-200'} rounded text-xs transition-colors`}
+                                      >
+                                        {vendor.businessName}
+                                        <span className="text-xs text-gray-400 ml-1">★{vendor.rating}</span>
+                                      </button>
+                                    ))}
+                                  </div>
+                                )}
+                                <button
+                                  onClick={() => setAssigningRequestId(null)}
+                                  className="mt-2 text-xs text-gray-400 hover:text-gray-300"
+                                >
+                                  Cancel
+                                </button>
+                              </div>
+                            ) : (
+                              <button
+                                onClick={() => handleAssignClick(request.id)}
+                                className="px-4 py-2 bg-gradient-to-r from-[#ff6b35] to-[#f7931e] rounded-lg text-sm font-medium hover:scale-105 transition-transform"
+                              >
+                                Assign
+                              </button>
+                            )}
+                          </>
                         )}
                       </div>
                     </div>
@@ -276,9 +364,16 @@ export function MaintenancePanel() {
                     <p className="text-sm text-emerald-400 mb-1 font-medium">
                       {hvacProgram.reduce((sum, p) => sum + p.total_filters, 0)} filters scheduled
                     </p>
-                    <p className={`text-xs ${text.muted}`}>
+                    <p className={`text-xs ${text.muted} mb-3`}>
                       Across {hvacProgram.length} properties
                     </p>
+                    <button
+                      onClick={handleGenerateBatch}
+                      disabled={generatingBatch}
+                      className={`w-full py-2 ${isDark ? 'bg-emerald-500/20 hover:bg-emerald-500/30' : 'bg-emerald-100 hover:bg-emerald-200'} text-emerald-400 rounded-lg text-xs font-medium transition-colors ${generatingBatch ? 'opacity-50 cursor-not-allowed' : ''}`}
+                    >
+                      {generatingBatch ? 'Generating...' : 'Generate Next Batch'}
+                    </button>
                   </div>
                 </>
               )}
@@ -317,18 +412,28 @@ export function MaintenancePanel() {
                 <p className={`text-sm ${text.muted}`}>Round-the-clock emergency response team standing by</p>
               </div>
 
-              {metrics && metrics.recent_emergency_count > 0 && (
-                <div className={`p-4 ${isDark ? 'bg-white/5' : 'bg-gray-50'} rounded-lg`}>
-                  <p className={`text-sm ${text.muted} mb-1`}>Recent Emergency Requests</p>
-                  <p className="text-2xl font-bold text-[#ff6b35]" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
-                    {metrics.recent_emergency_count}
-                  </p>
-                  <p className={`text-xs ${text.inactive}`}>Last 24 hours</p>
-                </div>
-              )}
+              <div className="space-y-3">
+                {metrics && metrics.recent_emergency_count > 0 && (
+                  <div className={`p-4 ${isDark ? 'bg-white/5' : 'bg-gray-50'} rounded-lg`}>
+                    <p className={`text-sm ${text.muted} mb-1`}>Recent Emergency Requests</p>
+                    <p className="text-2xl font-bold text-[#ff6b35]" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
+                      {metrics.recent_emergency_count}
+                    </p>
+                    <p className={`text-xs ${text.inactive}`}>Last 24 hours</p>
+                  </div>
+                )}
+
+                <button
+                  onClick={handleEmergencyClick}
+                  className={`w-full py-3 ${isDark ? 'bg-red-500/20 hover:bg-red-500/30' : 'bg-red-50 hover:bg-red-100'} border border-red-500/30 text-red-400 rounded-lg font-medium transition-colors flex items-center justify-center gap-2`}
+                >
+                  <AlertTriangle className="w-4 h-4" />
+                  Create Emergency Request
+                </button>
+              </div>
 
               {maintenanceRouting.hasAccess && routingMetrics && (
-                <div className="mt-4 space-y-3">
+                <div className="space-y-3">
                   <p className={`text-sm ${text.muted} font-medium`}>Smart Routing Metrics</p>
                   <div className="grid grid-cols-2 gap-3">
                     <div className={`p-3 ${isDark ? 'bg-white/5' : 'bg-gray-50'} rounded-lg`}>
@@ -338,6 +443,10 @@ export function MaintenancePanel() {
                     <div className={`p-3 ${isDark ? 'bg-white/5' : 'bg-gray-50'} rounded-lg`}>
                       <p className={`text-xs ${text.inactive} mb-1`}>Avg Response</p>
                       <p className="text-lg font-bold text-emerald-400">{routingMetrics.avg_acceptance_time_hours}h</p>
+                    </div>
+                    <div className={`p-3 ${isDark ? 'bg-white/5' : 'bg-gray-50'} rounded-lg col-span-2`}>
+                      <p className={`text-xs ${text.inactive} mb-1`}>Routing Efficiency</p>
+                      <p className="text-lg font-bold text-emerald-400">{routingMetrics.vendor_utilization_rate}%</p>
                     </div>
                   </div>
                 </div>
