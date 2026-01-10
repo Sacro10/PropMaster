@@ -289,7 +289,8 @@ router.get('/timeseries', async (req: AnalyticsRequest, res: Response) => {
         });
 
       if (error) {
-        throw error;
+        console.warn('Analytics timeseries RPC missing or failed, returning empty series:', error);
+        return res.json([]);
       }
 
       // Format data for charts
@@ -322,6 +323,91 @@ router.get('/timeseries', async (req: AnalyticsRequest, res: Response) => {
   } catch (error) {
     console.error('Analytics timeseries error:', error);
     res.status(500).json({ error: 'Failed to fetch timeseries data' });
+  }
+});
+
+/**
+ * GET /api/analytics/properties
+ * Returns property performance metrics for the given timeframe
+ */
+router.get('/properties', async (req: AnalyticsRequest, res: Response) => {
+  try {
+    const { range = '30d' } = req.query as Partial<TimeframeQuery>;
+    const userId = req.user?.id;
+
+    if (!userId) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
+
+    const accountId = await getUserAccountId(userId);
+    const { start, end } = getDateRange(range);
+
+    const { data: properties, error: propertiesError } = await supabase
+      .from('properties')
+      .select('id, name, total_units, occupied_units')
+      .eq('account_id', accountId);
+
+    if (propertiesError) {
+      throw propertiesError;
+    }
+
+    if (!properties || properties.length === 0) {
+      return res.json([]);
+    }
+
+    const propertyIds = properties.map((p) => p.id);
+    const { data: units } = await supabase
+      .from('units')
+      .select('property_id, status')
+      .eq('account_id', accountId)
+      .in('property_id', propertyIds);
+
+    const unitStats = (units || []).reduce((acc: Record<string, { total: number; occupied: number }>, unit: any) => {
+      const current = acc[unit.property_id] || { total: 0, occupied: 0 };
+      current.total += 1;
+      if (unit.status === 'occupied') {
+        current.occupied += 1;
+      }
+      acc[unit.property_id] = current;
+      return acc;
+    }, {});
+
+    const { data: payments } = await supabase
+      .from('payments')
+      .select('amount, unit_id, units!inner(property_id)')
+      .eq('account_id', accountId)
+      .eq('status', 'paid')
+      .gte('paid_at', start.toISOString())
+      .lte('paid_at', end.toISOString());
+
+    const revenueByProperty = (payments || []).reduce((acc: Record<string, number>, payment: any) => {
+      const propertyId = payment.units?.property_id;
+      if (!propertyId) {
+        return acc;
+      }
+      acc[propertyId] = (acc[propertyId] || 0) + Number(payment.amount || 0);
+      return acc;
+    }, {});
+
+    const result = properties.map((property) => {
+      const unitsStat = unitStats[property.id] || { total: 0, occupied: 0 };
+      const totalUnits = Number(property.total_units ?? unitsStat.total ?? 0);
+      const occupiedUnits = Number(property.occupied_units ?? unitsStat.occupied ?? 0);
+      const occupancy = totalUnits > 0 ? (occupiedUnits / totalUnits) * 100 : 0;
+
+      return {
+        property_id: property.id,
+        name: property.name,
+        revenue: revenueByProperty[property.id] || 0,
+        occupancy,
+        units: totalUnits,
+      };
+    });
+
+    res.json(result);
+  } catch (error) {
+    console.error('Analytics properties error:', error);
+    res.status(500).json({ error: 'Failed to fetch property performance' });
   }
 });
 

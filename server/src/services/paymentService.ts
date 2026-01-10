@@ -70,7 +70,6 @@ export async function getRecentPayments(
     .from('payments')
     .select(`
       *,
-      tenant:user_profiles!tenant_user_id(full_name, email, phone),
       unit:units(unit_number, property_id, properties(name, address1, city, state))
     `)
     .eq('account_id', accountId)
@@ -79,6 +78,19 @@ export async function getRecentPayments(
     .limit(limit);
 
   if (error) throw error;
+
+  const tenantIds = Array.from(new Set((data || []).map((p: any) => p.tenant_user_id).filter(Boolean)));
+  const { data: tenantProfiles } = tenantIds.length > 0
+    ? await supabase
+        .from('tenant_profiles')
+        .select('user_id, full_name, email, phone')
+        .eq('account_id', accountId)
+        .in('user_id', tenantIds)
+    : { data: [] as any[] };
+
+  const tenantMap = new Map(
+    (tenantProfiles || []).map((t: any) => [t.user_id, t])
+  );
 
   return (data || []).map((p: any) => ({
     id: p.id,
@@ -104,9 +116,9 @@ export async function getRecentPayments(
     createdAt: p.created_at,
     updatedAt: p.updated_at,
     tenant: {
-      name: p.tenant?.full_name || 'Unknown',
-      email: p.tenant?.email || '',
-      phone: p.tenant?.phone,
+      name: tenantMap.get(p.tenant_user_id)?.full_name || 'Unknown',
+      email: tenantMap.get(p.tenant_user_id)?.email || '',
+      phone: tenantMap.get(p.tenant_user_id)?.phone,
     },
     unit: {
       unitNumber: p.unit?.unit_number || '',

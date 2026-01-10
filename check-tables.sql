@@ -12,9 +12,11 @@ WHERE
     'hvac_delivery_batches',
     'message_templates',
     'automated_reminders',
+    'conversations',
     'reminder_schedules',
     'reminder_runs',
     'reminder_logs',
+    'showing_outcomes',
     'showings'
   )
 ORDER BY

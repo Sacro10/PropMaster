@@ -20,7 +20,8 @@ export function AppLayout() {
   const [showNotifications, setShowNotifications] = useState(false)
   const [notifications, setNotifications] = useState<Notification[]>([])
   const [unreadCount, setUnreadCount] = useState(0)
-  const [unitsCount, setUnitsCount] = useState<number>(0)
+  const [unitsCount, setUnitsCount] = useState<number | null>(null)
+  const [loadingUnits, setLoadingUnits] = useState(true)
   const notificationsRef = useRef<HTMLDivElement>(null)
   const { user, signOut, profile } = useAuth()
   const { theme, toggleTheme } = useThemeContext()
@@ -41,9 +42,14 @@ export function AppLayout() {
   // Fetch units count for the user's account
   useEffect(() => {
     const fetchUnitsCount = async () => {
-      if (!user) return
+      if (!user) {
+        setLoadingUnits(false)
+        return
+      }
 
       try {
+        setLoadingUnits(true)
+
         // First, get the user's account_id from account_members
         const { data: memberData, error: memberError } = await supabase
           .from('account_members')
@@ -53,6 +59,8 @@ export function AppLayout() {
 
         if (memberError || !memberData) {
           console.error('Error fetching account membership:', memberError)
+          setUnitsCount(0)
+          setLoadingUnits(false)
           return
         }
 
@@ -64,12 +72,18 @@ export function AppLayout() {
 
         if (countError) {
           console.error('Error counting units:', countError)
+          setUnitsCount(0)
+          setLoadingUnits(false)
           return
         }
 
+        console.log('Units count fetched:', count)
         setUnitsCount(count || 0)
+        setLoadingUnits(false)
       } catch (error) {
         console.error('Error in fetchUnitsCount:', error)
+        setUnitsCount(0)
+        setLoadingUnits(false)
       }
     }
 
@@ -281,7 +295,11 @@ export function AppLayout() {
                     Active Properties
                   </p>
                   <p className="text-lg font-semibold" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
-                    {unitsCount} {unitsCount === 1 ? 'UNIT' : 'UNITS'}
+                    {loadingUnits ? (
+                      <span className="inline-block animate-pulse">...</span>
+                    ) : (
+                      `${unitsCount ?? 0} ${unitsCount === 1 ? 'UNIT' : 'UNITS'}`
+                    )}
                   </p>
                 </div>
               </div>
