@@ -157,14 +157,18 @@ export async function hasFeature(featureKey: FeatureKey): Promise<boolean> {
     });
 
     if (error) {
-      console.error('[Plan Gating] Error checking feature:', error);
-      return false;
+      console.warn('[Plan Gating] RPC error, falling back to plan check:', error.message);
+      // Fallback: Check plan directly from accounts table
+      const requiredPlan = FEATURE_REQUIREMENTS[featureKey];
+      return await hasPlanFallback(requiredPlan);
     }
 
     return data === true;
   } catch (err) {
-    console.error('[Plan Gating] Exception checking feature:', err);
-    return false;
+    console.warn('[Plan Gating] Exception, falling back to plan check:', err);
+    // Fallback: Check plan directly from accounts table
+    const requiredPlan = FEATURE_REQUIREMENTS[featureKey];
+    return await hasPlanFallback(requiredPlan);
   }
 }
 
@@ -181,13 +185,61 @@ export async function hasPlan(requiredPlan: PlanTier): Promise<boolean> {
     });
 
     if (error) {
-      console.error('[Plan Gating] Error checking plan:', error);
-      return false;
+      console.warn('[Plan Gating] RPC error, falling back to direct query:', error.message);
+      return await hasPlanFallback(requiredPlan);
     }
 
     return data === true;
   } catch (err) {
-    console.error('[Plan Gating] Exception checking plan:', err);
+    console.warn('[Plan Gating] Exception, falling back to direct query:', err);
+    return await hasPlanFallback(requiredPlan);
+  }
+}
+
+/**
+ * Fallback function to check plan directly from accounts table
+ * Used when RPC functions are not available
+ */
+async function hasPlanFallback(requiredPlan: PlanTier): Promise<boolean> {
+  try {
+    // Get current user
+    const { data: { user }, error: userError } = await supabase.auth.getUser();
+    if (userError || !user) {
+      console.error('[Plan Gating] Cannot get user:', userError);
+      return false;
+    }
+
+    // Get user's account via account_members
+    const { data: member, error: memberError } = await supabase
+      .from('account_members')
+      .select('account_id, accounts(plan)')
+      .eq('user_id', user.id)
+      .single();
+
+    if (memberError || !member) {
+      console.error('[Plan Gating] Cannot get account member:', memberError);
+      return false;
+    }
+
+    const userPlan = (member.accounts as any)?.plan as string;
+    if (!userPlan) {
+      console.error('[Plan Gating] No plan found for user');
+      return false;
+    }
+
+    // Compare plan tiers
+    const planRank: Record<string, number> = {
+      basic: 1,
+      pro: 2,
+      premium: 3,
+    };
+
+    const userRank = planRank[userPlan] || 0;
+    const requiredRank = planRank[requiredPlan] || 999;
+
+    return userRank >= requiredRank;
+  } catch (err) {
+    console.error('[Plan Gating] Fallback check failed:', err);
     return false;
   }
 }
