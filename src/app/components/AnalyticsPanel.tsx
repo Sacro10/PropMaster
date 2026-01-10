@@ -6,6 +6,8 @@ import { useThemeStyles } from '../hooks/useThemeStyles';
 import { FeatureGate } from './UpgradeCTA';
 import { LoadingPage } from './LoadingSpinner';
 import { ErrorState } from './ErrorBoundary';
+import { formatCurrencyCompact, formatPercentageChange, formatCurrency } from '../../lib/utils/currencyHelpers';
+import type { TimeframeOption } from '../../lib/hooks/useAnalytics';
 import {
   useAnalyticsMetrics,
   useRevenueTrend,
@@ -14,9 +16,7 @@ import {
   useExpenseBreakdown,
   useExportAnalytics,
   useAnalyticsInsights,
-  type TimeframeOption,
 } from '../../lib/hooks/useAnalytics';
-import { formatCurrencyCompact, formatPercentageChange, formatCurrency } from '../../lib/utils/currencyHelpers';
 
 export function AnalyticsPanel() {
   const { isDark, text, border } = useThemeStyles();

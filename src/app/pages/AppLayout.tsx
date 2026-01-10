@@ -249,7 +249,7 @@ export function AppLayout() {
 
       {/* Header */}
       <header
-        className={`relative border-b ${
+        className={`relative z-50 border-b ${
           isDark ? 'border-white/10 bg-[#0f1523]/80' : 'border-gray-200 bg-white/80'
         } backdrop-blur-xl`}
       >
@@ -436,7 +436,7 @@ export function AppLayout() {
                   {user?.email?.[0].toUpperCase() || 'U'}
 
                   {/* Dropdown Menu */}
-                  <div className={`absolute top-full right-0 mt-2 w-48 ${isDark ? 'bg-[#1a1f35] border-white/10' : 'bg-white border-gray-200'} border rounded-lg shadow-xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50`}>
+                  <div className={`absolute top-full right-0 mt-2 w-48 ${isDark ? 'bg-[#1a1f35] border-white/10' : 'bg-white border-gray-200'} border rounded-lg shadow-xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-60`}>
                     <button
                       onClick={() => navigate('/app/settings')}
                       className={`w-full text-left px-4 py-3 ${isDark ? 'hover:bg-white/5' : 'hover:bg-gray-50'} transition-colors flex items-center gap-3`}
@@ -464,7 +464,7 @@ export function AppLayout() {
 
       {/* Navigation */}
       <nav
-        className={`relative border-b ${
+        className={`relative z-40 border-b ${
           isDark ? 'border-white/10 bg-[#0f1523]/60' : 'border-gray-200 bg-gray-50/60'
         } backdrop-blur-lg`}
       >
