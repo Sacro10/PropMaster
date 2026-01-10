@@ -1,4 +1,4 @@
-import { TrendingUp, TrendingDown, Users, Wrench, DollarSign, CircleCheck, Activity, Bell, ListFilter, RefreshCw, FileText } from 'lucide-react';
+import { TrendingUp, TrendingDown, Users, Wrench, DollarSign, CircleCheck, Activity, Bell, ListFilter, RefreshCw, FileText, Building2, Plus } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useThemeStyles } from '../hooks/useThemeStyles';
 import { useDashboardData } from '../../lib/hooks/useDashboardData';
@@ -6,11 +6,57 @@ import { LoadingPage } from './LoadingSpinner';
 import { ErrorState } from './ErrorBoundary';
 import { formatCurrencyCompact, formatPercentageChange, formatNumber } from '../../lib/utils/currencyHelpers';
 import { formatRelativeTime } from '../../lib/utils/dateHelpers';
+import { AddPropertyModal } from './AddPropertyModal';
+import { useState, useEffect } from 'react';
+import { supabase } from '@/lib/supabaseClient';
+import { getCurrentAccountId } from '@/lib/api/client';
 
 export function DashboardOverview() {
   const { isDark, text, border } = useThemeStyles();
   const navigate = useNavigate();
   const { metrics, recentActivity, systemMetrics, upcomingTasks, loading, error, refetch } = useDashboardData();
+  const [isPropertyModalOpen, setIsPropertyModalOpen] = useState(false);
+  const [properties, setProperties] = useState<any[]>([]);
+  const [loadingProperties, setLoadingProperties] = useState(true);
+
+  // Fetch properties
+  const fetchProperties = async () => {
+    try {
+      setLoadingProperties(true);
+      const accountId = await getCurrentAccountId();
+      if (!accountId) return;
+
+      const { data, error } = await supabase
+        .from('properties')
+        .select(`
+          id,
+          name,
+          address1,
+          city,
+          state,
+          property_type,
+          units:units(count)
+        `)
+        .eq('account_id', accountId)
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+      setProperties(data || []);
+    } catch (error) {
+      console.error('Error fetching properties:', error);
+    } finally {
+      setLoadingProperties(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchProperties();
+  }, []);
+
+  const handlePropertySuccess = () => {
+    fetchProperties();
+    refetch(); // Refresh dashboard metrics
+  };
 
   // Show loading state
   if (loading) {
@@ -278,6 +324,82 @@ export function DashboardOverview() {
               const now = new Date();
               const daysUntilDue = Math.ceil((dueDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
 
+
+      {/* Properties Section */}
+      <div className={`${isDark ? 'bg-gradient-to-br from-[#1a1f35] to-[#0f1523]' : 'bg-white shadow-md'} border ${border.default} rounded-xl p-6`}>
+        <div className="flex items-center justify-between mb-6">
+          <h3 className="text-2xl" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
+            MY PROPERTIES
+          </h3>
+          <button
+            onClick={() => setIsPropertyModalOpen(true)}
+            className="px-6 py-3 bg-gradient-to-r from-[#ff6b35] to-[#f7931e] rounded-lg font-medium hover:scale-105 transition-transform flex items-center gap-2"
+            style={{ fontFamily: 'Work Sans, sans-serif' }}
+          >
+            <Plus className="w-4 h-4" />
+            Add Property
+          </button>
+        </div>
+
+        {loadingProperties ? (
+          <div className="text-center py-8">
+            <p className={text.muted} style={{ fontFamily: 'Work Sans, sans-serif' }}>
+              Loading properties...
+            </p>
+          </div>
+        ) : properties.length === 0 ? (
+          <div className="text-center py-12">
+            <Building2 className="w-12 h-12 mx-auto mb-4 text-white/20" />
+            <p className={text.muted} style={{ fontFamily: 'Work Sans, sans-serif' }}>
+              No properties yet. Click "Add Property" to get started.
+            </p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-3 gap-4">
+            {properties.map((property) => (
+              <div
+                key={property.id}
+                className={`p-5 ${isDark ? 'bg-white/5 hover:bg-white/10' : 'bg-gray-50 hover:bg-gray-100'} rounded-lg border ${border.default} hover:border-[#ff6b35]/50 transition-all group cursor-pointer`}
+              >
+                <div className="flex items-start gap-3 mb-4">
+                  <div className="p-2 bg-gradient-to-br from-[#ff6b35] to-[#f7931e] rounded-lg">
+                    <Building2 className="w-5 h-5 text-white" />
+                  </div>
+                  <div className="flex-1">
+                    <h4 className="font-semibold text-lg mb-1" style={{ fontFamily: 'Work Sans, sans-serif' }}>
+                      {property.name}
+                    </h4>
+                    <p className={`text-sm ${text.muted}`}>
+                      {property.address1}
+                    </p>
+                    <p className={`text-sm ${text.muted}`}>
+                      {property.city}, {property.state}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between pt-3 border-t border-white/10">
+                  <div>
+                    <p className={`text-xs ${text.inactive} mb-1`}>Type</p>
+                    <p className="text-sm font-medium">{property.property_type || 'N/A'}</p>
+                  </div>
+                  <div>
+                    <p className={`text-xs ${text.inactive} mb-1`}>Units</p>
+                    <p className="text-sm font-medium">{property.units?.[0]?.count || 0}</p>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Add Property Modal */}
+      <AddPropertyModal
+        isOpen={isPropertyModalOpen}
+        onClose={() => setIsPropertyModalOpen(false)}
+        onSuccess={handlePropertySuccess}
+      />
               let dueDateDisplay = '';
               if (daysUntilDue < 0) {
                 dueDateDisplay = 'Overdue';
