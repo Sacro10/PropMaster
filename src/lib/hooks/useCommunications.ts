@@ -225,3 +225,34 @@ export function useMessageSuggestion() {
     clear,
   };
 }
+
+export function useCreateReminder() {
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<Error | null>(null);
+
+  const create = useCallback(async (reminderData: {
+    reminderType: string;
+    name: string;
+    frequency: 'daily' | 'weekly' | 'monthly' | 'quarterly' | 'custom';
+    customSchedule?: string;
+    templateId?: string;
+    messageSubject: string;
+    messageBody: string;
+    recipientFilter?: Record<string, any>;
+  }) => {
+    try {
+      setLoading(true);
+      setError(null);
+      const result = await api.createAutomatedReminder(reminderData);
+      return { success: true, data: result };
+    } catch (err) {
+      console.error('[useCreateReminder] Error creating reminder:', err);
+      setError(err as Error);
+      return { success: false, error: err as Error };
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  return { create, loading, error };
+}

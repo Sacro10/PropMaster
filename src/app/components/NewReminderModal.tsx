@@ -1,0 +1,391 @@
+import { X } from 'lucide-react';
+import { useState } from 'react';
+import { useThemeStyles } from '../hooks/useThemeStyles';
+import { useCreateReminder } from '../../lib/hooks/useCommunications';
+
+interface NewReminderModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  onSuccess?: () => void;
+  templates: Array<{
+    id: string;
+    name: string;
+    category: string;
+    subject: string | null;
+    body: string;
+  }>;
+}
+
+export function NewReminderModal({
+  isOpen,
+  onClose,
+  onSuccess,
+  templates,
+}: NewReminderModalProps) {
+  const { isDark, text, border } = useThemeStyles();
+  const { create, loading } = useCreateReminder();
+
+  const [formData, setFormData] = useState({
+    name: '',
+    reminderType: 'payment' as string,
+    frequency: 'monthly' as 'daily' | 'weekly' | 'monthly' | 'quarterly' | 'custom',
+    customSchedule: '',
+    templateId: '',
+    messageSubject: '',
+    messageBody: '',
+  });
+
+  const [errors, setErrors] = useState<Record<string, string>>({});
+
+  const reminderTypes = [
+    { value: 'payment', label: 'Rent Payment Reminder' },
+    { value: 'lease_renewal', label: 'Lease Renewal' },
+    { value: 'maintenance', label: 'Maintenance Update' },
+    { value: 'inspection', label: 'Property Inspection' },
+    { value: 'custom', label: 'Custom Reminder' },
+  ];
+
+  const frequencies = [
+    { value: 'daily', label: 'Daily' },
+    { value: 'weekly', label: 'Weekly' },
+    { value: 'monthly', label: 'Monthly' },
+    { value: 'quarterly', label: 'Quarterly' },
+    { value: 'custom', label: 'Custom Schedule' },
+  ];
+
+  const validateForm = () => {
+    const newErrors: Record<string, string> = {};
+
+    if (!formData.name.trim()) newErrors.name = 'Reminder name is required';
+    if (!formData.reminderType) newErrors.reminderType = 'Reminder type is required';
+    if (!formData.frequency) newErrors.frequency = 'Frequency is required';
+    if (formData.frequency === 'custom' && !formData.customSchedule.trim()) {
+      newErrors.customSchedule = 'Custom schedule is required for custom frequency';
+    }
+    if (!formData.messageSubject.trim()) newErrors.messageSubject = 'Subject is required';
+    if (!formData.messageBody.trim()) newErrors.messageBody = 'Message body is required';
+
+    setErrors(newErrors);
+    return Object.keys(newErrors).length === 0;
+  };
+
+  const handleTemplateChange = (templateId: string) => {
+    setFormData(prev => ({ ...prev, templateId }));
+
+    if (templateId) {
+      const template = templates.find(t => t.id === templateId);
+      if (template) {
+        setFormData(prev => ({
+          ...prev,
+          messageSubject: template.subject || '',
+          messageBody: template.body || '',
+        }));
+      }
+    }
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+
+    if (!validateForm()) {
+      return;
+    }
+
+    const result = await create({
+      name: formData.name,
+      reminderType: formData.reminderType,
+      frequency: formData.frequency,
+      customSchedule: formData.frequency === 'custom' ? formData.customSchedule : undefined,
+      templateId: formData.templateId || undefined,
+      messageSubject: formData.messageSubject,
+      messageBody: formData.messageBody,
+      recipientFilter: {}, // Default to all tenants, can be enhanced later
+    });
+
+    if (result.success) {
+      // Reset form
+      setFormData({
+        name: '',
+        reminderType: 'payment',
+        frequency: 'monthly',
+        customSchedule: '',
+        templateId: '',
+        messageSubject: '',
+        messageBody: '',
+      });
+      setErrors({});
+
+      // Call success callback
+      if (onSuccess) {
+        onSuccess();
+      }
+
+      // Close modal
+      onClose();
+
+      // Show success message
+      alert('Automated reminder created successfully!');
+    } else {
+      alert('Failed to create reminder. Please try again.');
+    }
+  };
+
+  const handleClose = () => {
+    // Reset form when closing
+    setFormData({
+      name: '',
+      reminderType: 'payment',
+      frequency: 'monthly',
+      customSchedule: '',
+      templateId: '',
+      messageSubject: '',
+      messageBody: '',
+    });
+    setErrors({});
+    onClose();
+  };
+
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      {/* Backdrop */}
+      <div
+        className="absolute inset-0 bg-black/50 backdrop-blur-sm"
+        onClick={handleClose}
+      />
+
+      {/* Modal */}
+      <div
+        className={`relative w-full max-w-3xl ${
+          isDark ? 'bg-gradient-to-br from-[#1a1f35] to-[#0f1523]' : 'bg-white'
+        } border ${border.default} rounded-xl shadow-2xl max-h-[90vh] overflow-y-auto`}
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between p-6 border-b border-white/10">
+          <h2 className="text-2xl" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
+            CREATE AUTOMATED REMINDER
+          </h2>
+          <button
+            onClick={handleClose}
+            className={`p-2 ${
+              isDark ? 'hover:bg-white/10' : 'hover:bg-gray-100'
+            } rounded-lg transition-colors`}
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        {/* Form */}
+        <form onSubmit={handleSubmit} className="p-6 space-y-6">
+          {/* Reminder Name */}
+          <div>
+            <label
+              className={`block text-sm font-medium mb-2 ${text.primary}`}
+              style={{ fontFamily: 'Work Sans, sans-serif' }}
+            >
+              Reminder Name *
+            </label>
+            <input
+              type="text"
+              value={formData.name}
+              onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+              className={`w-full px-4 py-3 ${
+                isDark ? 'bg-white/5 border-white/10' : 'bg-gray-50 border-gray-300'
+              } border rounded-lg ${text.primary} focus:outline-none focus:border-[#ff6b35] transition-colors`}
+              style={{ fontFamily: 'Work Sans, sans-serif' }}
+              placeholder="e.g., Monthly Rent Reminder"
+            />
+            {errors.name && (
+              <p className="text-red-400 text-sm mt-1">{errors.name}</p>
+            )}
+          </div>
+
+          {/* Reminder Type & Frequency */}
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label
+                className={`block text-sm font-medium mb-2 ${text.primary}`}
+                style={{ fontFamily: 'Work Sans, sans-serif' }}
+              >
+                Reminder Type *
+              </label>
+              <select
+                value={formData.reminderType}
+                onChange={(e) => setFormData({ ...formData, reminderType: e.target.value })}
+                className={`w-full px-4 py-3 ${
+                  isDark ? 'bg-white/5 border-white/10' : 'bg-gray-50 border-gray-300'
+                } border rounded-lg ${text.primary} focus:outline-none focus:border-[#ff6b35] transition-colors`}
+                style={{ fontFamily: 'Work Sans, sans-serif' }}
+              >
+                {reminderTypes.map((type) => (
+                  <option key={type.value} value={type.value}>
+                    {type.label}
+                  </option>
+                ))}
+              </select>
+              {errors.reminderType && (
+                <p className="text-red-400 text-sm mt-1">{errors.reminderType}</p>
+              )}
+            </div>
+
+            <div>
+              <label
+                className={`block text-sm font-medium mb-2 ${text.primary}`}
+                style={{ fontFamily: 'Work Sans, sans-serif' }}
+              >
+                Frequency *
+              </label>
+              <select
+                value={formData.frequency}
+                onChange={(e) =>
+                  setFormData({
+                    ...formData,
+                    frequency: e.target.value as 'daily' | 'weekly' | 'monthly' | 'quarterly' | 'custom',
+                  })
+                }
+                className={`w-full px-4 py-3 ${
+                  isDark ? 'bg-white/5 border-white/10' : 'bg-gray-50 border-gray-300'
+                } border rounded-lg ${text.primary} focus:outline-none focus:border-[#ff6b35] transition-colors`}
+                style={{ fontFamily: 'Work Sans, sans-serif' }}
+              >
+                {frequencies.map((freq) => (
+                  <option key={freq.value} value={freq.value}>
+                    {freq.label}
+                  </option>
+                ))}
+              </select>
+              {errors.frequency && (
+                <p className="text-red-400 text-sm mt-1">{errors.frequency}</p>
+              )}
+            </div>
+          </div>
+
+          {/* Custom Schedule (shown only if frequency is custom) */}
+          {formData.frequency === 'custom' && (
+            <div>
+              <label
+                className={`block text-sm font-medium mb-2 ${text.primary}`}
+                style={{ fontFamily: 'Work Sans, sans-serif' }}
+              >
+                Custom Schedule (Cron Expression) *
+              </label>
+              <input
+                type="text"
+                value={formData.customSchedule}
+                onChange={(e) => setFormData({ ...formData, customSchedule: e.target.value })}
+                className={`w-full px-4 py-3 ${
+                  isDark ? 'bg-white/5 border-white/10' : 'bg-gray-50 border-gray-300'
+                } border rounded-lg ${text.primary} focus:outline-none focus:border-[#ff6b35] transition-colors`}
+                style={{ fontFamily: 'Work Sans, sans-serif' }}
+                placeholder="e.g., 0 9 * * 1 (Every Monday at 9 AM)"
+              />
+              {errors.customSchedule && (
+                <p className="text-red-400 text-sm mt-1">{errors.customSchedule}</p>
+              )}
+              <p className={`text-xs ${text.muted} mt-1`}>
+                Use cron syntax: minute hour day month weekday
+              </p>
+            </div>
+          )}
+
+          {/* Template Selection (Optional) */}
+          <div>
+            <label
+              className={`block text-sm font-medium mb-2 ${text.primary}`}
+              style={{ fontFamily: 'Work Sans, sans-serif' }}
+            >
+              Use Template (Optional)
+            </label>
+            <select
+              value={formData.templateId}
+              onChange={(e) => handleTemplateChange(e.target.value)}
+              className={`w-full px-4 py-3 ${
+                isDark ? 'bg-white/5 border-white/10' : 'bg-gray-50 border-gray-300'
+              } border rounded-lg ${text.primary} focus:outline-none focus:border-[#ff6b35] transition-colors`}
+              style={{ fontFamily: 'Work Sans, sans-serif' }}
+            >
+              <option value="">None - Create custom message</option>
+              {templates.map((template) => (
+                <option key={template.id} value={template.id}>
+                  {template.name} ({template.category})
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Message Subject */}
+          <div>
+            <label
+              className={`block text-sm font-medium mb-2 ${text.primary}`}
+              style={{ fontFamily: 'Work Sans, sans-serif' }}
+            >
+              Message Subject *
+            </label>
+            <input
+              type="text"
+              value={formData.messageSubject}
+              onChange={(e) => setFormData({ ...formData, messageSubject: e.target.value })}
+              className={`w-full px-4 py-3 ${
+                isDark ? 'bg-white/5 border-white/10' : 'bg-gray-50 border-gray-300'
+              } border rounded-lg ${text.primary} focus:outline-none focus:border-[#ff6b35] transition-colors`}
+              style={{ fontFamily: 'Work Sans, sans-serif' }}
+              placeholder="Rent Payment Reminder"
+            />
+            {errors.messageSubject && (
+              <p className="text-red-400 text-sm mt-1">{errors.messageSubject}</p>
+            )}
+          </div>
+
+          {/* Message Body */}
+          <div>
+            <label
+              className={`block text-sm font-medium mb-2 ${text.primary}`}
+              style={{ fontFamily: 'Work Sans, sans-serif' }}
+            >
+              Message Body *
+            </label>
+            <textarea
+              value={formData.messageBody}
+              onChange={(e) => setFormData({ ...formData, messageBody: e.target.value })}
+              rows={6}
+              className={`w-full px-4 py-3 ${
+                isDark ? 'bg-white/5 border-white/10' : 'bg-gray-50 border-gray-300'
+              } border rounded-lg ${text.primary} focus:outline-none focus:border-[#ff6b35] transition-colors resize-none`}
+              style={{ fontFamily: 'Work Sans, sans-serif' }}
+              placeholder="Hello, this is a reminder that your rent payment is due..."
+            />
+            {errors.messageBody && (
+              <p className="text-red-400 text-sm mt-1">{errors.messageBody}</p>
+            )}
+            <p className={`text-xs ${text.muted} mt-1`}>
+              Tip: You can use variables like {'{tenant_name}'}, {'{property_name}'}, {'{due_date}'}
+            </p>
+          </div>
+
+          {/* Actions */}
+          <div className="flex items-center justify-end gap-3 pt-4 border-t border-white/10">
+            <button
+              type="button"
+              onClick={handleClose}
+              className={`px-6 py-3 ${
+                isDark ? 'bg-white/5 hover:bg-white/10' : 'bg-gray-100 hover:bg-gray-200'
+              } rounded-lg font-medium transition-colors`}
+              style={{ fontFamily: 'Work Sans, sans-serif' }}
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={loading}
+              className="px-6 py-3 bg-gradient-to-r from-[#ff6b35] to-[#f7931e] rounded-lg font-medium hover:scale-105 transition-transform disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
+              style={{ fontFamily: 'Work Sans, sans-serif' }}
+            >
+              {loading ? 'Creating...' : 'Create Reminder'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}

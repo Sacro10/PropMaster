@@ -93,7 +93,7 @@ export function useOccupancyTrend(timeframe: TimeframeOption = '30d') {
     } finally {
       setLoading(false);
     }
-  }, [fetchData]);
+  }, [timeframe]);
 
   useEffect(() => {
     fetchData();
@@ -119,7 +119,7 @@ export function usePropertyPerformance(timeframe: TimeframeOption = '30d') {
     } finally {
       setLoading(false);
     }
-  }, [fetchData]);
+  }, [timeframe]);
 
   useEffect(() => {
     fetchData();
@@ -145,7 +145,7 @@ export function useExpenseBreakdown(timeframe: TimeframeOption = '30d') {
     } finally {
       setLoading(false);
     }
-  }, [fetchData]);
+  }, [timeframe]);
 
   useEffect(() => {
     fetchData();

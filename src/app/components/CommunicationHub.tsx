@@ -16,6 +16,7 @@ import {
   useSendMessage,
 } from '../../lib/hooks/useCommunications';
 import { formatRelativeTime } from '../../lib/utils/dateHelpers';
+import { NewReminderModal } from './NewReminderModal';
 
 export function CommunicationHub() {
   const { isDark, text, border } = useThemeStyles();
@@ -26,7 +27,7 @@ export function CommunicationHub() {
   // Fetch data
   const { data: messages, loading: messagesLoading, error: messagesError, refetch: refetchMessages } = useRecentMessages();
   const { data: templates, loading: templatesLoading } = useMessageTemplates();
-  const { data: reminders, loading: remindersLoading } = useAutomatedReminders();
+  const { data: reminders, loading: remindersLoading, refetch: refetchReminders } = useAutomatedReminders();
   const { data: portalActivity, loading: activityLoading } = usePortalActivity();
   const { data: stats, loading: statsLoading } = useCommunicationStats();
   const { data: tenants, loading: tenantsLoading } = useTenants();
@@ -47,6 +48,7 @@ export function CommunicationHub() {
   const [composerError, setComposerError] = useState<string | null>(null);
   const [recipientSearch, setRecipientSearch] = useState('');
   const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null);
+  const [reminderModalOpen, setReminderModalOpen] = useState(false);
   const aiPanelRef = useRef<HTMLDivElement | null>(null);
 
   // Show loading state
@@ -603,7 +605,10 @@ export function CommunicationHub() {
               <p className={`text-sm ${text.muted}`}>Schedule and manage automated tenant communications</p>
             </div>
           </div>
-          <button className="px-6 py-3 bg-gradient-to-r from-[#ff6b35] to-[#f7931e] rounded-lg font-medium hover:scale-105 transition-transform">
+          <button
+            onClick={() => setReminderModalOpen(true)}
+            className="px-6 py-3 bg-gradient-to-r from-[#ff6b35] to-[#f7931e] rounded-lg font-medium hover:scale-105 transition-transform"
+          >
             + New Reminder
           </button>
         </div>
@@ -727,6 +732,14 @@ export function CommunicationHub() {
         </div>
       </div>
       </div>
+
+      {/* New Reminder Modal */}
+      <NewReminderModal
+        isOpen={reminderModalOpen}
+        onClose={() => setReminderModalOpen(false)}
+        onSuccess={refetchReminders}
+        templates={templates}
+      />
     </FeatureGate>
   );
 }
