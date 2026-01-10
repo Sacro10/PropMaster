@@ -1,0 +1,405 @@
+import { X } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { useThemeStyles } from '../hooks/useThemeStyles';
+import { useCreateMaintenanceRequest } from '../../lib/hooks/useMaintenance';
+import { supabase } from '../../lib/supabaseClient';
+
+interface CreateMaintenanceRequestModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  onSuccess?: () => void;
+}
+
+interface PropertyUnit {
+  id: string;
+  property_id: string;
+  property_name: string;
+  unit_number: string;
+  address: string;
+}
+
+const MAINTENANCE_CATEGORIES = [
+  'hvac',
+  'plumbing',
+  'electrical',
+  'appliance',
+  'general',
+  'remodel',
+  'landscaping',
+  'pest',
+  'painting',
+  'roofing',
+  'flooring',
+  'security',
+] as const;
+
+const PRIORITIES = [
+  { value: 'low', label: 'Low', description: 'Can wait, no immediate impact' },
+  { value: 'normal', label: 'Normal', description: 'Standard maintenance request' },
+  { value: 'high', label: 'High', description: 'Needs attention soon' },
+  { value: 'emergency', label: 'Emergency', description: 'Urgent, requires immediate action' },
+] as const;
+
+export function CreateMaintenanceRequestModal({
+  isOpen,
+  onClose,
+  onSuccess,
+}: CreateMaintenanceRequestModalProps) {
+  const { isDark, text, border } = useThemeStyles();
+  const { create, loading } = useCreateMaintenanceRequest();
+
+  const [formData, setFormData] = useState({
+    unit_id: '',
+    property_id: '',
+    title: '',
+    description: '',
+    category: 'general' as typeof MAINTENANCE_CATEGORIES[number],
+    priority: 'normal' as 'low' | 'normal' | 'high' | 'emergency',
+  });
+
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [availableUnits, setAvailableUnits] = useState<PropertyUnit[]>([]);
+  const [loadingUnits, setLoadingUnits] = useState(true);
+
+  // Fetch available properties and units
+  useEffect(() => {
+    const fetchUnits = async () => {
+      try {
+        setLoadingUnits(true);
+
+        // Get current account ID
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) return;
+
+        const { data: profile } = await supabase
+          .from('user_profiles')
+          .select('account_id')
+          .eq('id', user.id)
+          .single();
+
+        if (!profile?.account_id) return;
+
+        // Fetch all units with their properties
+        const { data: units, error } = await supabase
+          .from('units')
+          .select(`
+            id,
+            unit_number,
+            property_id,
+            properties!inner (
+              id,
+              name,
+              address1,
+              city,
+              state,
+              zip,
+              account_id
+            )
+          `)
+          .eq('properties.account_id', profile.account_id)
+          .order('unit_number', { ascending: true });
+
+        if (error) {
+          console.error('Error fetching units:', error);
+          return;
+        }
+
+        const formattedUnits: PropertyUnit[] = (units || []).map((unit: any) => ({
+          id: unit.id,
+          property_id: unit.property_id,
+          property_name: unit.properties.name,
+          unit_number: unit.unit_number,
+          address: `${unit.properties.address1}, ${unit.properties.city}, ${unit.properties.state}`,
+        }));
+
+        setAvailableUnits(formattedUnits);
+      } catch (error) {
+        console.error('Error fetching units:', error);
+      } finally {
+        setLoadingUnits(false);
+      }
+    };
+
+    if (isOpen) {
+      fetchUnits();
+    }
+  }, [isOpen]);
+
+  const validateForm = () => {
+    const newErrors: Record<string, string> = {};
+
+    if (!formData.unit_id) newErrors.unit_id = 'Please select a unit';
+    if (!formData.title.trim()) newErrors.title = 'Title is required';
+    if (!formData.description.trim()) newErrors.description = 'Description is required';
+    if (!formData.category) newErrors.category = 'Category is required';
+    if (!formData.priority) newErrors.priority = 'Priority is required';
+
+    setErrors(newErrors);
+    return Object.keys(newErrors).length === 0;
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+
+    if (!validateForm()) {
+      return;
+    }
+
+    const result = await create(formData);
+
+    if (result.success) {
+      // Reset form
+      setFormData({
+        unit_id: '',
+        property_id: '',
+        title: '',
+        description: '',
+        category: 'general',
+        priority: 'normal',
+      });
+      setErrors({});
+
+      // Call success callback
+      if (onSuccess) {
+        onSuccess();
+      }
+
+      // Close modal
+      onClose();
+
+      // Show success message
+      alert('Maintenance request created successfully!');
+    } else {
+      alert('Failed to create maintenance request. Please try again.');
+    }
+  };
+
+  const handleClose = () => {
+    // Reset form when closing
+    setFormData({
+      unit_id: '',
+      property_id: '',
+      title: '',
+      description: '',
+      category: 'general',
+      priority: 'normal',
+    });
+    setErrors({});
+    onClose();
+  };
+
+  const handleUnitChange = (unitId: string) => {
+    const selectedUnit = availableUnits.find(u => u.id === unitId);
+    setFormData({
+      ...formData,
+      unit_id: unitId,
+      property_id: selectedUnit?.property_id || '',
+    });
+  };
+
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      {/* Backdrop */}
+      <div
+        className="absolute inset-0 bg-black/50 backdrop-blur-sm"
+        onClick={handleClose}
+      />
+
+      {/* Modal */}
+      <div
+        className={`relative w-full max-w-2xl ${
+          isDark ? 'bg-gradient-to-br from-[#1a1f35] to-[#0f1523]' : 'bg-white'
+        } border ${border.default} rounded-xl shadow-2xl max-h-[90vh] overflow-y-auto`}
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between p-6 border-b border-white/10">
+          <h2 className="text-2xl" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
+            CREATE MAINTENANCE REQUEST
+          </h2>
+          <button
+            onClick={handleClose}
+            className={`p-2 ${
+              isDark ? 'hover:bg-white/10' : 'hover:bg-gray-100'
+            } rounded-lg transition-colors`}
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        {/* Form */}
+        <form onSubmit={handleSubmit} className="p-6 space-y-6">
+          {/* Unit Selection */}
+          <div>
+            <label
+              className={`block text-sm font-medium mb-2 ${text.primary}`}
+              style={{ fontFamily: 'Work Sans, sans-serif' }}
+            >
+              Property / Unit *
+            </label>
+            {loadingUnits ? (
+              <div className={`w-full px-4 py-3 ${isDark ? 'bg-white/5' : 'bg-gray-50'} border ${border.default} rounded-lg`}>
+                <p className={`text-sm ${text.muted}`}>Loading units...</p>
+              </div>
+            ) : (
+              <select
+                value={formData.unit_id}
+                onChange={(e) => handleUnitChange(e.target.value)}
+                className={`w-full px-4 py-3 ${
+                  isDark ? 'bg-white/5 border-white/10' : 'bg-gray-50 border-gray-300'
+                } border rounded-lg ${text.primary} focus:outline-none focus:border-[#ff6b35] transition-colors`}
+                style={{ fontFamily: 'Work Sans, sans-serif' }}
+              >
+                <option value="">Select a unit...</option>
+                {availableUnits.map((unit) => (
+                  <option key={unit.id} value={unit.id}>
+                    {unit.property_name} - Unit {unit.unit_number} ({unit.address})
+                  </option>
+                ))}
+              </select>
+            )}
+            {errors.unit_id && (
+              <p className="text-red-400 text-sm mt-1">{errors.unit_id}</p>
+            )}
+          </div>
+
+          {/* Title */}
+          <div>
+            <label
+              className={`block text-sm font-medium mb-2 ${text.primary}`}
+              style={{ fontFamily: 'Work Sans, sans-serif' }}
+            >
+              Title *
+            </label>
+            <input
+              type="text"
+              value={formData.title}
+              onChange={(e) => setFormData({ ...formData, title: e.target.value })}
+              className={`w-full px-4 py-3 ${
+                isDark ? 'bg-white/5 border-white/10' : 'bg-gray-50 border-gray-300'
+              } border rounded-lg ${text.primary} focus:outline-none focus:border-[#ff6b35] transition-colors`}
+              style={{ fontFamily: 'Work Sans, sans-serif' }}
+              placeholder="e.g., Leaking faucet in kitchen"
+            />
+            {errors.title && (
+              <p className="text-red-400 text-sm mt-1">{errors.title}</p>
+            )}
+          </div>
+
+          {/* Category */}
+          <div>
+            <label
+              className={`block text-sm font-medium mb-2 ${text.primary}`}
+              style={{ fontFamily: 'Work Sans, sans-serif' }}
+            >
+              Category *
+            </label>
+            <select
+              value={formData.category}
+              onChange={(e) => setFormData({ ...formData, category: e.target.value as typeof MAINTENANCE_CATEGORIES[number] })}
+              className={`w-full px-4 py-3 ${
+                isDark ? 'bg-white/5 border-white/10' : 'bg-gray-50 border-gray-300'
+              } border rounded-lg ${text.primary} focus:outline-none focus:border-[#ff6b35] transition-colors`}
+              style={{ fontFamily: 'Work Sans, sans-serif' }}
+            >
+              {MAINTENANCE_CATEGORIES.map((category) => (
+                <option key={category} value={category}>
+                  {category.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase())}
+                </option>
+              ))}
+            </select>
+            {errors.category && (
+              <p className="text-red-400 text-sm mt-1">{errors.category}</p>
+            )}
+          </div>
+
+          {/* Priority */}
+          <div>
+            <label
+              className={`block text-sm font-medium mb-2 ${text.primary}`}
+              style={{ fontFamily: 'Work Sans, sans-serif' }}
+            >
+              Priority *
+            </label>
+            <div className="grid grid-cols-2 gap-3">
+              {PRIORITIES.map((priority) => (
+                <button
+                  key={priority.value}
+                  type="button"
+                  onClick={() =>
+                    setFormData({
+                      ...formData,
+                      priority: priority.value as 'low' | 'normal' | 'high' | 'emergency',
+                    })
+                  }
+                  className={`px-4 py-3 rounded-lg border transition-all text-left ${
+                    formData.priority === priority.value
+                      ? 'bg-gradient-to-r from-[#ff6b35] to-[#f7931e] border-[#ff6b35] text-white font-semibold'
+                      : isDark
+                      ? 'bg-white/5 border-white/10 hover:bg-white/10'
+                      : 'bg-gray-50 border-gray-300 hover:bg-gray-100'
+                  }`}
+                  style={{ fontFamily: 'Work Sans, sans-serif' }}
+                >
+                  <div className="font-semibold mb-1">{priority.label}</div>
+                  <div className={`text-xs ${formData.priority === priority.value ? 'text-white/80' : text.muted}`}>
+                    {priority.description}
+                  </div>
+                </button>
+              ))}
+            </div>
+            {errors.priority && (
+              <p className="text-red-400 text-sm mt-1">{errors.priority}</p>
+            )}
+          </div>
+
+          {/* Description */}
+          <div>
+            <label
+              className={`block text-sm font-medium mb-2 ${text.primary}`}
+              style={{ fontFamily: 'Work Sans, sans-serif' }}
+            >
+              Description *
+            </label>
+            <textarea
+              value={formData.description}
+              onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+              rows={4}
+              className={`w-full px-4 py-3 ${
+                isDark ? 'bg-white/5 border-white/10' : 'bg-gray-50 border-gray-300'
+              } border rounded-lg ${text.primary} focus:outline-none focus:border-[#ff6b35] transition-colors resize-none`}
+              style={{ fontFamily: 'Work Sans, sans-serif' }}
+              placeholder="Please provide details about the issue..."
+            />
+            {errors.description && (
+              <p className="text-red-400 text-sm mt-1">{errors.description}</p>
+            )}
+          </div>
+
+          {/* Actions */}
+          <div className="flex items-center justify-end gap-3 pt-4 border-t border-white/10">
+            <button
+              type="button"
+              onClick={handleClose}
+              className={`px-6 py-3 ${
+                isDark ? 'bg-white/5 hover:bg-white/10' : 'bg-gray-100 hover:bg-gray-200'
+              } rounded-lg font-medium transition-colors`}
+              style={{ fontFamily: 'Work Sans, sans-serif' }}
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={loading}
+              className="px-6 py-3 bg-gradient-to-r from-[#ff6b35] to-[#f7931e] rounded-lg font-medium hover:scale-105 transition-transform disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
+              style={{ fontFamily: 'Work Sans, sans-serif' }}
+            >
+              {loading ? 'Creating...' : 'Create Request'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}

@@ -8,12 +8,14 @@ import { getAvailableVendors, generateHVACBatch, createEmergencyRequest } from '
 import { LoadingPage } from './LoadingSpinner';
 import { ErrorState } from './ErrorBoundary';
 import { formatRelativeTime, formatDisplayDate } from '../../lib/utils/dateHelpers';
+import { CreateMaintenanceRequestModal } from './CreateMaintenanceRequestModal';
 
 export function MaintenancePanel() {
   const { isDark, bg, text, border } = useThemeStyles();
   const [assigningRequestId, setAssigningRequestId] = useState<string | null>(null);
   const [availableVendors, setAvailableVendors] = useState<any[]>([]);
   const [generatingBatch, setGeneratingBatch] = useState(false);
+  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const { assign, isAssigning } = useAssignVendor();
 
   // Feature checks for plan gating
@@ -102,7 +104,10 @@ export function MaintenancePanel() {
           >
             <RefreshCw className="w-4 h-4" />
           </button>
-          <button className="px-6 py-3 bg-gradient-to-r from-[#ff6b35] to-[#f7931e] rounded-lg font-medium hover:scale-105 transition-transform">
+          <button
+            onClick={() => setIsCreateModalOpen(true)}
+            className="px-6 py-3 bg-gradient-to-r from-[#ff6b35] to-[#f7931e] rounded-lg font-medium hover:scale-105 transition-transform"
+          >
             + Create Request
           </button>
         </div>
@@ -455,6 +460,15 @@ export function MaintenancePanel() {
           </FeatureGate>
         </div>
       </div>
+
+      {/* Create Maintenance Request Modal */}
+      <CreateMaintenanceRequestModal
+        isOpen={isCreateModalOpen}
+        onClose={() => setIsCreateModalOpen(false)}
+        onSuccess={() => {
+          refetchRequests();
+        }}
+      />
     </div>
   );
 }

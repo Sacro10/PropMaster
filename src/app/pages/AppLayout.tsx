@@ -21,8 +21,11 @@ export function AppLayout() {
   const [notifications, setNotifications] = useState<Notification[]>([])
   const [unreadCount, setUnreadCount] = useState(0)
   const [unitsCount, setUnitsCount] = useState<number | null>(null)
+  const [unitBreakdown, setUnitBreakdown] = useState<{ occupied: number; vacant: number; other: number } | null>(null)
   const [loadingUnits, setLoadingUnits] = useState(true)
+  const [showUnitsSummary, setShowUnitsSummary] = useState(false)
   const notificationsRef = useRef<HTMLDivElement>(null)
+  const unitsSummaryRef = useRef<HTMLDivElement>(null)
   const { user, signOut, profile } = useAuth()
   const { theme, toggleTheme } = useThemeContext()
   const navigate = useNavigate()
@@ -65,24 +68,44 @@ export function AppLayout() {
         }
 
         // Then count the units for this account
-        const { count, error: countError } = await supabase
-          .from('units')
-          .select('*', { count: 'exact', head: true })
-          .eq('account_id', memberData.account_id)
+        const [totalResult, occupiedResult, vacantResult] = await Promise.all([
+          supabase
+            .from('units')
+            .select('id', { count: 'exact', head: true })
+            .eq('account_id', memberData.account_id),
+          supabase
+            .from('units')
+            .select('id', { count: 'exact', head: true })
+            .eq('account_id', memberData.account_id)
+            .eq('status', 'occupied'),
+          supabase
+            .from('units')
+            .select('id', { count: 'exact', head: true })
+            .eq('account_id', memberData.account_id)
+            .eq('status', 'vacant'),
+        ])
 
-        if (countError) {
-          console.error('Error counting units:', countError)
+        if (totalResult.error || occupiedResult.error || vacantResult.error) {
+          console.error('Error counting units:', totalResult.error || occupiedResult.error || vacantResult.error)
           setUnitsCount(0)
+          setUnitBreakdown({ occupied: 0, vacant: 0, other: 0 })
           setLoadingUnits(false)
           return
         }
 
-        console.log('Units count fetched:', count)
-        setUnitsCount(count || 0)
+        const totalUnits = totalResult.count || 0
+        const occupiedUnits = occupiedResult.count || 0
+        const vacantUnits = vacantResult.count || 0
+        const otherUnits = Math.max(0, totalUnits - occupiedUnits - vacantUnits)
+
+        console.log('Units count fetched:', totalUnits)
+        setUnitsCount(totalUnits)
+        setUnitBreakdown({ occupied: occupiedUnits, vacant: vacantUnits, other: otherUnits })
         setLoadingUnits(false)
       } catch (error) {
         console.error('Error in fetchUnitsCount:', error)
         setUnitsCount(0)
+        setUnitBreakdown({ occupied: 0, vacant: 0, other: 0 })
         setLoadingUnits(false)
       }
     }
@@ -155,6 +178,23 @@ export function AppLayout() {
       document.removeEventListener('mousedown', handleClickOutside)
     }
   }, [showNotifications])
+
+  // Close units summary dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (unitsSummaryRef.current && !unitsSummaryRef.current.contains(event.target as Node)) {
+        setShowUnitsSummary(false)
+      }
+    }
+
+    if (showUnitsSummary) {
+      document.addEventListener('mousedown', handleClickOutside)
+    }
+
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside)
+    }
+  }, [showUnitsSummary])
 
   const handleSignOut = async () => {
     await signOut()
@@ -284,24 +324,74 @@ export function AppLayout() {
             </div>
 
             <div className="flex items-center gap-6">
-              <div
-                className={`flex items-center gap-3 px-4 py-2 ${
-                  isDark ? 'bg-white/5 border-white/10' : 'bg-gray-50 border-gray-200'
-                } rounded-lg border`}
-              >
-                <House className="w-5 h-5 text-[#ff6b35]" />
-                <div>
-                  <p className={`text-xs ${isDark ? 'text-white/50' : 'text-gray-500'}`} style={{ fontFamily: 'Work Sans, sans-serif' }}>
-                    Active Properties
-                  </p>
-                  <p className="text-lg font-semibold" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
-                    {loadingUnits ? (
-                      <span className="inline-block animate-pulse">...</span>
-                    ) : (
-                      `${unitsCount ?? 0} ${unitsCount === 1 ? 'UNIT' : 'UNITS'}`
-                    )}
-                  </p>
-                </div>
+              <div className="relative" ref={unitsSummaryRef}>
+                <button
+                  type="button"
+                  onClick={() => setShowUnitsSummary(prev => !prev)}
+                  aria-expanded={showUnitsSummary}
+                  aria-haspopup="dialog"
+                  className={`flex items-center gap-3 px-4 py-2 ${
+                    isDark ? 'bg-white/5 border-white/10 hover:bg-white/10' : 'bg-gray-50 border-gray-200 hover:bg-gray-100'
+                  } rounded-lg border transition-colors`}
+                >
+                  <House className="w-5 h-5 text-[#ff6b35]" />
+                  <div className="text-left">
+                    <p className={`text-xs ${isDark ? 'text-white/50' : 'text-gray-500'}`} style={{ fontFamily: 'Work Sans, sans-serif' }}>
+                      Active Properties
+                    </p>
+                    <p className="text-lg font-semibold" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
+                      {loadingUnits ? (
+                        <span className="inline-block animate-pulse">...</span>
+                      ) : (
+                        `${unitsCount ?? 0} ${unitsCount === 1 ? 'UNIT' : 'UNITS'}`
+                      )}
+                    </p>
+                  </div>
+                </button>
+
+                {showUnitsSummary && (
+                  <div
+                    className={`absolute top-full left-0 mt-2 w-64 ${
+                      isDark ? 'bg-[#1a1f35] border-white/10' : 'bg-white border-gray-200'
+                    } border rounded-lg shadow-xl z-50`}
+                    role="dialog"
+                    aria-label="Unit summary"
+                  >
+                    <div className={`px-4 py-3 border-b ${isDark ? 'border-white/10' : 'border-gray-200'}`}>
+                      <p className="text-sm font-semibold" style={{ fontFamily: 'Work Sans, sans-serif' }}>
+                        Unit Summary
+                      </p>
+                    </div>
+                    <div className="px-4 py-3 space-y-2">
+                      {loadingUnits ? (
+                        <p className={`text-xs ${isDark ? 'text-white/60' : 'text-gray-500'}`} style={{ fontFamily: 'Work Sans, sans-serif' }}>
+                          Loading unit totals...
+                        </p>
+                      ) : (
+                        <>
+                          <div className="flex items-center justify-between text-sm" style={{ fontFamily: 'Work Sans, sans-serif' }}>
+                            <span className={`${isDark ? 'text-white/70' : 'text-gray-600'}`}>Total units</span>
+                            <span className="font-semibold text-[#ff6b35]">{unitsCount ?? 0}</span>
+                          </div>
+                          <div className="flex items-center justify-between text-sm" style={{ fontFamily: 'Work Sans, sans-serif' }}>
+                            <span className={`${isDark ? 'text-white/70' : 'text-gray-600'}`}>Occupied</span>
+                            <span className="font-semibold">{unitBreakdown?.occupied ?? 0}</span>
+                          </div>
+                          <div className="flex items-center justify-between text-sm" style={{ fontFamily: 'Work Sans, sans-serif' }}>
+                            <span className={`${isDark ? 'text-white/70' : 'text-gray-600'}`}>Vacant</span>
+                            <span className="font-semibold">{unitBreakdown?.vacant ?? 0}</span>
+                          </div>
+                          {(unitBreakdown?.other ?? 0) > 0 && (
+                            <div className="flex items-center justify-between text-sm" style={{ fontFamily: 'Work Sans, sans-serif' }}>
+                              <span className={`${isDark ? 'text-white/70' : 'text-gray-600'}`}>Other</span>
+                              <span className="font-semibold">{unitBreakdown?.other ?? 0}</span>
+                            </div>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
 
               <div className="relative" ref={notificationsRef}>

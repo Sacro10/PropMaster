@@ -157,7 +157,7 @@ async function seedDemoData(accountId: string) {
       const email = `tenant${i + 1}@example.com`;
       const password = 'DemoPass123!';
 
-      // Create auth user
+      // Try to create auth user, or get existing one
       const { data: authData, error: authError } = await supabase.auth.admin.createUser({
         email,
         password,
@@ -165,7 +165,20 @@ async function seedDemoData(accountId: string) {
       });
 
       if (authError) {
-        console.warn(`⚠️  Could not create user ${email}: ${authError.message}`);
+        // User already exists - try to get their ID
+        const { data: existingUsers } = await supabase.auth.admin.listUsers();
+        const existingUser = existingUsers?.users?.find(u => u.email === email);
+        
+        if (existingUser) {
+          tenantUsers.push({
+            id: existingUser.id,
+            name: tenantNames[i],
+            email,
+          });
+          console.log(`ℹ️  Using existing user ${email}`);
+        } else {
+          console.warn(`⚠️  Could not find or create user ${email}`);
+        }
         continue;
       }
 
@@ -184,7 +197,7 @@ async function seedDemoData(accountId: string) {
       });
     }
 
-    console.log(`✅ Created ${tenantUsers.length} tenant users\n`);
+    console.log(`✅ Found/created ${tenantUsers.length} tenant users\n`);
 
     // 4. Create Leases
     console.log('📄 Creating leases...');
@@ -265,8 +278,13 @@ async function seedDemoData(accountId: string) {
 
     const maintenanceRequests: any[] = [];
 
-    for (let i = 0; i < 30; i++) {
-      const lease = randomItem(createdLeases);
+    // Use leases if available, otherwise use occupied units directly
+    const maintenanceUnits = createdLeases.length > 0 
+      ? createdLeases.map(l => ({ unit_id: l.unit_id, user_id: l.tenant_user_id }))
+      : occupiedUnits.slice(0, 20).map(u => ({ unit_id: u.id, user_id: tenantUsers[0]?.id || null }));
+
+    for (let i = 0; i < 30 && maintenanceUnits.length > 0; i++) {
+      const unitData = randomItem(maintenanceUnits);
       const category = randomItem(categories);
       const priority = randomItem(priorities);
       const status = randomItem(statuses);
@@ -274,8 +292,8 @@ async function seedDemoData(accountId: string) {
 
       maintenanceRequests.push({
         account_id: accountId,
-        unit_id: lease.unit_id,
-        created_by_user_id: lease.tenant_user_id,
+        unit_id: unitData.unit_id,
+        created_by_user_id: unitData.user_id,
         title: `${category.charAt(0).toUpperCase() + category.slice(1)} issue in unit`,
         description: `Tenant reported ${category} problem that needs attention.`,
         category,
@@ -299,8 +317,11 @@ async function seedDemoData(accountId: string) {
     const vacantUnits = createdUnits.filter(u => u.status === 'vacant');
     const showings: any[] = [];
 
-    for (let i = 0; i < Math.min(20, vacantUnits.length * 3); i++) {
-      const unit = randomItem(vacantUnits);
+    // Create showings for vacant units or any units if none vacant
+    const showingUnits = vacantUnits.length > 0 ? vacantUnits : createdUnits.slice(0, 10);
+    
+    for (let i = 0; i < Math.min(20, showingUnits.length * 3); i++) {
+      const unit = randomItem(showingUnits);
       const scheduledDate = randomDate(new Date(), new Date(Date.now() + 14 * 24 * 60 * 60 * 1000));
 
       showings.push({
@@ -317,18 +338,23 @@ async function seedDemoData(accountId: string) {
       });
     }
 
-    const { error: showingsError } = await supabase
-      .from('showings')
-      .insert(showings);
+    if (showings.length > 0) {
+      const { error: showingsError } = await supabase
+        .from('showings')
+        .insert(showings);
 
-    if (showingsError) throw showingsError;
+      if (showingsError) throw showingsError;
+    }
     console.log(`✅ Created ${showings.length} showings\n`);
 
     // 8. Create HVAC Filter Subscriptions
     console.log('🌬️  Creating HVAC filter subscriptions...');
     const subscriptions: any[] = [];
 
-    for (const unit of occupiedUnits.slice(0, Math.floor(occupiedUnits.length * 0.6))) {
+    // Use occupied units or any units if none occupied
+    const hvacUnits = occupiedUnits.length > 0 ? occupiedUnits : createdUnits;
+    
+    for (const unit of hvacUnits.slice(0, Math.floor(hvacUnits.length * 0.6))) {
       subscriptions.push({
         account_id: accountId,
         unit_id: unit.id,
@@ -342,11 +368,13 @@ async function seedDemoData(accountId: string) {
       });
     }
 
-    const { error: subsError } = await supabase
-      .from('hvac_filter_subscriptions')
-      .insert(subscriptions);
+    if (subscriptions.length > 0) {
+      const { error: subsError } = await supabase
+        .from('hvac_filter_subscriptions')
+        .insert(subscriptions);
 
-    if (subsError) throw subsError;
+      if (subsError) throw subsError;
+    }
     console.log(`✅ Created ${subscriptions.length} HVAC filter subscriptions\n`);
 
     // 9. Create Messages
@@ -361,7 +389,7 @@ async function seedDemoData(accountId: string) {
       .eq('role', 'owner')
       .single();
 
-    if (adminMember) {
+    if (adminMember && tenantUsers.length > 0) {
       for (let i = 0; i < Math.min(15, tenantUsers.length * 2); i++) {
         const tenant = randomItem(tenantUsers);
         const fromTenant = Math.random() > 0.5;
@@ -384,15 +412,238 @@ async function seedDemoData(accountId: string) {
         });
       }
 
-      const { error: messagesError } = await supabase
-        .from('messages')
-        .insert(messages);
+      if (messages.length > 0) {
+        const { error: messagesError } = await supabase
+          .from('messages')
+          .insert(messages);
 
-      if (messagesError) throw messagesError;
+        if (messagesError) console.warn('⚠️  Messages error:', messagesError.message);
+      }
       console.log(`✅ Created ${messages.length} messages\n`);
+    } else {
+      console.log('⚠️  Skipping messages (no admin or tenant users)\n');
     }
 
-    // 10. Create Owner Disbursements
+    // 10. Create Tenant Profiles
+    console.log('👤 Creating tenant profiles...');
+    const tenantProfiles: any[] = [];
+
+    for (let i = 0; i < tenantUsers.length; i++) {
+      const tenant = tenantUsers[i];
+      tenantProfiles.push({
+        account_id: accountId,
+        user_id: tenant.id,
+        full_name: tenant.name,
+        email: tenant.email,
+        phone: `555-${String(100 + i).padStart(4, '0')}`,
+        ai_risk_score: Math.floor(60 + Math.random() * 40),
+        background_check_status: randomItem(['approved', 'approved', 'pending', 'approved']),
+        credit_score: Math.floor(600 + Math.random() * 200),
+        monthly_income: 3500 + Math.floor(Math.random() * 4500),
+        emergency_contact_name: `Emergency Contact ${i + 1}`,
+        emergency_contact_phone: `555-${String(200 + i).padStart(4, '0')}`,
+      });
+    }
+
+    if (tenantProfiles.length > 0) {
+      const { error: profilesError } = await supabase
+        .from('tenant_profiles')
+        .upsert(tenantProfiles, { onConflict: 'user_id' });
+
+      if (profilesError) console.warn('⚠️  Tenant profiles warning:', profilesError.message);
+    }
+    console.log(`✅ Created ${tenantProfiles.length} tenant profiles\n`);
+
+    // 11. Create Rental Applications
+    console.log('📝 Creating rental applications...');
+    const applications: any[] = [];
+    const applicantNames = [
+      'Alex Thompson', 'Jamie Wilson', 'Morgan Davis', 'Taylor Smith',
+      'Jordan Lee', 'Casey Brown', 'Riley Johnson', 'Quinn Martinez'
+    ];
+
+    for (let i = 0; i < 15; i++) {
+      const unit = randomItem(showingUnits);
+      const property = createdProperties.find(p => p.id === unit.property_id);
+      const createdAt = randomDate(new Date('2025-12-01'), new Date());
+      const monthlyIncome = 4000 + Math.floor(Math.random() * 6000);
+      const creditScore = 600 + Math.floor(Math.random() * 200);
+      const aiRiskScore = Math.floor(65 + Math.random() * 30);
+      const status = randomItem(['pending', 'under_review', 'approved', 'rejected', 'pending']);
+
+      // Calculate reviewed_at based on status
+      let reviewedAt = null;
+      if (status === 'approved' || status === 'rejected') {
+        // Reviewed 2-48 hours after submission
+        const reviewHours = 2 + Math.floor(Math.random() * 46);
+        reviewedAt = new Date(createdAt.getTime() + reviewHours * 60 * 60 * 1000).toISOString();
+      }
+
+      applications.push({
+        account_id: accountId,
+        property_id: unit.property_id,
+        unit_id: unit.id,
+        full_name: randomItem(applicantNames) + ` ${i + 1}`,
+        email: `applicant${i + 1}@example.com`,
+        phone: `555-${String(300 + i).padStart(4, '0')}`,
+        current_address: `${100 + i} Previous Street, City, ST 12345`,
+        employment_status: randomItem(['employed', 'employed', 'self_employed', 'employed']),
+        current_employer: randomItem(['Tech Corp', 'City Hospital', 'Local Bank', 'Retail Inc', 'Services LLC']),
+        monthly_income: monthlyIncome,
+        credit_score: creditScore,
+        ai_risk_score: aiRiskScore,
+        background_check_status: aiRiskScore >= 75 ? 'approved' : (aiRiskScore >= 60 ? 'pending' : 'rejected'),
+        status: status,
+        desired_move_in_date: new Date(Date.now() + (14 + i * 7) * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+        created_at: createdAt.toISOString(),
+        reviewed_at: reviewedAt,
+      });
+    }
+
+    if (applications.length > 0) {
+      const { error: appsError } = await supabase
+        .from('rental_applications')
+        .insert(applications);
+
+      if (appsError) console.warn('⚠️  Applications warning:', appsError.message);
+    }
+    console.log(`✅ Created ${applications.length} rental applications\n`);
+
+    // 12. Create Message Templates
+    console.log('📋 Creating message templates...');
+    const templates = [
+      {
+        account_id: accountId,
+        name: 'Rent Payment Reminder',
+        category: 'payment',
+        subject: 'Rent Payment Reminder - {{unit_number}}',
+        body: 'Dear {{tenant_name}},\n\nThis is a friendly reminder that your rent payment of ${{rent_amount}} is due on {{due_date}}.\n\nPlease submit your payment through the tenant portal.\n\nThank you!',
+        variables: ['tenant_name', 'unit_number', 'rent_amount', 'due_date'],
+        is_active: true,
+      },
+      {
+        account_id: accountId,
+        name: 'Maintenance Update',
+        category: 'maintenance',
+        subject: 'Maintenance Request Update - {{ticket_number}}',
+        body: 'Hello {{tenant_name}},\n\nYour maintenance request ({{ticket_number}}) has been updated.\n\nStatus: {{status}}\nScheduled Date: {{scheduled_date}}\n\nBest regards',
+        variables: ['tenant_name', 'ticket_number', 'status', 'scheduled_date'],
+        is_active: true,
+      },
+      {
+        account_id: accountId,
+        name: 'Lease Renewal Notice',
+        category: 'lease',
+        subject: 'Lease Renewal Notice - {{property_name}}',
+        body: 'Dear {{tenant_name}},\n\nYour lease for {{unit_number}} at {{property_name}} will expire on {{lease_end}}.\n\nPlease let us know if you would like to renew.\n\nThank you!',
+        variables: ['tenant_name', 'unit_number', 'property_name', 'lease_end'],
+        is_active: true,
+      },
+      {
+        account_id: accountId,
+        name: 'Welcome New Tenant',
+        category: 'onboarding',
+        subject: 'Welcome to {{property_name}}!',
+        body: 'Dear {{tenant_name}},\n\nWelcome to your new home at {{property_name}}!\n\nYour move-in date is {{move_in_date}}.\n\nWelcome home!',
+        variables: ['tenant_name', 'property_name', 'move_in_date'],
+        is_active: true,
+      },
+      {
+        account_id: accountId,
+        name: 'Late Payment Notice',
+        category: 'payment',
+        subject: 'Late Payment Notice - {{unit_number}}',
+        body: 'Dear {{tenant_name}},\n\nYour rent payment is now {{days_overdue}} days overdue.\n\nPlease make payment immediately to avoid additional fees.\n\nContact us if you need assistance.',
+        variables: ['tenant_name', 'unit_number', 'days_overdue'],
+        is_active: true,
+      },
+    ];
+
+    const { error: templatesError } = await supabase
+      .from('message_templates')
+      .insert(templates);
+
+    if (templatesError) console.warn('⚠️  Templates warning:', templatesError.message);
+    console.log(`✅ Created ${templates.length} message templates\n`);
+
+    // 13. Create Activity Events
+    console.log('📊 Creating activity events...');
+    const activityEvents: any[] = [];
+    const eventTypes = [
+      { type: 'payment_received', entity: 'payment', summary: 'Rent payment received' },
+      { type: 'maintenance_created', entity: 'maintenance_request', summary: 'New maintenance request submitted' },
+      { type: 'maintenance_completed', entity: 'maintenance_request', summary: 'Maintenance request completed' },
+      { type: 'showing_scheduled', entity: 'showing', summary: 'Property showing scheduled' },
+      { type: 'application_submitted', entity: 'rental_application', summary: 'New rental application received' },
+      { type: 'lease_signed', entity: 'lease', summary: 'Lease agreement signed' },
+      { type: 'tenant_move_in', entity: 'tenant', summary: 'Tenant moved in' },
+      { type: 'payment_late', entity: 'payment', summary: 'Payment marked as late' },
+    ];
+
+    for (let i = 0; i < 50; i++) {
+      const eventType = randomItem(eventTypes);
+      const createdAt = randomDate(new Date('2026-01-01'), new Date());
+
+      activityEvents.push({
+        account_id: accountId,
+        event_type: eventType.type,
+        entity_type: eventType.entity,
+        summary: eventType.summary,
+        metadata: { auto_generated: true, index: i },
+        created_at: createdAt.toISOString(),
+      });
+    }
+
+    const { error: activityError } = await supabase
+      .from('activity_events')
+      .insert(activityEvents);
+
+    if (activityError) console.warn('⚠️  Activity events warning:', activityError.message);
+    console.log(`✅ Created ${activityEvents.length} activity events\n`);
+
+    // 14. Create Automated Reminders
+    console.log('⏰ Creating automated reminders...');
+    const reminders = [
+      {
+        account_id: accountId,
+        reminder_type: 'rent_due',
+        name: 'Monthly Rent Reminder',
+        frequency: 'monthly',
+        next_send_date: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+        message_subject: 'Rent Payment Due',
+        message_body: 'Your rent payment is due soon. Please ensure payment is made by the due date.',
+        status: 'active',
+      },
+      {
+        account_id: accountId,
+        reminder_type: 'lease_renewal',
+        name: 'Lease Renewal Reminder',
+        frequency: 'monthly',
+        next_send_date: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString(),
+        message_subject: 'Lease Renewal Notice',
+        message_body: 'Your lease will be expiring soon. Please contact us to discuss renewal options.',
+        status: 'active',
+      },
+      {
+        account_id: accountId,
+        reminder_type: 'hvac_filter',
+        name: 'HVAC Filter Delivery',
+        frequency: 'quarterly',
+        next_send_date: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+        message_subject: 'HVAC Filter Delivery',
+        message_body: 'Your HVAC filter delivery is scheduled. Please replace filters upon receipt.',
+        status: 'active',
+      },
+    ];
+
+    const { error: remindersError } = await supabase
+      .from('automated_reminders')
+      .insert(reminders);
+
+    if (remindersError) console.warn('⚠️  Reminders warning:', remindersError.message);
+    console.log(`✅ Created ${reminders.length} automated reminders\n`);
+
+    // 15. Create Owner Disbursements
     console.log('💰 Creating owner disbursements...');
     const disbursements: any[] = [];
 
@@ -438,12 +689,17 @@ async function seedDemoData(accountId: string) {
     console.log(`   - ${createdProperties.length} properties`);
     console.log(`   - ${createdUnits.length} units`);
     console.log(`   - ${tenantUsers.length} tenants`);
+    console.log(`   - ${tenantProfiles.length} tenant profiles`);
     console.log(`   - ${createdLeases.length} active leases`);
     console.log(`   - ${payments.length} payment records`);
     console.log(`   - ${maintenanceRequests.length} maintenance requests`);
     console.log(`   - ${showings.length} showings`);
+    console.log(`   - ${applications.length} rental applications`);
     console.log(`   - ${subscriptions.length} HVAC subscriptions`);
     console.log(`   - ${messages.length} messages`);
+    console.log(`   - ${templates.length} message templates`);
+    console.log(`   - ${activityEvents.length} activity events`);
+    console.log(`   - ${reminders.length} automated reminders`);
     console.log(`   - ${disbursements.length} disbursements`);
 
   } catch (error) {

@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { X, Loader2 } from 'lucide-react';
 import { useThemeStyles } from '../hooks/useThemeStyles';
+import { supabase } from '@/lib/supabase';
 
 interface NewApplicationFormProps {
   onClose: () => void;
@@ -24,6 +25,7 @@ export function NewApplicationForm({ onClose, onSubmit }: NewApplicationFormProp
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [units, setUnits] = useState<any[]>([]);
   const [loadingUnits, setLoadingUnits] = useState(true);
+  const [unitQuery, setUnitQuery] = useState('');
   const [formData, setFormData] = useState<ApplicationFormData>({
     firstName: '',
     lastName: '',
@@ -40,9 +42,49 @@ export function NewApplicationForm({ onClose, onSubmit }: NewApplicationFormProp
   useEffect(() => {
     async function loadUnits() {
       try {
-        // This would call your API to get available units
-        // For now using placeholder
-        setUnits([]);
+        setLoadingUnits(true);
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) return;
+
+        const { data: memberData, error: memberError } = await supabase
+          .from('account_members')
+          .select('account_id')
+          .eq('user_id', user.id)
+          .single();
+
+        if (memberError || !memberData?.account_id) {
+          console.error('Failed to load account membership:', memberError);
+          return;
+        }
+
+        const { data: unitsData, error: unitsError } = await supabase
+          .from('units')
+          .select(`
+            id,
+            unit_number,
+            property_id,
+            properties!inner (
+              id,
+              name,
+              account_id
+            )
+          `)
+          .eq('properties.account_id', memberData.account_id)
+          .order('unit_number', { ascending: true });
+
+        if (unitsError) {
+          console.error('Failed to load units:', unitsError);
+          return;
+        }
+
+        const formattedUnits = (unitsData || []).map((unit: any) => ({
+          id: unit.id,
+          unit_number: unit.unit_number,
+          property_id: unit.property_id,
+          property_name: unit.properties?.name || 'Unknown Property',
+        }));
+
+        setUnits(formattedUnits);
       } catch (error) {
         console.error('Failed to load units:', error);
       } finally {
@@ -60,10 +102,32 @@ export function NewApplicationForm({ onClose, onSubmit }: NewApplicationFormProp
     }));
   };
 
+  const formatUnitLabel = (unit: any) => `${unit.property_name} - Unit ${unit.unit_number}`;
+
+  const handleUnitChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const { value } = e.target;
+    const normalizedValue = value.trim().toLowerCase();
+    setUnitQuery(value);
+
+    const matchedUnit = units.find((unit) => {
+      const label = formatUnitLabel(unit).toLowerCase();
+      return label === normalizedValue || String(unit.unit_number).toLowerCase() === normalizedValue;
+    });
+
+    setFormData(prev => ({
+      ...prev,
+      unitId: matchedUnit?.id || '',
+    }));
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSubmitting(true);
     try {
+      if (!formData.unitId) {
+        alert('Please select an existing unit from the list.');
+        return;
+      }
       await onSubmit(formData);
       onClose();
     } catch (error) {
@@ -191,24 +255,30 @@ export function NewApplicationForm({ onClose, onSubmit }: NewApplicationFormProp
                 <label className={`block text-sm ${text.muted} mb-2`}>
                   Unit <span className="text-red-400">*</span>
                 </label>
-                <select
-                  name="unitId"
-                  value={formData.unitId}
-                  onChange={handleChange}
+                <input
+                  type="text"
+                  name="unitSearch"
+                  value={unitQuery}
+                  onChange={handleUnitChange}
                   required
                   disabled={loadingUnits}
+                  list="unit-options"
+                  placeholder={loadingUnits ? 'Loading units...' : 'Start typing a unit'}
                   className={`w-full px-4 py-3 ${isDark ? 'bg-white/5' : 'bg-gray-50'} border ${border.default} rounded-lg focus:outline-none focus:border-[#ff6b35]/50`}
                   style={{ fontFamily: 'Work Sans, sans-serif' }}
-                >
-                  <option value="">Select a unit</option>
+                />
+                <datalist id="unit-options">
                   {units.map(unit => (
-                    <option key={unit.id} value={unit.id}>
-                      {unit.property?.name} - Unit {unit.unit_number}
-                    </option>
+                    <option key={unit.id} value={formatUnitLabel(unit)} />
                   ))}
-                </select>
+                </datalist>
                 {loadingUnits && (
                   <p className={`text-xs ${text.muted} mt-1`}>Loading units...</p>
+                )}
+                {!loadingUnits && unitQuery && !formData.unitId && (
+                  <p className={`text-xs ${text.muted} mt-1`}>
+                    No matching unit found. Pick a unit from the list to continue.
+                  </p>
                 )}
               </div>
 

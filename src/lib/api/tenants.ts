@@ -7,6 +7,59 @@ import { supabase } from '../supabaseClient';
 import { getCurrentAccountId, handleSupabaseError, getPaginationRange, calculatePaginationMeta, type PaginationParams } from './client';
 import type { TenantWithLease, RentalApplication, PaginatedResponse } from './types';
 
+function clamp(value: number, min: number, max: number) {
+  return Math.min(Math.max(value, min), max);
+}
+
+function calculateTenantRiskScore(tenant: any, lease: any): number | null {
+  const parts: Array<{ score: number; weight: number }> = [];
+
+  if (tenant?.credit_score !== null && tenant?.credit_score !== undefined) {
+    const normalized = clamp(((Number(tenant.credit_score) - 300) / 550) * 100, 0, 100);
+    parts.push({ score: Math.round(normalized), weight: 0.4 });
+  }
+
+  const rent = lease?.rent ? Number(lease.rent) : 0;
+  if (tenant?.monthly_income !== null && tenant?.monthly_income !== undefined && rent > 0) {
+    const ratio = Number(tenant.monthly_income) / rent;
+    const ratioScore =
+      ratio >= 3 ? 100 :
+      ratio >= 2.5 ? 90 :
+      ratio >= 2 ? 80 :
+      ratio >= 1.5 ? 60 :
+      ratio >= 1.2 ? 50 :
+      ratio >= 1 ? 40 :
+      20;
+    parts.push({ score: ratioScore, weight: 0.3 });
+  }
+
+  if (tenant?.background_check_status) {
+    const status = String(tenant.background_check_status).toLowerCase();
+    const backgroundScore =
+      status === 'approved' ? 90 :
+      status === 'pending' ? 60 :
+      status === 'rejected' ? 20 :
+      70;
+    parts.push({ score: backgroundScore, weight: 0.2 });
+  }
+
+  if (tenant?.employment_status) {
+    const status = String(tenant.employment_status).toLowerCase();
+    const employmentScore =
+      status.includes('employed') || status.includes('self') ? 80 :
+      status.includes('unemployed') ? 30 :
+      status.includes('student') || status.includes('retired') ? 50 :
+      60;
+    parts.push({ score: employmentScore, weight: 0.1 });
+  }
+
+  if (parts.length === 0) return null;
+
+  const totalWeight = parts.reduce((sum, part) => sum + part.weight, 0);
+  const weightedScore = parts.reduce((sum, part) => sum + part.score * part.weight, 0) / totalWeight;
+  return clamp(Math.round(weightedScore), 0, 100);
+}
+
 /**
  * Get all active tenants with their lease and unit information
  */
@@ -89,14 +142,27 @@ export async function getTenants(params: PaginationParams = {}) {
     });
 
     // Transform the data to match our interface
+    const pendingRiskUpdates: Array<Promise<any>> = [];
     const tenants: TenantWithLease[] = leasesData.map((lease: any) => {
       const tenant = profileMap.get(lease.tenant_user_id) || {};
       const unit = lease.units || {};
       const property = unit.properties || {};
+      const calculatedRiskScore = tenant.ai_risk_score ?? calculateTenantRiskScore(tenant, lease);
+
+      if (tenant.user_id && tenant.ai_risk_score == null && calculatedRiskScore != null) {
+        pendingRiskUpdates.push(
+          supabase
+            .from('tenant_profiles')
+            .update({ ai_risk_score: calculatedRiskScore })
+            .eq('account_id', accountId)
+            .eq('user_id', tenant.user_id)
+        );
+      }
 
       return {
         ...tenant,
         account_id: accountId,
+        ai_risk_score: calculatedRiskScore ?? tenant.ai_risk_score ?? null,
         lease: {
           id: lease.id,
           unit_id: lease.unit_id,
@@ -128,6 +194,10 @@ export async function getTenants(params: PaginationParams = {}) {
         } : null,
       };
     });
+
+    if (pendingRiskUpdates.length > 0) {
+      await Promise.allSettled(pendingRiskUpdates);
+    }
 
     const result: PaginatedResponse<TenantWithLease> = {
       data: tenants,

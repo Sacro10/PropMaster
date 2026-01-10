@@ -145,3 +145,33 @@ export function useAssignVendor() {
 
   return { assign, isAssigning, error };
 }
+
+export function useCreateMaintenanceRequest() {
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<Error | null>(null);
+
+  const create = useCallback(async (request: {
+    unit_id: string;
+    property_id: string;
+    title: string;
+    description: string;
+    category: string;
+    priority: 'low' | 'normal' | 'high' | 'emergency';
+  }) => {
+    try {
+      setLoading(true);
+      setError(null);
+      const { createMaintenanceRequest } = await import('../api/maintenance');
+      await createMaintenanceRequest(request);
+      return { success: true };
+    } catch (err) {
+      console.error('[useCreateMaintenanceRequest] Error creating request:', err);
+      setError(err as Error);
+      return { success: false, error: err as Error };
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  return { create, loading, error };
+}

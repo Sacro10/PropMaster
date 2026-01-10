@@ -15,7 +15,8 @@
       "Bash(perl:*)",
       "Bash(cd /Users/sacro/Documents/Property\\\\ Management\\\\ Automation\\\\ App && npm run type-check:*)",
       "Bash(npm run build:*)",
-      "Bash(find:*)"
+      "Bash(find:*)",
+      "Bash(npm run seed:*)"
     ]
   }
 }
