@@ -14,7 +14,8 @@ WHERE
     'automated_reminders',
     'reminder_schedules',
     'reminder_runs',
-    'property_showings'
+    'reminder_logs',
+    'showings'
   )
 ORDER BY
   table_name;

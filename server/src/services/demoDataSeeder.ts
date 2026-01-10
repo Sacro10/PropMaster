@@ -338,6 +338,9 @@ async function seedShowings(accountId: string, properties: any[], units: any[], 
       property_id: property.id,
       unit_id: unit.id,
       scheduled_at: scheduledAt.toISOString(),
+      applicant_name: `Prospect ${i + 1}`,
+      applicant_email: `prospect${i + 1}@example.com`,
+      applicant_phone: `555-${String(2000 + i).padStart(4, '0')}`,
       prospect_name: `Prospect ${i + 1}`,
       prospect_email: `prospect${i + 1}@example.com`,
       prospect_phone: `555-${String(2000 + i).padStart(4, '0')}`,
@@ -347,7 +350,7 @@ async function seedShowings(accountId: string, properties: any[], units: any[], 
   }
 
   const { data } = await supabase
-    .from('property_showings')
+    .from('showings')
     .insert(showings)
     .select();
 
@@ -436,7 +439,7 @@ export async function clearDemoData(accountId: string): Promise<void> {
   await supabase.from('messages').delete().eq('account_id', accountId);
   await supabase.from('conversations').delete().eq('account_id', accountId);
   await supabase.from('activity_events').delete().eq('account_id', accountId);
-  await supabase.from('property_showings').delete().eq('account_id', accountId);
+  await supabase.from('showings').delete().eq('account_id', accountId);
   await supabase.from('payments').delete().eq('account_id', accountId);
   await supabase.from('maintenance_requests').delete().eq('account_id', accountId);
   await supabase.from('rental_applications').delete().eq('account_id', accountId);

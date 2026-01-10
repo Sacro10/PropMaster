@@ -118,22 +118,52 @@ BEGIN
   CREATE TABLE IF NOT EXISTS reminder_schedules (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     account_id UUID NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
-    reminder_id UUID NOT NULL REFERENCES automated_reminders(id) ON DELETE CASCADE,
-    scheduled_for TIMESTAMPTZ NOT NULL,
+    name TEXT,
+    reminder_type TEXT,
+    template_id UUID REFERENCES message_templates(id) ON DELETE SET NULL,
+    frequency TEXT,
+    custom_cron TEXT,
+    next_run_at TIMESTAMPTZ,
+    last_run_at TIMESTAMPTZ,
+    is_active BOOLEAN DEFAULT true,
+    recipient_filter JSONB DEFAULT '{}'::jsonb,
+    reminder_id UUID REFERENCES automated_reminders(id) ON DELETE CASCADE,
+    scheduled_for TIMESTAMPTZ,
     sent_at TIMESTAMPTZ,
     recipient_count INTEGER DEFAULT 0,
     status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'sent', 'failed', 'cancelled')),
     error_message TEXT,
-    created_at TIMESTAMPTZ DEFAULT NOW()
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
   );
 
   CREATE INDEX IF NOT EXISTS idx_reminder_schedules_reminder ON reminder_schedules(reminder_id);
   CREATE INDEX IF NOT EXISTS idx_reminder_schedules_scheduled ON reminder_schedules(scheduled_for) WHERE status = 'pending';
+  CREATE INDEX IF NOT EXISTS idx_reminder_schedules_next_run ON reminder_schedules(next_run_at) WHERE is_active = true;
 
   RAISE NOTICE '✓ Created reminder_schedules table';
 EXCEPTION
   WHEN OTHERS THEN
     RAISE NOTICE '✗ Failed to create reminder_schedules: %', SQLERRM;
+END $$;
+
+DO $$
+BEGIN
+  ALTER TABLE reminder_schedules ADD COLUMN IF NOT EXISTS name TEXT;
+  ALTER TABLE reminder_schedules ADD COLUMN IF NOT EXISTS reminder_type TEXT;
+  ALTER TABLE reminder_schedules ADD COLUMN IF NOT EXISTS template_id UUID REFERENCES message_templates(id) ON DELETE SET NULL;
+  ALTER TABLE reminder_schedules ADD COLUMN IF NOT EXISTS frequency TEXT;
+  ALTER TABLE reminder_schedules ADD COLUMN IF NOT EXISTS custom_cron TEXT;
+  ALTER TABLE reminder_schedules ADD COLUMN IF NOT EXISTS next_run_at TIMESTAMPTZ;
+  ALTER TABLE reminder_schedules ADD COLUMN IF NOT EXISTS last_run_at TIMESTAMPTZ;
+  ALTER TABLE reminder_schedules ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT true;
+  ALTER TABLE reminder_schedules ADD COLUMN IF NOT EXISTS recipient_filter JSONB DEFAULT '{}'::jsonb;
+  ALTER TABLE reminder_schedules ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();
+  ALTER TABLE reminder_schedules ALTER COLUMN scheduled_for SET DEFAULT NOW();
+  RAISE NOTICE '✓ Updated reminder_schedules columns';
+EXCEPTION
+  WHEN OTHERS THEN
+    RAISE NOTICE '✗ Failed to update reminder_schedules columns: %', SQLERRM;
 END $$;
 
 -- Step 6: Reminder Runs
@@ -143,10 +173,13 @@ BEGIN
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     account_id UUID NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
     reminder_id UUID NOT NULL REFERENCES automated_reminders(id) ON DELETE CASCADE,
+    schedule_id UUID REFERENCES reminder_schedules(id) ON DELETE CASCADE,
     run_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     recipients_count INTEGER DEFAULT 0,
     messages_sent INTEGER DEFAULT 0,
     messages_failed INTEGER DEFAULT 0,
+    sent_count INTEGER DEFAULT 0,
+    failed_count INTEGER DEFAULT 0,
     status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'running', 'completed', 'failed')),
     error_message TEXT,
     metadata JSONB DEFAULT '{}'::jsonb,
@@ -159,6 +192,64 @@ BEGIN
 EXCEPTION
   WHEN OTHERS THEN
     RAISE NOTICE '✗ Failed to create reminder_runs: %', SQLERRM;
+END $$;
+
+DO $$
+BEGIN
+  ALTER TABLE reminder_runs ADD COLUMN IF NOT EXISTS schedule_id UUID REFERENCES reminder_schedules(id) ON DELETE CASCADE;
+  ALTER TABLE reminder_runs ADD COLUMN IF NOT EXISTS sent_count INTEGER DEFAULT 0;
+  ALTER TABLE reminder_runs ADD COLUMN IF NOT EXISTS failed_count INTEGER DEFAULT 0;
+  ALTER TABLE reminder_runs ALTER COLUMN reminder_id DROP NOT NULL;
+  RAISE NOTICE '✓ Updated reminder_runs columns';
+EXCEPTION
+  WHEN OTHERS THEN
+    RAISE NOTICE '✗ Failed to update reminder_runs columns: %', SQLERRM;
+END $$;
+
+-- Step 6b: Reminder Logs
+DO $$
+BEGIN
+  CREATE TABLE IF NOT EXISTS reminder_logs (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    account_id UUID NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    reminder_id UUID NOT NULL REFERENCES automated_reminders(id) ON DELETE CASCADE,
+    executed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    recipients_count INTEGER DEFAULT 0,
+    messages_sent INTEGER DEFAULT 0,
+    messages_failed INTEGER DEFAULT 0,
+    status TEXT DEFAULT 'pending' CHECK (status IN ('success', 'partial', 'failed', 'pending')),
+    error_message TEXT,
+    execution_duration_ms INTEGER,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_reminder_logs_reminder ON reminder_logs(reminder_id, executed_at DESC);
+
+  RAISE NOTICE '✓ Created reminder_logs table';
+EXCEPTION
+  WHEN OTHERS THEN
+    RAISE NOTICE '✗ Failed to create reminder_logs: %', SQLERRM;
+END $$;
+
+-- Step 6c: Ensure showings columns exist
+DO $$
+BEGIN
+  ALTER TABLE showings ADD COLUMN IF NOT EXISTS showing_date TIMESTAMPTZ;
+  ALTER TABLE showings ADD COLUMN IF NOT EXISTS showing_type TEXT;
+  ALTER TABLE showings ADD COLUMN IF NOT EXISTS agent_name TEXT;
+  ALTER TABLE showings ADD COLUMN IF NOT EXISTS visitor_name TEXT;
+  ALTER TABLE showings ADD COLUMN IF NOT EXISTS visitor_email TEXT;
+  ALTER TABLE showings ADD COLUMN IF NOT EXISTS visitor_phone TEXT;
+  ALTER TABLE showings ADD COLUMN IF NOT EXISTS prospect_name TEXT;
+  ALTER TABLE showings ADD COLUMN IF NOT EXISTS prospect_email TEXT;
+  ALTER TABLE showings ADD COLUMN IF NOT EXISTS prospect_phone TEXT;
+  ALTER TABLE showings ADD COLUMN IF NOT EXISTS access_code_expires_at TIMESTAMPTZ;
+  ALTER TABLE showings ADD COLUMN IF NOT EXISTS reminder_sent_at TIMESTAMPTZ;
+  ALTER TABLE showings ADD COLUMN IF NOT EXISTS duration INTEGER;
+  RAISE NOTICE '✓ Updated showings columns';
+EXCEPTION
+  WHEN OTHERS THEN
+    RAISE NOTICE '✗ Failed to update showings columns: %', SQLERRM;
 END $$;
 
 -- Step 7: Create expire_old_access_codes function
@@ -174,7 +265,7 @@ BEGIN
   BEGIN
     -- Expire access codes that have passed their expiration date
     WITH expired AS (
-      UPDATE property_showings
+      UPDATE showings
       SET
         access_code = NULL,
         access_code_expires_at = NULL,
