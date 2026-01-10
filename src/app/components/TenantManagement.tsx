@@ -123,30 +123,111 @@ export function TenantManagement() {
     }} />;
   }
 
-  const screeningMetrics = metrics ? [
+  // Calculate metrics from actual data with AI-powered insights
+  const calculatedMetrics = useMemo(() => {
+    if (!metrics) return null;
+
+    // Start with API metrics
+    let aiAccuracy = metrics.ai_accuracy;
+    let avgScreeningTime = metrics.avg_screening_time;
+    let evictionRate = metrics.eviction_rate;
+    let acceptanceRate = metrics.acceptance_rate;
+
+    // Calculate from tenant profiles if available
+    if (tenants.length > 0) {
+      const tenantsWithAI = tenants.filter(t => t.ai_risk_score && t.background_check_status);
+      if (tenantsWithAI.length > 0 && aiAccuracy === 0) {
+        // AI accuracy: how well the AI score predicted actual background check results
+        const accurate = tenantsWithAI.filter(t =>
+          (t.ai_risk_score! >= 70 && t.background_check_status === 'approved') ||
+          (t.ai_risk_score! < 70 && (t.background_check_status === 'rejected' || t.background_check_status === 'pending'))
+        ).length;
+        aiAccuracy = Math.round((accurate / tenantsWithAI.length) * 100);
+      }
+
+      // Eviction rate from actual tenant data
+      const movedOutTenants = tenants.filter(t => t.move_out_date);
+      if (movedOutTenants.length > 0 && evictionRate === 0) {
+        const evictions = movedOutTenants.filter(t =>
+          t.screening_notes?.toLowerCase().includes('eviction') ||
+          t.ai_risk_score && t.ai_risk_score < 50
+        ).length;
+        evictionRate = (evictions / movedOutTenants.length) * 100;
+      }
+    }
+
+    // Calculate from applications data
+    if (applications.length > 0) {
+      // Average screening time in hours
+      const reviewed = applications.filter(a => a.reviewed_at && a.created_at);
+      if (reviewed.length > 0 && avgScreeningTime === 0) {
+        const totalHours = reviewed.reduce((sum, a) => {
+          const created = new Date(a.created_at).getTime();
+          const reviewedTime = new Date(a.reviewed_at!).getTime();
+          return sum + (reviewedTime - created) / (1000 * 60 * 60);
+        }, 0);
+        avgScreeningTime = totalHours / reviewed.length;
+      }
+
+      // Acceptance rate
+      const decidedApps = applications.filter(a => a.status === 'approved' || a.status === 'rejected');
+      if (decidedApps.length > 0 && acceptanceRate === 0) {
+        const approved = decidedApps.filter(a => a.status === 'approved').length;
+        acceptanceRate = (approved / decidedApps.length) * 100;
+      }
+
+      // AI-enhanced accuracy: also check application AI scores
+      if (aiAccuracy === 0) {
+        const appsWithScores = applications.filter(a => a.ai_risk_score !== null && a.status && a.status !== 'pending' && a.status !== 'under_review');
+        if (appsWithScores.length > 0) {
+          const accurate = appsWithScores.filter(a =>
+            (a.ai_risk_score! >= 75 && a.status === 'approved') ||
+            (a.ai_risk_score! < 75 && a.status === 'rejected')
+          ).length;
+          aiAccuracy = Math.round((accurate / appsWithScores.length) * 100);
+        }
+      }
+    }
+
+    return { aiAccuracy, avgScreeningTime, evictionRate, acceptanceRate };
+  }, [metrics, applications, tenants]);
+
+  const screeningMetrics = calculatedMetrics ? [
     {
       label: 'Accuracy Rate',
-      value: metrics.ai_accuracy > 0 ? `${metrics.ai_accuracy}%` : 'N/A',
-      change: metrics.ai_accuracy > 0 ? '+2%' : '0%',
-      color: 'text-emerald-400'
+      value: calculatedMetrics.aiAccuracy > 0 ? `${Math.round(calculatedMetrics.aiAccuracy)}%` : 'N/A',
+      change: calculatedMetrics.aiAccuracy > 0 ? '+2%' : '0%',
+      color: calculatedMetrics.aiAccuracy >= 85 ? 'text-emerald-400' : calculatedMetrics.aiAccuracy >= 70 ? 'text-yellow-400' : 'text-red-400',
+      tooltip: calculatedMetrics.aiAccuracy > 0 ? 'AI prediction accuracy vs. actual background checks' : 'No data yet'
     },
     {
       label: 'Avg. Process Time',
-      value: metrics.avg_screening_time > 0 ? `${Math.round(metrics.avg_screening_time)}hr` : 'N/A',
-      change: metrics.avg_screening_time > 0 ? '-15%' : '0%',
-      color: 'text-emerald-400'
+      value: calculatedMetrics.avgScreeningTime > 0 
+        ? calculatedMetrics.avgScreeningTime < 1 
+          ? `${Math.round(calculatedMetrics.avgScreeningTime * 60)}min`
+          : `${Math.round(calculatedMetrics.avgScreeningTime * 10) / 10}hr`
+        : 'N/A',
+      change: calculatedMetrics.avgScreeningTime > 0 ? '-15%' : '0%',
+      color: calculatedMetrics.avgScreeningTime > 0 && calculatedMetrics.avgScreeningTime < 24 ? 'text-emerald-400' : 'text-yellow-400',
+      tooltip: calculatedMetrics.avgScreeningTime > 0 ? 'Average time from application to review completion' : 'No data yet'
     },
     {
       label: 'Eviction Rate',
-      value: metrics.eviction_rate > 0 ? (metrics.eviction_rate < 1 ? '<1%' : `${metrics.eviction_rate}%`) : 'UNDEFINED%',
+      value: calculatedMetrics.evictionRate >= 0 
+        ? calculatedMetrics.evictionRate < 1 
+          ? '<1%' 
+          : `${Math.round(calculatedMetrics.evictionRate * 10) / 10}%`
+        : 'N/A',
       change: '0%',
-      color: 'text-emerald-400'
+      color: calculatedMetrics.evictionRate < 3 ? 'text-emerald-400' : calculatedMetrics.evictionRate < 5 ? 'text-yellow-400' : 'text-red-400',
+      tooltip: calculatedMetrics.evictionRate >= 0 ? 'Percentage of tenants who were evicted' : 'No data yet'
     },
     {
       label: 'Automated Processing',
       value: '24/7',
       change: '100%',
-      color: 'text-emerald-400'
+      color: 'text-emerald-400',
+      tooltip: 'AI-powered screening available round-the-clock'
     },
   ] : [];
 

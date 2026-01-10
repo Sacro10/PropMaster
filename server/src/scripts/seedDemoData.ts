@@ -430,16 +430,44 @@ async function seedDemoData(accountId: string) {
 
     for (let i = 0; i < tenantUsers.length; i++) {
       const tenant = tenantUsers[i];
+      const creditScore = Math.floor(600 + Math.random() * 200);
+      const monthlyIncome = 3500 + Math.floor(Math.random() * 4500);
+      const employmentStatus = randomItem(['employed', 'employed', 'self_employed', 'employed']);
+      
+      // AI risk score based on credit score and income (realistic correlation)
+      let aiRiskScore = 50;
+      if (creditScore >= 750 && monthlyIncome >= 5000) {
+        aiRiskScore = Math.floor(85 + Math.random() * 15); // 85-100
+      } else if (creditScore >= 700) {
+        aiRiskScore = Math.floor(75 + Math.random() * 15); // 75-90
+      } else if (creditScore >= 650) {
+        aiRiskScore = Math.floor(60 + Math.random() * 20); // 60-80
+      } else {
+        aiRiskScore = Math.floor(40 + Math.random() * 30); // 40-70
+      }
+
+      // Background check should mostly align with AI score for realistic accuracy
+      let backgroundStatus;
+      if (aiRiskScore >= 75) {
+        backgroundStatus = Math.random() < 0.9 ? 'approved' : 'pending'; // 90% match
+      } else if (aiRiskScore >= 60) {
+        backgroundStatus = Math.random() < 0.7 ? 'approved' : 'pending'; // 70% match  
+      } else {
+        backgroundStatus = Math.random() < 0.3 ? 'approved' : 'rejected'; // 30% match
+      }
+
       tenantProfiles.push({
         account_id: accountId,
         user_id: tenant.id,
         full_name: tenant.name,
         email: tenant.email,
         phone: `555-${String(100 + i).padStart(4, '0')}`,
-        ai_risk_score: Math.floor(60 + Math.random() * 40),
-        background_check_status: randomItem(['approved', 'approved', 'pending', 'approved']),
-        credit_score: Math.floor(600 + Math.random() * 200),
-        monthly_income: 3500 + Math.floor(Math.random() * 4500),
+        ai_risk_score: aiRiskScore,
+        background_check_status: backgroundStatus,
+        credit_score: creditScore,
+        monthly_income: monthlyIncome,
+        employment_status: employmentStatus,
+        employer: randomItem(['Tech Corp', 'City Hospital', 'Local Bank', 'Retail Inc', 'Services LLC', 'Startup Inc']),
         emergency_contact_name: `Emergency Contact ${i + 1}`,
         emergency_contact_phone: `555-${String(200 + i).padStart(4, '0')}`,
       });
@@ -468,13 +496,37 @@ async function seedDemoData(accountId: string) {
       const createdAt = randomDate(new Date('2025-12-01'), new Date());
       const monthlyIncome = 4000 + Math.floor(Math.random() * 6000);
       const creditScore = 600 + Math.floor(Math.random() * 200);
-      const aiRiskScore = Math.floor(65 + Math.random() * 30);
-      const status = randomItem(['pending', 'under_review', 'approved', 'rejected', 'pending']);
+      
+      // AI risk score based on income and credit (realistic ML model)
+      let aiRiskScore = 50;
+      const incomeToRentRatio = monthlyIncome / (unit.rent_amount || 1500);
+      
+      if (creditScore >= 750 && incomeToRentRatio >= 3.5) {
+        aiRiskScore = Math.floor(85 + Math.random() * 15); // 85-100
+      } else if (creditScore >= 700 && incomeToRentRatio >= 3) {
+        aiRiskScore = Math.floor(75 + Math.random() * 15); // 75-90
+      } else if (creditScore >= 650 && incomeToRentRatio >= 2.5) {
+        aiRiskScore = Math.floor(60 + Math.random() * 20); // 60-80
+      } else {
+        aiRiskScore = Math.floor(40 + Math.random() * 30); // 40-70
+      }
+
+      // Status should align with AI score for realistic accuracy (85-90%)
+      let status;
+      if (aiRiskScore >= 80) {
+        status = Math.random() < 0.85 ? 'approved' : (Math.random() < 0.5 ? 'under_review' : 'pending');
+      } else if (aiRiskScore >= 70) {
+        status = Math.random() < 0.6 ? 'approved' : (Math.random() < 0.5 ? 'under_review' : 'pending');
+      } else if (aiRiskScore >= 60) {
+        status = Math.random() < 0.3 ? 'approved' : (Math.random() < 0.6 ? 'rejected' : 'pending');
+      } else {
+        status = Math.random() < 0.1 ? 'approved' : (Math.random() < 0.7 ? 'rejected' : 'pending');
+      }
 
       // Calculate reviewed_at based on status
       let reviewedAt = null;
       if (status === 'approved' || status === 'rejected') {
-        // Reviewed 2-48 hours after submission
+        // Reviewed 2-48 hours after submission (AI makes it faster)
         const reviewHours = 2 + Math.floor(Math.random() * 46);
         reviewedAt = new Date(createdAt.getTime() + reviewHours * 60 * 60 * 1000).toISOString();
       }
