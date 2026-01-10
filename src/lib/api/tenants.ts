@@ -123,6 +123,7 @@ export async function getTenants(params: PaginationParams = {}) {
 
     // Get the tenant user IDs
     const tenantUserIds = leasesData.map((lease: any) => lease.tenant_user_id);
+    const unitIds = leasesData.map((lease: any) => lease.unit_id).filter(Boolean);
 
     // Fetch tenant profiles for these users
     const { data: tenantProfiles, error: profilesError } = await supabase
@@ -141,28 +142,64 @@ export async function getTenants(params: PaginationParams = {}) {
       profileMap.set(profile.user_id, profile);
     });
 
+    // Fetch recent applications for fallback tenant data
+    const applicationsByUnit = new Map<string, any>();
+    if (unitIds.length > 0) {
+      const { data: applicationsData, error: applicationsError } = await supabase
+        .from('rental_applications')
+        .select('*')
+        .eq('account_id', accountId)
+        .in('unit_id', unitIds)
+        .order('created_at', { ascending: false });
+
+      if (applicationsError) {
+        console.error('[Tenants API] Error fetching rental applications:', applicationsError);
+      } else {
+        (applicationsData || []).forEach((app: any) => {
+          if (app.unit_id && !applicationsByUnit.has(app.unit_id)) {
+            applicationsByUnit.set(app.unit_id, app);
+          }
+        });
+      }
+    }
+
     // Transform the data to match our interface
     const pendingRiskUpdates: Array<Promise<any>> = [];
     const tenants: TenantWithLease[] = leasesData.map((lease: any) => {
       const tenant = profileMap.get(lease.tenant_user_id) || {};
+      const fallbackApplication = applicationsByUnit.get(lease.unit_id);
+      const fallbackTenant = fallbackApplication ? {
+        full_name: fallbackApplication.full_name
+          || `${fallbackApplication.first_name || ''} ${fallbackApplication.last_name || ''}`.trim()
+          || fallbackApplication.applicant_name,
+        email: fallbackApplication.email || fallbackApplication.applicant_email,
+        phone: fallbackApplication.phone || fallbackApplication.applicant_phone,
+        monthly_income: fallbackApplication.monthly_income,
+        credit_score: fallbackApplication.credit_score,
+        background_check_status: fallbackApplication.background_check_status,
+        employment_status: fallbackApplication.employment_status
+          || (fallbackApplication.current_employer ? 'employed' : null),
+        ai_risk_score: fallbackApplication.ai_risk_score,
+      } : null;
+      const mergedTenant = fallbackTenant ? { ...fallbackTenant, ...tenant } : tenant;
       const unit = lease.units || {};
       const property = unit.properties || {};
-      const calculatedRiskScore = tenant.ai_risk_score ?? calculateTenantRiskScore(tenant, lease);
+      const calculatedRiskScore = mergedTenant.ai_risk_score ?? calculateTenantRiskScore(mergedTenant, lease);
 
-      if (tenant.user_id && tenant.ai_risk_score == null && calculatedRiskScore != null) {
+      if (mergedTenant.user_id && mergedTenant.ai_risk_score == null && calculatedRiskScore != null) {
         pendingRiskUpdates.push(
           supabase
             .from('tenant_profiles')
             .update({ ai_risk_score: calculatedRiskScore })
             .eq('account_id', accountId)
-            .eq('user_id', tenant.user_id)
+            .eq('user_id', mergedTenant.user_id)
         );
       }
 
       return {
-        ...tenant,
+        ...mergedTenant,
         account_id: accountId,
-        ai_risk_score: calculatedRiskScore ?? tenant.ai_risk_score ?? null,
+        ai_risk_score: calculatedRiskScore ?? mergedTenant.ai_risk_score ?? null,
         lease: {
           id: lease.id,
           unit_id: lease.unit_id,
