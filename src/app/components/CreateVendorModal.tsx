@@ -131,7 +131,11 @@ export function CreateVendorModal({
         // Show success message
         alert('Vendor created successfully!');
       } else {
-        alert('Failed to create vendor. Please try again.');
+        console.error('Create vendor failed:', result.error);
+        const message = result.error?.message
+          ? `Failed to create vendor: ${result.error.message}`
+          : 'Failed to create vendor. Please try again.';
+        alert(message);
       }
     } catch (error) {
       console.error('Error creating vendor:', error);
