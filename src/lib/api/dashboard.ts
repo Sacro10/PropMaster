@@ -190,13 +190,19 @@ async function getCurrentAccountId(): Promise<string | null> {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return null;
 
-  const { data: profile } = await supabase
-    .from('user_profiles')
+  const { data, error } = await supabase
+    .from('account_members')
     .select('account_id')
-    .eq('id', user.id)
+    .eq('user_id', user.id)
+    .eq('is_active', true)
     .single();
 
-  return profile?.account_id || null;
+  if (error) {
+    console.error('[Dashboard API] Error fetching account ID:', error);
+    return null;
+  }
+
+  return data?.account_id || null;
 }
 
 /**
@@ -222,11 +228,20 @@ export async function getDashboardMetrics(): Promise<DashboardMetrics> {
     // Get properties and units
     const { data: properties } = await supabase
       .from('properties')
-      .select('id, total_units, occupied_units')
+      .select('id, total_units')
       .eq('account_id', accountId);
 
+    const { data: units, error: unitsError } = await supabase
+      .from('units')
+      .select('status')
+      .eq('account_id', accountId);
+
+    if (unitsError) {
+      console.error('[Dashboard API] Error fetching units:', unitsError);
+    }
+
     const total_units = properties?.reduce((sum, p) => sum + (p.total_units || 0), 0) || 0;
-    const occupied_units = properties?.reduce((sum, p) => sum + (p.occupied_units || 0), 0) || 0;
+    const occupied_units = units?.filter((unit) => unit.status === 'occupied').length || 0;
     const occupancy_rate = total_units > 0 ? Math.round((occupied_units / total_units) * 100) : 0;
 
     // Get active tenants count
