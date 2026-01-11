@@ -463,24 +463,22 @@ export async function getShowingStatistics(accountId: string) {
     };
   }
 
-  const scheduledToday = showings.filter(s => {
-    const showingDate = new Date(s.showing_date || s.scheduled_at);
+  const scheduledToday = showings.filter((s) => {
+    const showingDate = new Date(s.scheduled_at);
     return showingDate >= today && showingDate < new Date(today.getTime() + 24 * 60 * 60 * 1000);
   }).length;
 
-  const totalThisWeek = showings.filter(s => {
-    const showingDate = new Date(s.showing_date || s.scheduled_at);
+  const totalThisWeek = showings.filter((s) => {
+    const showingDate = new Date(s.scheduled_at);
     return showingDate >= startOfWeek;
   }).length;
 
   // Calculate avg response time (creation to showing date in hours)
-  const responseTimes = showings
-    .filter(s => s.showing_date || s.scheduled_at)
-    .map(s => {
-      const created = new Date(s.created_at);
-      const scheduled = new Date(s.showing_date || s.scheduled_at);
-      return (scheduled.getTime() - created.getTime()) / (1000 * 60 * 60);
-    });
+  const responseTimes = showings.map((s) => {
+    const created = new Date(s.created_at);
+    const scheduled = new Date(s.scheduled_at);
+    return (scheduled.getTime() - created.getTime()) / (1000 * 60 * 60);
+  });
 
   const avgResponseTime =
     responseTimes.length > 0
@@ -534,7 +532,7 @@ export async function regenerateAccessCode(
     : codeData;
 
   // Calculate expiration (trigger will also do this, but we return it)
-  const showingDate = new Date(showing.showing_date || showing.scheduled_at);
+  const showingDate = new Date(showing.scheduled_at);
   const durationMinutes = showing.duration_minutes || 30;
   const expiresAt = new Date(showingDate.getTime() + durationMinutes * 60 * 1000);
 
@@ -601,7 +599,7 @@ export async function sendShowingReminder(
   // For now, just log the activity and update the reminder timestamp
 
   const reminderMessage = `Reminder sent to ${showing.visitor_name} (${showing.visitor_email})`;
-  const scheduledAt = showing.showing_date || showing.scheduled_at;
+  const scheduledAt = showing.scheduled_at;
   
   // Update reminder_sent_at
   const { error: updateError } = await supabase
