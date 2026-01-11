@@ -246,7 +246,7 @@ export async function getExpenseBreakdown(timeframe: TimeframeOption = '30d'): P
     const data = await response.json();
     const mapped = (data || []).map((item: any, index: number) => ({
       name: item.name || 'Other',
-      value: Number(item.percentage ?? item.value ?? 0),
+      value: Number((Number(item.percentage ?? item.value ?? 0)).toFixed(3)),
       color: item.color || palette[index % palette.length],
     }));
     return mapped;
