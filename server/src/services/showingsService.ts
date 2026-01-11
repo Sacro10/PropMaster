@@ -115,7 +115,7 @@ export async function getShowings(
     if (startDate) query = query.gte('scheduled_at', startDate);
     if (endDate) query = query.lte('scheduled_at', endDate);
 
-    query = query.order('scheduled_at', { ascending: false });
+    query = query.order('scheduled_at', { ascending: true });
     query = query.range(offset, offset + limit - 1);
     return query;
   };

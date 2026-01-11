@@ -3,7 +3,7 @@ import { useState, useEffect } from 'react';
 import { useThemeStyles } from '../hooks/useThemeStyles';
 import { useCreateMaintenanceRequest } from '../../lib/hooks/useMaintenance';
 import { supabase } from '../../lib/supabaseClient';
-import { createEmergencyRequest } from '../../lib/api/maintenanceMetrics';
+import { createEmergencyRequest, getEmergencySupportConfig } from '../../lib/api/maintenanceMetrics';
 
 interface CreateMaintenanceRequestModalProps {
   isOpen: boolean;
@@ -151,6 +151,23 @@ export function CreateMaintenanceRequestModal({
       setErrors({});
       setEmergencyChannels(DEFAULT_EMERGENCY_CHANNELS);
     }
+  }, [isOpen, emergencyMode]);
+
+  useEffect(() => {
+    if (!isOpen || !emergencyMode) return;
+
+    const loadConfig = async () => {
+      try {
+        const config = await getEmergencySupportConfig();
+        if (Array.isArray(config.notificationChannels) && config.notificationChannels.length > 0) {
+          setEmergencyChannels(config.notificationChannels as EmergencyChannel[]);
+        }
+      } catch (error) {
+        console.error('Failed to load emergency config:', error);
+      }
+    };
+
+    loadConfig();
   }, [isOpen, emergencyMode]);
 
   const validateForm = () => {

@@ -10,6 +10,9 @@ import {
   getAvailableVendors,
   assignVendorToRequest,
   createEmergencyRequest,
+  getEmergencySupportConfig,
+  upsertEmergencySupportConfig,
+  testEmergencyNotifications,
   getRoutingMetrics,
   CreateMaintenanceData,
   UpdateMaintenanceData,
@@ -291,6 +294,7 @@ router.post(
         category: req.body.category,
         unitId: req.body.unitId,
         reportedBy: req.body.reportedBy,
+        notificationChannels: req.body.notificationChannels,
       };
 
       // Validate required fields
@@ -302,16 +306,118 @@ router.post(
         return;
       }
 
-      const request = await createEmergencyRequest(
+      const result = await createEmergencyRequest(
         req.user.accountId,
         req.user.id,
         data
       );
-      res.status(201).json(request);
+      res.status(201).json({
+        request: result.request,
+        notifications: result.notifications,
+      });
     } catch (error) {
       console.error('Create emergency request error:', error);
       res.status(500).json({
         error: 'Failed to create emergency request',
+        details: error instanceof Error ? error.message : 'Unknown error',
+      });
+    }
+  }
+);
+
+/**
+ * GET /api/maintenance/emergency-config
+ * Get emergency support configuration
+ */
+router.get(
+  '/emergency-config',
+  authenticate,
+  Permissions.readMaintenance,
+  async (req: AuthRequest, res) => {
+    try {
+      if (!req.user?.accountId) {
+        res.status(400).json({ error: 'Account ID required' });
+        return;
+      }
+
+      const config = await getEmergencySupportConfig(req.user.accountId);
+      res.json(config);
+    } catch (error) {
+      console.error('Get emergency config error:', error);
+      res.status(500).json({
+        error: 'Failed to fetch emergency config',
+        details: error instanceof Error ? error.message : 'Unknown error',
+      });
+    }
+  }
+);
+
+/**
+ * PUT /api/maintenance/emergency-config
+ * Update emergency support configuration
+ */
+router.put(
+  '/emergency-config',
+  authenticate,
+  Permissions.updateMaintenance,
+  async (req: AuthRequest, res) => {
+    try {
+      if (!req.user?.accountId) {
+        res.status(400).json({ error: 'Account ID required' });
+        return;
+      }
+
+      const updated = await upsertEmergencySupportConfig(req.user.accountId, {
+        isEnabled: Boolean(req.body.isEnabled),
+        notificationPhone: req.body.notificationPhone || null,
+        notificationEmail: req.body.notificationEmail || null,
+        notificationChannels: req.body.notificationChannels || [],
+      });
+
+      res.json(updated);
+    } catch (error) {
+      console.error('Update emergency config error:', error);
+      res.status(500).json({
+        error: 'Failed to update emergency config',
+        details: error instanceof Error ? error.message : 'Unknown error',
+      });
+    }
+  }
+);
+
+/**
+ * POST /api/maintenance/emergency-test
+ * Send a test emergency notification
+ */
+router.post(
+  '/emergency-test',
+  authenticate,
+  Permissions.updateMaintenance,
+  async (req: AuthRequest, res) => {
+    try {
+      if (!req.user?.accountId) {
+        res.status(400).json({ error: 'Account ID required' });
+        return;
+      }
+
+      const notifications = await testEmergencyNotifications(
+        req.user.accountId,
+        req.user.id,
+        {
+          title: req.body.title,
+          description: req.body.description,
+          category: req.body.category,
+          unitId: req.body.unitId,
+          propertyId: req.body.propertyId,
+          notificationChannels: req.body.notificationChannels,
+        }
+      );
+
+      res.json({ notifications });
+    } catch (error) {
+      console.error('Emergency test error:', error);
+      res.status(500).json({
+        error: 'Failed to send emergency test',
         details: error instanceof Error ? error.message : 'Unknown error',
       });
     }

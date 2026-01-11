@@ -48,6 +48,13 @@ export interface UpdateMaintenanceData {
   notes?: string;
 }
 
+export interface EmergencySupportConfig {
+  isEnabled: boolean;
+  notificationPhone: string | null;
+  notificationEmail: string | null;
+  notificationChannels: EmergencyChannel[];
+}
+
 export interface SLAMetrics {
   totalRequests: number;
   avgResponseTime: number;
@@ -590,8 +597,6 @@ export async function createEmergencyRequest(
     notificationChannels?: EmergencyChannel[];
   }
 ): Promise<{ request: MaintenanceRequest; notifications: EmergencyNotificationResult[] }> {
-  const channels = normalizeEmergencyChannels(data.notificationChannels);
-
   // Create request with emergency priority
   const request = await createMaintenanceRequest(accountId, userId, {
     ...data,
@@ -610,6 +615,10 @@ export async function createEmergencyRequest(
     .select('*')
     .eq('account_id', accountId)
     .single();
+
+  const channels = normalizeEmergencyChannels(
+    data.notificationChannels ?? (config?.notification_channels as EmergencyChannel[] | undefined)
+  );
 
   const notifications = await sendEmergencyNotifications({
     accountId,
@@ -641,6 +650,132 @@ export async function createEmergencyRequest(
   );
 
   return { request, notifications };
+}
+
+export async function testEmergencyNotifications(
+  accountId: string,
+  userId: string | null,
+  data: {
+    title?: string;
+    description?: string;
+    category?: string;
+    unitId?: string;
+    propertyId?: string;
+    notificationChannels?: EmergencyChannel[];
+  }
+): Promise<EmergencyNotificationResult[]> {
+  const { data: config } = await supabase
+    .from('emergency_support_config')
+    .select('*')
+    .eq('account_id', accountId)
+    .single();
+
+  const title = data.title?.trim() || 'Emergency Notification Test';
+  const description = data.description?.trim() || 'This is a test of your emergency notification channels.';
+  const category = data.category?.trim() || 'general';
+  const unitId = data.unitId?.trim() || 'test-unit';
+  const propertyId = data.propertyId?.trim() || 'test-property';
+  const channels = normalizeEmergencyChannels(
+    data.notificationChannels ?? (config?.notification_channels as EmergencyChannel[] | undefined)
+  );
+
+  const request: MaintenanceRequest = {
+    id: `test-${Date.now()}`,
+    title,
+    description,
+    priority: 'emergency',
+    status: 'test',
+    category,
+    unitId,
+    propertyId,
+    reportedBy: userId,
+    assignedTo: null,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+
+  const notifications = await sendEmergencyNotifications({
+    accountId,
+    request,
+    channels,
+    title,
+    description,
+    category,
+    unitId,
+    notificationPhone: config?.notification_phone,
+    notificationEmail: config?.notification_email,
+  });
+
+  await logActivityEvent(
+    accountId,
+    userId,
+    'maintenance_test',
+    'Emergency notification test sent',
+    {
+      entityType: 'maintenance_request',
+      entityId: request.id,
+      metadata: {
+        notificationResults: notifications,
+        notificationPhone: config?.notification_phone,
+        notificationEmail: config?.notification_email,
+      },
+    }
+  );
+
+  return notifications;
+}
+
+export async function getEmergencySupportConfig(
+  accountId: string
+): Promise<EmergencySupportConfig> {
+  const { data, error } = await supabase
+    .from('emergency_support_config')
+    .select('is_enabled, notification_phone, notification_email, notification_channels')
+    .eq('account_id', accountId)
+    .single();
+
+  if (error && error.code !== 'PGRST116') {
+    throw error;
+  }
+
+  return {
+    isEnabled: data?.is_enabled ?? false,
+    notificationPhone: data?.notification_phone ?? null,
+    notificationEmail: data?.notification_email ?? null,
+    notificationChannels: normalizeEmergencyChannels(
+      (data?.notification_channels as EmergencyChannel[] | undefined) ?? undefined
+    ),
+  };
+}
+
+export async function upsertEmergencySupportConfig(
+  accountId: string,
+  data: EmergencySupportConfig
+): Promise<EmergencySupportConfig> {
+  const payload = {
+    account_id: accountId,
+    is_enabled: data.isEnabled,
+    notification_phone: data.notificationPhone || null,
+    notification_email: data.notificationEmail || null,
+    notification_channels: normalizeEmergencyChannels(data.notificationChannels),
+  };
+
+  const { data: updated, error } = await supabase
+    .from('emergency_support_config')
+    .upsert(payload, { onConflict: 'account_id' })
+    .select('is_enabled, notification_phone, notification_email, notification_channels')
+    .single();
+
+  if (error) throw error;
+
+  return {
+    isEnabled: updated.is_enabled ?? false,
+    notificationPhone: updated.notification_phone ?? null,
+    notificationEmail: updated.notification_email ?? null,
+    notificationChannels: normalizeEmergencyChannels(
+      (updated.notification_channels as EmergencyChannel[] | undefined) ?? undefined
+    ),
+  };
 }
 
 type EmergencyChannel = 'webhook' | 'pagerduty' | 'opsgenie' | 'twilio' | 'slack' | 'email';

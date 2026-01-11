@@ -38,6 +38,25 @@ CREATE TABLE IF NOT EXISTS hvac_delivery_batches (
 
 CREATE INDEX IF NOT EXISTS idx_hvac_batches_account ON hvac_delivery_batches(account_id, delivery_date DESC);
 
+-- 2b. Emergency Support Config (from 004_maintenance_enhancements.sql)
+CREATE TABLE IF NOT EXISTS emergency_support_config (
+  account_id UUID PRIMARY KEY REFERENCES accounts(id) ON DELETE CASCADE,
+  is_enabled BOOLEAN DEFAULT false,
+  on_call_vendor_ids UUID[] DEFAULT '{}',
+  notification_phone TEXT,
+  notification_email TEXT,
+  notification_channels TEXT[] DEFAULT '{}',
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+ALTER TABLE emergency_support_config ADD COLUMN IF NOT EXISTS notification_channels TEXT[] DEFAULT '{}';
+ALTER TABLE emergency_support_config ADD COLUMN IF NOT EXISTS notification_phone TEXT;
+ALTER TABLE emergency_support_config ADD COLUMN IF NOT EXISTS notification_email TEXT;
+ALTER TABLE emergency_support_config ADD COLUMN IF NOT EXISTS is_enabled BOOLEAN DEFAULT false;
+
+CREATE INDEX IF NOT EXISTS idx_emergency_support_config_account ON emergency_support_config(account_id);
+
 -- 3. Message Templates (from 003_complete_schema.sql)
 CREATE TABLE IF NOT EXISTS message_templates (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -468,21 +487,86 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_expenses_maintenance_request ON expenses(m
 ALTER TABLE expense_categories ENABLE ROW LEVEL SECURITY;
 ALTER TABLE expenses ENABLE ROW LEVEL SECURITY;
 
-CREATE POLICY expense_categories_select ON expense_categories FOR SELECT USING (is_account_member(account_id));
-CREATE POLICY expense_categories_insert ON expense_categories FOR INSERT WITH CHECK (is_account_member(account_id));
-CREATE POLICY expense_categories_update ON expense_categories FOR UPDATE USING (is_account_member(account_id));
-CREATE POLICY expense_categories_delete ON expense_categories FOR DELETE USING (is_account_member(account_id));
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE schemaname = 'public' AND tablename = 'expense_categories' AND policyname = 'expense_categories_select'
+  ) THEN
+    CREATE POLICY expense_categories_select ON expense_categories FOR SELECT USING (is_account_member(account_id));
+  END IF;
 
-CREATE POLICY expenses_select ON expenses FOR SELECT USING (is_account_member(account_id));
-CREATE POLICY expenses_insert ON expenses FOR INSERT WITH CHECK (is_account_member(account_id));
-CREATE POLICY expenses_update ON expenses FOR UPDATE USING (is_account_member(account_id));
-CREATE POLICY expenses_delete ON expenses FOR DELETE USING (is_account_member(account_id));
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE schemaname = 'public' AND tablename = 'expense_categories' AND policyname = 'expense_categories_insert'
+  ) THEN
+    CREATE POLICY expense_categories_insert ON expense_categories FOR INSERT WITH CHECK (is_account_member(account_id));
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE schemaname = 'public' AND tablename = 'expense_categories' AND policyname = 'expense_categories_update'
+  ) THEN
+    CREATE POLICY expense_categories_update ON expense_categories FOR UPDATE USING (is_account_member(account_id));
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE schemaname = 'public' AND tablename = 'expense_categories' AND policyname = 'expense_categories_delete'
+  ) THEN
+    CREATE POLICY expense_categories_delete ON expense_categories FOR DELETE USING (is_account_member(account_id));
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE schemaname = 'public' AND tablename = 'expenses' AND policyname = 'expenses_select'
+  ) THEN
+    CREATE POLICY expenses_select ON expenses FOR SELECT USING (is_account_member(account_id));
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE schemaname = 'public' AND tablename = 'expenses' AND policyname = 'expenses_insert'
+  ) THEN
+    CREATE POLICY expenses_insert ON expenses FOR INSERT WITH CHECK (is_account_member(account_id));
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE schemaname = 'public' AND tablename = 'expenses' AND policyname = 'expenses_update'
+  ) THEN
+    CREATE POLICY expenses_update ON expenses FOR UPDATE USING (is_account_member(account_id));
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE schemaname = 'public' AND tablename = 'expenses' AND policyname = 'expenses_delete'
+  ) THEN
+    CREATE POLICY expenses_delete ON expenses FOR DELETE USING (is_account_member(account_id));
+  END IF;
+END $$;
 
 -- Auto-update timestamps
-CREATE TRIGGER update_expense_categories_updated_at BEFORE UPDATE ON expense_categories
-  FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
-CREATE TRIGGER update_expenses_updated_at BEFORE UPDATE ON expenses
-  FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_trigger
+    WHERE tgname = 'update_expense_categories_updated_at'
+      AND tgrelid = 'expense_categories'::regclass
+  ) THEN
+    CREATE TRIGGER update_expense_categories_updated_at BEFORE UPDATE ON expense_categories
+      FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_trigger
+    WHERE tgname = 'update_expenses_updated_at'
+      AND tgrelid = 'expenses'::regclass
+  ) THEN
+    CREATE TRIGGER update_expenses_updated_at BEFORE UPDATE ON expenses
+      FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+  END IF;
+END $$;
 
 -- Backfill categories + expenses from maintenance_requests
 INSERT INTO expense_categories (account_id, name, description, tax_deductible)

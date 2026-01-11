@@ -39,6 +39,13 @@ export function ScheduleShowingModal({
 
   const [errors, setErrors] = useState<Record<string, string>>({});
 
+  const getLocalDateTimeValue = (date: Date) => {
+    const pad = (value: number) => value.toString().padStart(2, '0');
+    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(
+      date.getHours()
+    )}:${pad(date.getMinutes())}`;
+  };
+
   // Update unit_id when preSelectedUnitId changes
   useEffect(() => {
     if (preSelectedUnitId) {
@@ -78,7 +85,10 @@ export function ScheduleShowingModal({
       return;
     }
 
-    const result = await create(formData);
+    const result = await create({
+      ...formData,
+      showing_date: new Date(formData.showing_date).toISOString(),
+    });
 
     if (result.success) {
       // Reset form
@@ -304,7 +314,7 @@ export function ScheduleShowingModal({
                 isDark ? 'bg-white/5 border-white/10' : 'bg-gray-50 border-gray-300'
               } border rounded-lg ${text.primary} focus:outline-none focus:border-[#ff6b35] transition-colors`}
               style={{ fontFamily: 'Work Sans, sans-serif' }}
-              min={new Date().toISOString().slice(0, 16)}
+              min={getLocalDateTimeValue(new Date())}
             />
             {errors.showing_date && (
               <p className="text-red-400 text-sm mt-1">{errors.showing_date}</p>

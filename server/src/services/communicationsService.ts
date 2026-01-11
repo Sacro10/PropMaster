@@ -145,7 +145,7 @@ export async function getConversations(
 
   let query = supabase
     .from('conversations')
-    .select('*', { count: 'exact' })
+    .select('*, properties(name), units(unit_number)', { count: 'exact' })
     .eq('account_id', accountId)
     .contains('participants', [userId]);
 
@@ -158,6 +158,35 @@ export async function getConversations(
   const { data, error, count } = await query;
 
   if (error) throw error;
+
+  const participantIds = new Set<string>();
+  (data || []).forEach((conv: any) => {
+    (conv.participants || []).forEach((participantId: string) => {
+      if (participantId && participantId !== userId) {
+        participantIds.add(participantId);
+      }
+    });
+  });
+
+  const participantMap = new Map<string, { fullName: string | null; email: string | null }>();
+  if (participantIds.size > 0) {
+    const { data: participants, error: participantsError } = await supabase
+      .from('tenant_profiles')
+      .select('user_id, full_name, email')
+      .eq('account_id', accountId)
+      .in('user_id', Array.from(participantIds));
+
+    if (participantsError) {
+      console.warn('[Communications] Failed to load participant profiles:', participantsError);
+    } else {
+      (participants || []).forEach((participant: any) => {
+        participantMap.set(participant.user_id, {
+          fullName: participant.full_name || null,
+          email: participant.email || null,
+        });
+      });
+    }
+  }
 
   // Get last message and unread count for each conversation
   const conversationsWithDetails = await Promise.all(
@@ -179,6 +208,16 @@ export async function getConversations(
         .eq('to_user_id', userId)
         .eq('is_read', false);
 
+      const otherParticipantId = (conv.participants || []).find(
+        (participantId: string) => participantId && participantId !== userId
+      );
+      const participantProfile = otherParticipantId
+        ? participantMap.get(otherParticipantId)
+        : undefined;
+      const tenantName =
+        participantProfile?.fullName || participantProfile?.email || 'Tenant';
+      const tenantEmail = participantProfile?.email || null;
+
       return {
         id: conv.id,
         accountId: conv.account_id,
@@ -194,6 +233,10 @@ export async function getConversations(
         updatedAt: conv.updated_at,
         lastMessage: lastMsg?.body || null,
         unreadCount: unreadCount || 0,
+        tenant_name: tenantName,
+        tenant_email: tenantEmail,
+        property_name: conv.properties?.name || null,
+        unit_number: conv.units?.unit_number || null,
       };
     })
   );
@@ -386,6 +429,19 @@ export async function sendMessage(
     .single();
 
   if (error) throw error;
+
+  const { error: conversationUpdateError } = await supabase
+    .from('conversations')
+    .update({
+      last_message_at: message.created_at,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', conversationId)
+    .eq('account_id', accountId);
+
+  if (conversationUpdateError) {
+    console.warn('[Communications] Failed to update conversation timestamp:', conversationUpdateError);
+  }
 
   // Create activity event
   await logActivityEvent(
@@ -731,20 +787,23 @@ export async function updateAutomatedReminder(
   data: Partial<AutomatedReminder>
 ): Promise<AutomatedReminder> {
   const updateData: any = { updated_at: new Date().toISOString() };
+  const hasCustomSchedule = Object.prototype.hasOwnProperty.call(data, 'customSchedule');
+  const hasTemplateId = Object.prototype.hasOwnProperty.call(data, 'templateId');
 
   if (data.name) updateData.name = data.name;
   if (data.frequency) updateData.frequency = data.frequency;
-  if (data.customSchedule) updateData.custom_schedule = data.customSchedule;
+  if (hasCustomSchedule) updateData.custom_schedule = data.customSchedule;
+  if (hasTemplateId) updateData.template_id = data.templateId;
   if (data.messageSubject) updateData.message_subject = data.messageSubject;
   if (data.messageBody) updateData.message_body = data.messageBody;
   if (data.recipientFilter) updateData.recipient_filter = data.recipientFilter;
   if (data.status) updateData.status = data.status;
 
   // Recalculate next send date if frequency changed
-  if (data.frequency || data.customSchedule) {
+  if (data.frequency || hasCustomSchedule) {
     updateData.next_send_date = calculateNextSendDate(
       data.frequency || 'monthly',
-      data.customSchedule || undefined
+      hasCustomSchedule ? (data.customSchedule || undefined) : undefined
     );
   }
 
@@ -1089,6 +1148,7 @@ export async function generateMessageSuggestion(
     .limit(10);
 
   const aiStatus = getAiStatus();
+  const fallbackSuggestion = buildFallbackSuggestion(messages || []);
 
   try {
     const suggestion = await generateText(
@@ -1107,11 +1167,40 @@ export async function generateMessageSuggestion(
       }
     );
 
-    return { suggestion, provider: aiStatus.provider };
+    return {
+      suggestion: suggestion || fallbackSuggestion,
+      provider: aiStatus.provider || (suggestion || fallbackSuggestion ? 'template' : null),
+    };
   } catch (error) {
     if (!(error instanceof AiDisabledError)) {
       console.warn('[Communications] AI suggestion failed:', error);
     }
-    return { suggestion: '', provider: aiStatus.provider };
+    return {
+      suggestion: fallbackSuggestion,
+      provider: aiStatus.provider || (fallbackSuggestion ? 'template' : null),
+    };
   }
+}
+
+function buildFallbackSuggestion(
+  messages: Array<{ subject?: string | null; body?: string | null }>
+): string {
+  if (!messages.length) {
+    return 'Thanks for reaching out. I received your message and will follow up shortly.';
+  }
+
+  const latest = messages[0];
+  const subject = latest.subject?.trim();
+  const body = latest.body?.trim();
+  const snippetSource = subject || body || '';
+  const snippet =
+    snippetSource.length > 120
+      ? `${snippetSource.slice(0, 117)}...`
+      : snippetSource;
+
+  if (!snippet) {
+    return 'Thanks for the update. I will review this and get back to you shortly.';
+  }
+
+  return `Thanks for the update about "${snippet}". I will review this and get back to you shortly.`;
 }

@@ -37,14 +37,7 @@ export async function getUpcomingShowings(params: PaginationParams = {}) {
       // Check if response is HTML (error page) instead of JSON
       const contentType = response.headers.get('content-type');
       if (contentType && contentType.includes('text/html')) {
-        console.error('[Showings API] Received HTML instead of JSON - API may not be running');
-        return {
-          data: [],
-          total: 0,
-          page: 1,
-          pageSize: 50,
-          totalPages: 0,
-        };
+        throw new Error('Showings API unavailable');
       }
       throw new Error(`Failed to fetch showings: ${response.statusText}`);
     }
@@ -77,14 +70,7 @@ export async function getUpcomingShowings(params: PaginationParams = {}) {
     };
   } catch (error) {
     console.error('[Showings API] Error fetching showings:', error);
-    // Return empty data instead of throwing to prevent UI crash
-    return {
-      data: [],
-      total: 0,
-      page: 1,
-      pageSize: 50,
-      totalPages: 0,
-    };
+    throw error;
   }
 }
 
@@ -218,7 +204,7 @@ export async function createShowing(data: {
       },
       body: JSON.stringify({
         unitId: data.unit_id,
-        showingDate: data.showing_date,
+        showingDate: new Date(data.showing_date).toISOString(),
         showingType: data.showing_type,
         visitorName: data.visitor_name,
         visitorEmail: data.visitor_email,

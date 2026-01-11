@@ -16,6 +16,7 @@ import { RentCollection } from './components/RentCollection'
 import { CommunicationHub } from './components/CommunicationHub'
 import { ProtectedRoute } from './components/ProtectedRoute'
 import { BillingPage } from './pages/BillingPage'
+import { SettingsPage } from './pages/SettingsPage'
 
 export default function App() {
   const { theme, toggleTheme } = useTheme()
@@ -63,7 +64,7 @@ export default function App() {
 
             {/* Billing & Settings pages */}
             <Route path="billing" element={<BillingPage />} />
-            <Route path="settings" element={<BillingPage />} />
+            <Route path="settings" element={<SettingsPage />} />
           </Route>
 
           {/* Catch all - redirect to home */}

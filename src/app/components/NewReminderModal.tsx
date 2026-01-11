@@ -1,12 +1,14 @@
 import { X } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useThemeStyles } from '../hooks/useThemeStyles';
-import { useCreateReminder } from '../../lib/hooks/useCommunications';
+import { useCreateReminder, useUpdateReminder } from '../../lib/hooks/useCommunications';
+import type { AutomatedReminder } from '../../lib/api/communicationsClient';
 
 interface NewReminderModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSuccess?: () => void;
+  reminder?: AutomatedReminder | null;
   templates: Array<{
     id: string;
     name: string;
@@ -16,24 +18,39 @@ interface NewReminderModalProps {
   }>;
 }
 
+type ReminderFormShape = {
+  name: string;
+  reminderType: string;
+  frequency: 'daily' | 'weekly' | 'monthly' | 'quarterly' | 'custom';
+  customSchedule: string;
+  templateId: string;
+  messageSubject: string;
+  messageBody: string;
+};
+
 export function NewReminderModal({
   isOpen,
   onClose,
   onSuccess,
+  reminder,
   templates,
 }: NewReminderModalProps) {
   const { isDark, text, border } = useThemeStyles();
   const { create, loading } = useCreateReminder();
+  const { update, loading: updating } = useUpdateReminder();
+  const isEditing = Boolean(reminder?.id);
 
-  const [formData, setFormData] = useState({
-    name: '',
-    reminderType: 'payment' as string,
-    frequency: 'monthly' as 'daily' | 'weekly' | 'monthly' | 'quarterly' | 'custom',
-    customSchedule: '',
-    templateId: '',
-    messageSubject: '',
-    messageBody: '',
+  const buildFormData = (source?: AutomatedReminder | null): ReminderFormShape => ({
+    name: source?.name || '',
+    reminderType: source?.reminderType || (source as any)?.reminder_type || 'payment',
+    frequency: source?.frequency || 'monthly',
+    customSchedule: source?.customSchedule || (source as any)?.custom_schedule || '',
+    templateId: source?.templateId || (source as any)?.template_id || '',
+    messageSubject: source?.messageSubject || (source as any)?.message_subject || '',
+    messageBody: source?.messageBody || (source as any)?.message_body || '',
   });
+
+  const [formData, setFormData] = useState<ReminderFormShape>(() => buildFormData(reminder));
 
   const [errors, setErrors] = useState<Record<string, string>>({});
 
@@ -91,28 +108,26 @@ export function NewReminderModal({
       return;
     }
 
-    const result = await create({
+    const basePayload = {
       name: formData.name,
-      reminderType: formData.reminderType,
       frequency: formData.frequency,
-      customSchedule: formData.frequency === 'custom' ? formData.customSchedule : undefined,
-      templateId: formData.templateId || undefined,
+      customSchedule: formData.frequency === 'custom' ? formData.customSchedule : null,
       messageSubject: formData.messageSubject,
       messageBody: formData.messageBody,
-      recipientFilter: {}, // Default to all tenants, can be enhanced later
-    });
+    };
+
+    const result = isEditing && reminder?.id
+      ? await update(reminder.id, { ...basePayload, templateId: formData.templateId || null })
+      : await create({
+        ...basePayload,
+        reminderType: formData.reminderType,
+        templateId: formData.templateId || undefined,
+        recipientFilter: {},
+      });
 
     if (result.success) {
       // Reset form
-      setFormData({
-        name: '',
-        reminderType: 'payment',
-        frequency: 'monthly',
-        customSchedule: '',
-        templateId: '',
-        messageSubject: '',
-        messageBody: '',
-      });
+      setFormData(buildFormData(null));
       setErrors({});
 
       // Call success callback
@@ -124,26 +139,24 @@ export function NewReminderModal({
       onClose();
 
       // Show success message
-      alert('Automated reminder created successfully!');
+      alert(isEditing ? 'Automated reminder updated successfully!' : 'Automated reminder created successfully!');
     } else {
-      alert('Failed to create reminder. Please try again.');
+      alert(isEditing ? 'Failed to update reminder. Please try again.' : 'Failed to create reminder. Please try again.');
     }
   };
 
   const handleClose = () => {
     // Reset form when closing
-    setFormData({
-      name: '',
-      reminderType: 'payment',
-      frequency: 'monthly',
-      customSchedule: '',
-      templateId: '',
-      messageSubject: '',
-      messageBody: '',
-    });
+    setFormData(buildFormData(null));
     setErrors({});
     onClose();
   };
+
+  useEffect(() => {
+    if (!isOpen) return;
+    setFormData(buildFormData(reminder));
+    setErrors({});
+  }, [isOpen, reminder?.id]);
 
   if (!isOpen) return null;
 
@@ -164,7 +177,7 @@ export function NewReminderModal({
         {/* Header */}
         <div className="flex items-center justify-between p-6 border-b border-white/10">
           <h2 className="text-2xl" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
-            CREATE AUTOMATED REMINDER
+            {isEditing ? 'EDIT AUTOMATED REMINDER' : 'CREATE AUTOMATED REMINDER'}
           </h2>
           <button
             onClick={handleClose}
@@ -213,6 +226,7 @@ export function NewReminderModal({
               <select
                 value={formData.reminderType}
                 onChange={(e) => setFormData({ ...formData, reminderType: e.target.value })}
+                disabled={isEditing}
                 className={`w-full px-4 py-3 ${
                   isDark ? 'bg-white/5 border-white/10' : 'bg-gray-50 border-gray-300'
                 } border rounded-lg ${text.primary} focus:outline-none focus:border-[#ff6b35] transition-colors`}
@@ -377,11 +391,11 @@ export function NewReminderModal({
             </button>
             <button
               type="submit"
-              disabled={loading}
+              disabled={loading || updating}
               className="px-6 py-3 bg-gradient-to-r from-[#ff6b35] to-[#f7931e] rounded-lg font-medium hover:scale-105 transition-transform disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
               style={{ fontFamily: 'Work Sans, sans-serif' }}
             >
-              {loading ? 'Creating...' : 'Create Reminder'}
+              {loading || updating ? 'Saving...' : (isEditing ? 'Update Reminder' : 'Create Reminder')}
             </button>
           </div>
         </form>

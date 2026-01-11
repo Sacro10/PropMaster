@@ -201,17 +201,19 @@ describe('Emergency Requests', () => {
       unitId: TEST_UNIT_ID,
     };
 
-    const request = await createEmergencyRequest(
+    const result = await createEmergencyRequest(
       TEST_ACCOUNT_ID,
       TEST_USER_ID,
       emergencyData
     );
 
+    const request = result.request;
+
     testEmergencyId = request.id;
 
     expect(request).toBeDefined();
     expect(request.title).toBe(emergencyData.title);
-    expect(request.priority).toBe('urgent');
+    expect(request.priority).toBe('emergency');
 
     // Verify is_emergency flag
     const { data: updated } = await supabase
@@ -231,11 +233,13 @@ describe('Emergency Requests', () => {
       unitId: TEST_UNIT_ID,
     };
 
-    const request = await createEmergencyRequest(
+    const result = await createEmergencyRequest(
       TEST_ACCOUNT_ID,
       TEST_USER_ID,
       emergencyData
     );
+
+    const request = result.request;
 
     testEmergencyId = request.id;
 

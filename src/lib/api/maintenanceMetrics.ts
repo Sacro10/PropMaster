@@ -29,6 +29,13 @@ export interface RoutingMetrics {
   vendor_utilization_rate: number;
 }
 
+export interface EmergencySupportConfig {
+  isEnabled: boolean;
+  notificationPhone: string | null;
+  notificationEmail: string | null;
+  notificationChannels: string[];
+}
+
 /**
  * Get maintenance KPI metrics
  */
@@ -321,6 +328,7 @@ export async function createEmergencyRequest(data: {
   description: string;
   category: string;
   unitId: string;
+  notificationChannels?: string[];
 }): Promise<any> {
   try {
     const response = await fetch('/api/maintenance/emergency', {
@@ -341,6 +349,58 @@ export async function createEmergencyRequest(data: {
     console.error('[Maintenance Metrics API] Error creating emergency request:', error);
     throw error;
   }
+}
+
+export async function getEmergencySupportConfig(): Promise<EmergencySupportConfig> {
+  const response = await fetch('/api/maintenance/emergency-config');
+
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.error || 'Failed to fetch emergency config');
+  }
+
+  return await response.json();
+}
+
+export async function updateEmergencySupportConfig(data: EmergencySupportConfig): Promise<EmergencySupportConfig> {
+  const response = await fetch('/api/maintenance/emergency-config', {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(data),
+  });
+
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.error || 'Failed to update emergency config');
+  }
+
+  return await response.json();
+}
+
+export async function sendEmergencyTest(data: {
+  title?: string;
+  description?: string;
+  category?: string;
+  unitId?: string;
+  propertyId?: string;
+  notificationChannels?: string[];
+}): Promise<{ notifications: Array<{ channel: string; sent: boolean; status?: number; error?: string }> }> {
+  const response = await fetch('/api/maintenance/emergency-test', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(data),
+  });
+
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.error || 'Failed to send emergency test');
+  }
+
+  return await response.json();
 }
 
 /**

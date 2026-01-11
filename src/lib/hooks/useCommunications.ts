@@ -256,3 +256,65 @@ export function useCreateReminder() {
 
   return { create, loading, error };
 }
+
+export function useUpdateReminder() {
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<Error | null>(null);
+
+  const update = useCallback(async (
+    reminderId: string,
+    reminderData: {
+      name?: string;
+      frequency?: 'daily' | 'weekly' | 'monthly' | 'quarterly' | 'custom';
+      customSchedule?: string | null;
+      templateId?: string | null;
+      messageSubject?: string;
+      messageBody?: string;
+      recipientFilter?: Record<string, any>;
+      status?: 'active' | 'paused' | 'inactive';
+    }
+  ) => {
+    try {
+      setLoading(true);
+      setError(null);
+      const result = await api.updateAutomatedReminder(reminderId, reminderData);
+      return { success: true, data: result };
+    } catch (err) {
+      console.error('[useUpdateReminder] Error updating reminder:', err);
+      setError(err as Error);
+      return { success: false, error: err as Error };
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  return { update, loading, error };
+}
+
+export function useCreateMessageTemplate() {
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<Error | null>(null);
+
+  const create = useCallback(async (templateData: {
+    name: string;
+    category: 'payment' | 'maintenance' | 'lease' | 'onboarding' | 'general';
+    subject?: string;
+    body: string;
+    variables?: string[];
+  }) => {
+    try {
+      setLoading(true);
+      setError(null);
+      const result = await api.createMessageTemplate(templateData);
+      return { success: true, data: result };
+    } catch (err) {
+      console.error('[useCreateMessageTemplate] Error creating template:', err);
+      setError(err as Error);
+      return { success: false, error: err as Error };
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  return { create, loading, error };
+}

@@ -14,6 +14,7 @@ import {
   useCommunicationStats,
   useMessageSuggestion,
   useSendMessage,
+  useCreateMessageTemplate,
 } from '../../lib/hooks/useCommunications';
 import { formatRelativeTime } from '../../lib/utils/dateHelpers';
 import { NewReminderModal } from './NewReminderModal';
@@ -26,7 +27,7 @@ export function CommunicationHub() {
 
   // Fetch data
   const { data: messages, loading: messagesLoading, error: messagesError, refetch: refetchMessages } = useRecentMessages();
-  const { data: templates, loading: templatesLoading } = useMessageTemplates();
+  const { data: templates, loading: templatesLoading, refetch: refetchTemplates } = useMessageTemplates();
   const { data: reminders, loading: remindersLoading, refetch: refetchReminders } = useAutomatedReminders();
   const { data: portalActivity, loading: activityLoading } = usePortalActivity();
   const { data: stats, loading: statsLoading } = useCommunicationStats();
@@ -40,6 +41,11 @@ export function CommunicationHub() {
     clear: clearSuggestion,
   } = useMessageSuggestion();
   const { send: sendMessage, loading: sendingMessage, error: sendError } = useSendMessage();
+  const {
+    create: createTemplate,
+    loading: creatingTemplate,
+    error: createTemplateError,
+  } = useCreateMessageTemplate();
 
   const [composerOpen, setComposerOpen] = useState(false);
   const [composerRecipientId, setComposerRecipientId] = useState('');
@@ -49,6 +55,14 @@ export function CommunicationHub() {
   const [recipientSearch, setRecipientSearch] = useState('');
   const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null);
   const [reminderModalOpen, setReminderModalOpen] = useState(false);
+  const [editingReminder, setEditingReminder] = useState<any | null>(null);
+  const [templateModalOpen, setTemplateModalOpen] = useState(false);
+  const [templateName, setTemplateName] = useState('');
+  const [templateCategory, setTemplateCategory] = useState<'payment' | 'maintenance' | 'lease' | 'onboarding' | 'general'>('general');
+  const [templateSubject, setTemplateSubject] = useState('');
+  const [templateBody, setTemplateBody] = useState('');
+  const [templateVariables, setTemplateVariables] = useState('');
+  const [templateError, setTemplateError] = useState<string | null>(null);
   const aiPanelRef = useRef<HTMLDivElement | null>(null);
 
   // Show loading state
@@ -163,6 +177,47 @@ export function CommunicationHub() {
     setRecipientSearch('');
   };
 
+  const openTemplateModal = () => {
+    setTemplateModalOpen(true);
+    setTemplateError(null);
+  };
+
+  const closeTemplateModal = () => {
+    setTemplateModalOpen(false);
+    setTemplateName('');
+    setTemplateCategory('general');
+    setTemplateSubject('');
+    setTemplateBody('');
+    setTemplateVariables('');
+    setTemplateError(null);
+  };
+
+  const handleCreateTemplate = async () => {
+    if (!templateName.trim() || !templateBody.trim()) {
+      setTemplateError('Template name and body are required.');
+      return;
+    }
+
+    const variables = templateVariables
+      .split(',')
+      .map((value) => value.trim())
+      .filter(Boolean);
+
+    setTemplateError(null);
+    const result = await createTemplate({
+      name: templateName.trim(),
+      category: templateCategory,
+      subject: templateSubject.trim() || undefined,
+      body: templateBody.trim(),
+      variables: variables.length ? variables : undefined,
+    });
+
+    if (result.success) {
+      closeTemplateModal();
+      refetchTemplates();
+    }
+  };
+
   const handleSendMessage = async () => {
     if (!composerRecipientId.trim() && !composerBody.trim()) {
       setComposerError('Recipient and message are required.');
@@ -189,6 +244,24 @@ export function CommunicationHub() {
       refetchMessages();
     }
   };
+
+  const normalizedReminders = reminders.map((reminder) => {
+    const reminderType = reminder.reminderType ?? (reminder as any).reminder_type ?? reminder.name ?? 'Reminder';
+    const recipientCount = reminder.recipientCount ?? (reminder as any).recipient_count ?? 0;
+    const nextSendDate = reminder.nextSendDate ?? (reminder as any).next_send_date ?? null;
+    const status = reminder.status ?? (reminder as any).status ?? 'active';
+    const frequency = reminder.frequency ?? (reminder as any).frequency ?? 'monthly';
+
+    return {
+      raw: reminder,
+      id: reminder.id,
+      reminderType,
+      recipientCount,
+      nextSendDate,
+      status,
+      frequency,
+    };
+  });
 
   return (
     <FeatureGate
@@ -333,6 +406,101 @@ export function CommunicationHub() {
                 disabled={sendingMessage || !composerRecipientId.trim() || !composerBody.trim()}
               >
                 {sendingMessage ? 'Sending...' : 'Send Message'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {templateModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div
+            className="absolute inset-0 bg-black/50"
+            onClick={closeTemplateModal}
+          />
+          <div
+            className={`${isDark ? 'bg-[#0f1523]' : 'bg-white'} relative z-10 w-full max-w-2xl rounded-2xl border ${border.default} shadow-xl`}
+          >
+            <div className="flex items-center justify-between px-6 py-4 border-b border-white/10">
+              <h3 className="text-2xl" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
+                CREATE TEMPLATE
+              </h3>
+              <button
+                onClick={closeTemplateModal}
+                className={`px-3 py-1 ${isDark ? 'bg-white/5 hover:bg-white/10' : 'bg-gray-100 hover:bg-gray-200'} rounded-lg text-sm`}
+              >
+                Close
+              </button>
+            </div>
+
+            <div className="p-6 space-y-4">
+              <div>
+                <label className={`text-xs uppercase ${text.inactive}`}>Template Name</label>
+                <input
+                  value={templateName}
+                  onChange={(e) => setTemplateName(e.target.value)}
+                  placeholder="Friendly name"
+                  className={`mt-2 w-full px-4 py-2 ${isDark ? 'bg-white/5 border-white/10' : 'bg-gray-100 border-gray-200'} border rounded-lg text-sm focus:outline-none focus:border-[#ff6b35]/50`}
+                />
+              </div>
+              <div>
+                <label className={`text-xs uppercase ${text.inactive}`}>Category</label>
+                <select
+                  value={templateCategory}
+                  onChange={(e) => setTemplateCategory(e.target.value as typeof templateCategory)}
+                  className={`mt-2 w-full px-4 py-2 ${isDark ? 'bg-white/5 border-white/10' : 'bg-gray-100 border-gray-200'} border rounded-lg text-sm focus:outline-none focus:border-[#ff6b35]/50`}
+                >
+                  <option value="general">General</option>
+                  <option value="payment">Payment</option>
+                  <option value="maintenance">Maintenance</option>
+                  <option value="lease">Lease</option>
+                  <option value="onboarding">Onboarding</option>
+                </select>
+              </div>
+              <div>
+                <label className={`text-xs uppercase ${text.inactive}`}>Subject (optional)</label>
+                <input
+                  value={templateSubject}
+                  onChange={(e) => setTemplateSubject(e.target.value)}
+                  placeholder="Subject line"
+                  className={`mt-2 w-full px-4 py-2 ${isDark ? 'bg-white/5 border-white/10' : 'bg-gray-100 border-gray-200'} border rounded-lg text-sm focus:outline-none focus:border-[#ff6b35]/50`}
+                />
+              </div>
+              <div>
+                <label className={`text-xs uppercase ${text.inactive}`}>Message Body</label>
+                <textarea
+                  value={templateBody}
+                  onChange={(e) => setTemplateBody(e.target.value)}
+                  rows={6}
+                  placeholder="Write your template..."
+                  className={`mt-2 w-full px-4 py-2 ${isDark ? 'bg-white/5 border-white/10' : 'bg-gray-100 border-gray-200'} border rounded-lg text-sm focus:outline-none focus:border-[#ff6b35]/50`}
+                />
+              </div>
+              <div>
+                <label className={`text-xs uppercase ${text.inactive}`}>Variables (optional)</label>
+                <input
+                  value={templateVariables}
+                  onChange={(e) => setTemplateVariables(e.target.value)}
+                  placeholder="tenant_name, property_name"
+                  className={`mt-2 w-full px-4 py-2 ${isDark ? 'bg-white/5 border-white/10' : 'bg-gray-100 border-gray-200'} border rounded-lg text-sm focus:outline-none focus:border-[#ff6b35]/50`}
+                />
+              </div>
+              {templateError && (
+                <p className="text-xs text-red-400">{templateError}</p>
+              )}
+              {createTemplateError && (
+                <p className="text-xs text-red-400">{createTemplateError.message}</p>
+              )}
+            </div>
+
+            <div className="flex items-center justify-between px-6 py-4 border-t border-white/10">
+              <p className={`text-xs ${text.inactive}`}>Templates are available in Quick Templates.</p>
+              <button
+                onClick={handleCreateTemplate}
+                className="px-6 py-2 bg-gradient-to-r from-[#ff6b35] to-[#f7931e] rounded-lg text-sm font-medium hover:scale-105 transition-transform"
+                disabled={creatingTemplate || !templateName.trim() || !templateBody.trim()}
+              >
+                {creatingTemplate ? 'Creating...' : 'Create Template'}
               </button>
             </div>
           </div>
@@ -541,7 +709,10 @@ export function CommunicationHub() {
               </div>
             )}
 
-            <button className="w-full mt-4 py-3 bg-gradient-to-r from-[#ff6b35] to-[#f7931e] rounded-lg text-sm font-medium hover:scale-105 transition-transform">
+            <button
+              onClick={openTemplateModal}
+              className="w-full mt-4 py-3 bg-gradient-to-r from-[#ff6b35] to-[#f7931e] rounded-lg text-sm font-medium hover:scale-105 transition-transform"
+            >
               Create Template
             </button>
           </div>
@@ -606,7 +777,10 @@ export function CommunicationHub() {
             </div>
           </div>
           <button
-            onClick={() => setReminderModalOpen(true)}
+            onClick={() => {
+              setEditingReminder(null);
+              setReminderModalOpen(true);
+            }}
             className="px-6 py-3 bg-gradient-to-r from-[#ff6b35] to-[#f7931e] rounded-lg font-medium hover:scale-105 transition-transform"
           >
             + New Reminder
@@ -620,7 +794,7 @@ export function CommunicationHub() {
               <p className={`text-sm ${text.muted}`}>Loading reminders...</p>
             </div>
           </div>
-        ) : reminders.length === 0 ? (
+        ) : normalizedReminders.length === 0 ? (
           <div className="text-center py-12">
             <Bell className={`w-12 h-12 mx-auto mb-4 ${text.inactive}`} />
             <p className={text.muted} style={{ fontFamily: 'Work Sans, sans-serif' }}>
@@ -629,14 +803,14 @@ export function CommunicationHub() {
           </div>
         ) : (
           <div className="grid grid-cols-4 gap-4">
-            {reminders.map((reminder) => (
+            {normalizedReminders.map((reminder) => (
               <div
                 key={reminder.id}
                 className={`p-5 ${isDark ? 'bg-white/5' : 'bg-gray-50'} rounded-lg border ${border.default} hover:border-[#ff6b35]/50 transition-all`}
               >
                 <div className="flex items-start justify-between mb-4">
                   <h4 className="font-semibold" style={{ fontFamily: 'Work Sans, sans-serif' }}>
-                    {reminder.reminder_type}
+                    {reminder.reminderType}
                   </h4>
                   <span className={`px-2 py-1 rounded-full text-xs font-medium ${
                     reminder.status === 'active'
@@ -650,7 +824,7 @@ export function CommunicationHub() {
                 <div className="space-y-3 mb-4">
                   <div className="flex items-center justify-between text-sm">
                     <span className={text.muted}>Recipients</span>
-                    <span className="font-medium">{reminder.recipient_count}</span>
+                    <span className="font-medium">{reminder.recipientCount}</span>
                   </div>
                   <div className="flex items-center justify-between text-sm">
                     <span className={text.muted}>Frequency</span>
@@ -664,17 +838,29 @@ export function CommunicationHub() {
                     <span className="text-xs text-blue-400 font-medium">Next Send</span>
                   </div>
                   <p className={`text-sm ${text.secondary}`}>
-                    {new Date(reminder.next_send_date).toLocaleString('en-US', {
-                      month: 'short',
-                      day: 'numeric',
-                      year: 'numeric',
-                      hour: 'numeric',
-                      minute: '2-digit',
-                    })}
+                    {(() => {
+                      const nextSend = reminder.nextSendDate ? new Date(reminder.nextSendDate) : null;
+                      if (!nextSend || Number.isNaN(nextSend.getTime())) {
+                        return 'Not scheduled';
+                      }
+                      return nextSend.toLocaleString('en-US', {
+                        month: 'short',
+                        day: 'numeric',
+                        year: 'numeric',
+                        hour: 'numeric',
+                        minute: '2-digit',
+                      });
+                    })()}
                   </p>
                 </div>
 
-                <button className={`w-full py-2 ${isDark ? 'bg-white/5 hover:bg-white/10' : 'bg-gray-100 hover:bg-gray-200'} rounded-lg text-sm transition-colors`}>
+                <button
+                  onClick={() => {
+                    setEditingReminder(reminder.raw);
+                    setReminderModalOpen(true);
+                  }}
+                  className={`w-full py-2 ${isDark ? 'bg-white/5 hover:bg-white/10' : 'bg-gray-100 hover:bg-gray-200'} rounded-lg text-sm transition-colors`}
+                >
                   Edit Schedule
                 </button>
               </div>
@@ -736,8 +922,15 @@ export function CommunicationHub() {
       {/* New Reminder Modal */}
       <NewReminderModal
         isOpen={reminderModalOpen}
-        onClose={() => setReminderModalOpen(false)}
-        onSuccess={refetchReminders}
+        onClose={() => {
+          setReminderModalOpen(false);
+          setEditingReminder(null);
+        }}
+        onSuccess={() => {
+          refetchReminders();
+          setEditingReminder(null);
+        }}
+        reminder={editingReminder}
         templates={templates}
       />
     </FeatureGate>

@@ -55,6 +55,33 @@ EXCEPTION
     RAISE NOTICE '✗ Failed to create hvac_delivery_batches: %', SQLERRM;
 END $$;
 
+-- Step 2b: Emergency Support Config
+DO $$
+BEGIN
+  CREATE TABLE IF NOT EXISTS emergency_support_config (
+    account_id UUID PRIMARY KEY REFERENCES accounts(id) ON DELETE CASCADE,
+    is_enabled BOOLEAN DEFAULT false,
+    on_call_vendor_ids UUID[] DEFAULT '{}',
+    notification_phone TEXT,
+    notification_email TEXT,
+    notification_channels TEXT[] DEFAULT '{}',
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+  );
+
+  ALTER TABLE emergency_support_config ADD COLUMN IF NOT EXISTS notification_channels TEXT[] DEFAULT '{}';
+  ALTER TABLE emergency_support_config ADD COLUMN IF NOT EXISTS notification_phone TEXT;
+  ALTER TABLE emergency_support_config ADD COLUMN IF NOT EXISTS notification_email TEXT;
+  ALTER TABLE emergency_support_config ADD COLUMN IF NOT EXISTS is_enabled BOOLEAN DEFAULT false;
+
+  CREATE INDEX IF NOT EXISTS idx_emergency_support_config_account ON emergency_support_config(account_id);
+
+  RAISE NOTICE '✓ Created emergency_support_config table';
+EXCEPTION
+  WHEN OTHERS THEN
+    RAISE NOTICE '✗ Failed to create emergency_support_config: %', SQLERRM;
+END $$;
+
 -- Step 3: Message Templates
 DO $$
 BEGIN
