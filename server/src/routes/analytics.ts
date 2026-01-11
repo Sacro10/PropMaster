@@ -383,7 +383,7 @@ router.get('/properties', async (req: AnalyticsRequest, res: Response) => {
 
     const { data: properties, error: propertiesError } = await supabase
       .from('properties')
-      .select('id, name, total_units, occupied_units')
+      .select('id, name, total_units')
       .eq('account_id', accountId);
 
     if (propertiesError) {
@@ -431,7 +431,7 @@ router.get('/properties', async (req: AnalyticsRequest, res: Response) => {
     const result = properties.map((property) => {
       const unitsStat = unitStats[property.id] || { total: 0, occupied: 0 };
       const totalUnits = Number(property.total_units ?? unitsStat.total ?? 0);
-      const occupiedUnits = Number(property.occupied_units ?? unitsStat.occupied ?? 0);
+      const occupiedUnits = Number(unitsStat.occupied ?? 0);
       const occupancy = totalUnits > 0 ? (occupiedUnits / totalUnits) * 100 : 0;
 
       return {

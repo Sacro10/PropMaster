@@ -440,48 +440,6 @@ export function DashboardOverview() {
         onClose={() => setIsPropertyModalOpen(false)}
         onSuccess={handlePropertySuccess}
       />
-              let dueDateDisplay = '';
-              if (daysUntilDue < 0) {
-                dueDateDisplay = 'Overdue';
-              } else if (daysUntilDue === 0) {
-                dueDateDisplay = 'Today';
-              } else if (daysUntilDue === 1) {
-                dueDateDisplay = 'Tomorrow';
-              } else if (daysUntilDue <= 7) {
-                dueDateDisplay = `${daysUntilDue} days`;
-              } else {
-                dueDateDisplay = dueDate.toLocaleDateString();
-              }
-
-              return (
-                <div
-                  key={task.id}
-                  className={`p-4 ${isDark ? 'bg-white/5' : 'bg-gray-50'} rounded-lg border ${border.default} hover:border-[#ff6b35]/50 transition-all group`}
-                >
-                  <div className="flex items-start justify-between mb-3">
-                    <div className={`px-2 py-1 rounded text-xs font-medium ${
-                      task.priority === 'urgent' || task.priority === 'high' ? 'bg-red-500/20 text-red-400' :
-                      task.priority === 'medium' ? 'bg-amber-500/20 text-amber-400' :
-                      'bg-blue-500/20 text-blue-400'
-                    }`}>
-                      {task.priority.toUpperCase()}
-                    </div>
-                  </div>
-                  <p className="font-medium mb-2" style={{ fontFamily: 'Work Sans, sans-serif' }}>
-                    {task.title}
-                  </p>
-                  <p className={`text-sm ${text.muted} mb-2`} style={{ fontFamily: 'Work Sans, sans-serif' }}>
-                    {task.type.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
-                  </p>
-                  <p className={`text-xs ${text.inactive}`} style={{ fontFamily: 'Work Sans, sans-serif' }}>
-                    Due: {dueDateDisplay}
-                  </p>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
     </div>
   );
 }
