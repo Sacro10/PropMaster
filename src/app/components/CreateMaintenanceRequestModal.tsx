@@ -4,6 +4,7 @@ import { useThemeStyles } from '../hooks/useThemeStyles';
 import { useCreateMaintenanceRequest } from '../../lib/hooks/useMaintenance';
 import { supabase } from '../../lib/supabaseClient';
 import { createEmergencyRequest, getEmergencySupportConfig } from '../../lib/api/maintenanceMetrics';
+import { getCurrentAccountId } from '../../lib/api/client';
 
 interface CreateMaintenanceRequestModalProps {
   isOpen: boolean;
@@ -87,17 +88,8 @@ export function CreateMaintenanceRequestModal({
       try {
         setLoadingUnits(true);
 
-        // Get current account ID
-        const { data: { user } } = await supabase.auth.getUser();
-        if (!user) return;
-
-        const { data: profile } = await supabase
-          .from('user_profiles')
-          .select('account_id')
-          .eq('id', user.id)
-          .single();
-
-        if (!profile?.account_id) return;
+        const accountId = await getCurrentAccountId();
+        if (!accountId) return;
 
         // Fetch all units with their properties
         const { data: units, error } = await supabase
@@ -116,7 +108,7 @@ export function CreateMaintenanceRequestModal({
               account_id
             )
           `)
-          .eq('properties.account_id', profile.account_id)
+          .eq('properties.account_id', accountId)
           .order('unit_number', { ascending: true });
 
         if (error) {
