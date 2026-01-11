@@ -74,6 +74,88 @@ async function getUserAccountId(userId: string): Promise<string> {
   return data.account_id;
 }
 
+const paymentStatusValues = ['paid', 'completed'];
+
+function getPaymentDateValue(dateField: string, date: Date) {
+  return dateField === 'payment_date' ? date.toISOString().split('T')[0] : date.toISOString();
+}
+
+async function fetchPaymentsInRange({
+  accountId,
+  start,
+  end,
+  select,
+  statusValues = paymentStatusValues,
+  dateFields = ['payment_date', 'paid_at', 'created_at'],
+}: {
+  accountId: string;
+  start: Date;
+  end: Date;
+  select: string;
+  statusValues?: string[];
+  dateFields?: string[];
+}) {
+  let lastError: any = null;
+
+  for (const dateField of dateFields) {
+    const { data, error } = await supabase
+      .from('payments')
+      .select(select)
+      .eq('account_id', accountId)
+      .in('status', statusValues)
+      .gte(dateField, getPaymentDateValue(dateField, start))
+      .lte(dateField, getPaymentDateValue(dateField, end));
+
+    if (!error) {
+      return { data: data || [], dateField };
+    }
+
+    lastError = error;
+    const message = String(error.message || '');
+    if (message.includes(`column "${dateField}"`) || message.includes('does not exist')) {
+      continue;
+    }
+
+    return { data: [], dateField: null, error };
+  }
+
+  return { data: [], dateField: null, error: lastError };
+}
+
+function buildMonthlyRevenueSeries(payments: any[], dateField: string, start: Date, end: Date) {
+  const totals = new Map<string, number>();
+
+  payments.forEach((payment) => {
+    const rawDate = payment?.[dateField];
+    if (!rawDate) {
+      return;
+    }
+    const date = new Date(rawDate);
+    if (Number.isNaN(date.getTime())) {
+      return;
+    }
+    const monthStart = new Date(date.getFullYear(), date.getMonth(), 1);
+    const key = monthStart.toISOString().split('T')[0];
+    totals.set(key, (totals.get(key) || 0) + Number(payment.amount || 0));
+  });
+
+  const series = [];
+  const current = new Date(start.getFullYear(), start.getMonth(), 1);
+  const endMonth = new Date(end.getFullYear(), end.getMonth(), 1);
+
+  while (current <= endMonth) {
+    const key = current.toISOString().split('T')[0];
+    series.push({
+      month: key,
+      value: Number((totals.get(key) || 0).toFixed(2)),
+      label: current.toLocaleDateString('en-US', { month: 'short' }),
+    });
+    current.setMonth(current.getMonth() + 1);
+  }
+
+  return series;
+}
+
 async function buildSummaryMetrics(accountId: string, range: TimeframeQuery['range']) {
   const { start, end } = getDateRange(range);
 
@@ -89,44 +171,32 @@ async function buildSummaryMetrics(accountId: string, range: TimeframeQuery['ran
     activeLeases,
     currentExpenses,
   ] = await Promise.all([
-    // Current period revenue
-    supabase
-      .from('payments')
-      .select('amount')
-      .eq('account_id', accountId)
-      .eq('status', 'paid')
-      .gte('paid_at', start.toISOString())
-      .lte('paid_at', end.toISOString()),
-
-    // Comparison period revenue
-    supabase
-      .from('payments')
-      .select('amount')
-      .eq('account_id', accountId)
-      .eq('status', 'paid')
-      .gte('paid_at', comparisonStart.toISOString())
-      .lt('paid_at', comparisonEnd.toISOString()),
-
-    // Units data for occupancy
+    fetchPaymentsInRange({
+      accountId,
+      start,
+      end,
+      select: 'amount',
+    }),
+    fetchPaymentsInRange({
+      accountId,
+      start: comparisonStart,
+      end: comparisonEnd,
+      select: 'amount',
+    }),
     supabase
       .from('units')
       .select('status')
       .eq('account_id', accountId),
-
-    // Active leases for average rent
     supabase
       .from('leases')
       .select('rent')
       .eq('account_id', accountId)
       .eq('status', 'active'),
-
-    // Current period expenses
     supabase
       .from('maintenance_requests')
-      .select('actual_cost')
+      .select('actual_cost, estimated_cost')
       .eq('account_id', accountId)
       .eq('status', 'completed')
-      .not('actual_cost', 'is', null)
       .gte('completed_at', start.toISOString())
       .lte('completed_at', end.toISOString()),
   ]);
@@ -154,7 +224,10 @@ async function buildSummaryMetrics(accountId: string, range: TimeframeQuery['ran
       : 0;
 
   const currentExpenseTotal =
-    currentExpenses.data?.reduce((sum: number, e: any) => sum + Number(e.actual_cost), 0) || 0;
+    currentExpenses.data?.reduce((sum: number, e: any) => {
+      const value = e.actual_cost ?? e.estimated_cost ?? 0;
+      return sum + Number(value);
+    }, 0) || 0;
   const noiMargin = currentRevenue > 0 ? ((currentRevenue - currentExpenseTotal) / currentRevenue) * 100 : 0;
 
   return {
@@ -292,19 +365,35 @@ router.get('/timeseries', async (req: AnalyticsRequest, res: Response) => {
           end_date: end.toISOString()
         });
 
-      if (error) {
-        console.warn('Analytics timeseries RPC missing or failed, returning empty series:', error);
-        return res.json([]);
+      if (!error && data && data.length > 0) {
+        const timeSeriesData = data.map((item: any) => ({
+          month: item.month,
+          value: Number(item.revenue),
+          label: new Date(item.month).toLocaleDateString('en-US', { month: 'short' })
+        }));
+
+        return res.json(timeSeriesData);
       }
 
-      // Format data for charts
-      const timeSeriesData = data?.map((item: any) => ({
-        month: item.month,
-        value: Number(item.revenue),
-        label: new Date(item.month).toLocaleDateString('en-US', { month: 'short' })
-      })) || [];
+      if (error) {
+        console.warn('Analytics timeseries RPC missing or failed, falling back to raw payments:', error);
+      }
 
-      res.json(timeSeriesData);
+      const paymentsResult = await fetchPaymentsInRange({
+        accountId,
+        start,
+        end,
+        select: 'amount, payment_date, paid_at, created_at',
+      });
+
+      if (paymentsResult.error) {
+        throw paymentsResult.error;
+      }
+
+      const dateField = paymentsResult.dateField || 'created_at';
+      const timeSeriesData = buildMonthlyRevenueSeries(paymentsResult.data, dateField, start, end);
+
+      return res.json(timeSeriesData);
 
     } else if (metric === 'occupancy') {
       const { data: units, error: unitsError } = await supabase
@@ -411,13 +500,18 @@ router.get('/properties', async (req: AnalyticsRequest, res: Response) => {
       return acc;
     }, {});
 
-    const { data: payments } = await supabase
-      .from('payments')
-      .select('amount, unit_id, units!inner(property_id)')
-      .eq('account_id', accountId)
-      .eq('status', 'paid')
-      .gte('paid_at', start.toISOString())
-      .lte('paid_at', end.toISOString());
+    const paymentsResult = await fetchPaymentsInRange({
+      accountId,
+      start,
+      end,
+      select: 'amount, unit_id, units!inner(property_id)',
+    });
+
+    if (paymentsResult.error) {
+      throw paymentsResult.error;
+    }
+
+    const payments = paymentsResult.data;
 
     const revenueByProperty = (payments || []).reduce((acc: Record<string, number>, payment: any) => {
       const propertyId = payment.units?.property_id;
@@ -466,25 +560,48 @@ router.get('/expenses/breakdown', async (req: AnalyticsRequest, res: Response) =
     const accountId = await getUserAccountId(userId);
     const { start, end } = getDateRange(range);
 
-    const { data, error } = await supabase
-      .from('maintenance_requests')
-      .select('category, actual_cost')
+    let categoryTotals: Record<string, number> = {};
+
+    const expenseResult = await supabase
+      .from('expenses')
+      .select('amount, expense_date, expense_categories(name)')
       .eq('account_id', accountId)
-      .eq('status', 'completed')
-      .not('actual_cost', 'is', null)
-      .gte('completed_at', start.toISOString())
-      .lte('completed_at', end.toISOString());
+      .gte('expense_date', start.toISOString().split('T')[0])
+      .lte('expense_date', end.toISOString().split('T')[0]);
 
-    if (error) {
-      throw error;
+    if (!expenseResult.error && expenseResult.data && expenseResult.data.length > 0) {
+      categoryTotals = expenseResult.data.reduce((acc: Record<string, number>, item: any) => {
+        const category = item.expense_categories?.name || 'Other';
+        acc[category] = (acc[category] || 0) + Number(item.amount || 0);
+        return acc;
+      }, {});
+    } else {
+      if (expenseResult.error) {
+        const message = String(expenseResult.error.message || '');
+        if (!message.includes('does not exist')) {
+          throw expenseResult.error;
+        }
+      }
+
+      const { data, error } = await supabase
+        .from('maintenance_requests')
+        .select('category, actual_cost, estimated_cost')
+        .eq('account_id', accountId)
+        .eq('status', 'completed')
+        .gte('completed_at', start.toISOString())
+        .lte('completed_at', end.toISOString());
+
+      if (error) {
+        throw error;
+      }
+
+      categoryTotals = data?.reduce((acc: Record<string, number>, item: any) => {
+        const category = item.category || 'Other';
+        const value = item.actual_cost ?? item.estimated_cost ?? 0;
+        acc[category] = (acc[category] || 0) + Number(value);
+        return acc;
+      }, {}) || {};
     }
-
-    // Group expenses by category
-    const categoryTotals = data?.reduce((acc: Record<string, number>, item: any) => {
-      const category = item.category || 'Other';
-      acc[category] = (acc[category] || 0) + Number(item.actual_cost);
-      return acc;
-    }, {}) || {};
 
     // Format for donut chart
     const expenseBreakdown = Object.entries(categoryTotals).map(([name, value]) => ({
