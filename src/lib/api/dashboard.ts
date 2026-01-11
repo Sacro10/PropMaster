@@ -184,21 +184,93 @@ export async function getDashboardSummary(): Promise<DashboardSummary> {
 }
 
 /**
- * Get dashboard KPI metrics
+ * Get current account ID from user session
+ */
+async function getCurrentAccountId(): Promise<string | null> {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return null;
+
+  const { data: profile } = await supabase
+    .from('user_profiles')
+    .select('account_id')
+    .eq('id', user.id)
+    .single();
+
+  return profile?.account_id || null;
+}
+
+/**
+ * Get dashboard KPI metrics directly from Supabase
  */
 export async function getDashboardMetrics(): Promise<DashboardMetrics> {
   try {
-    const summary = await getDashboardSummary();
+    const accountId = await getCurrentAccountId();
+    if (!accountId) {
+      console.warn('[Dashboard API] No account ID found');
+      return {
+        total_units: 0,
+        occupied_units: 0,
+        occupancy_rate: 0,
+        occupancy_change: 0,
+        active_tenants: 0,
+        tenant_change: 0,
+        monthly_revenue: 0,
+        revenue_change: 0,
+      };
+    }
+
+    // Get properties and units
+    const { data: properties } = await supabase
+      .from('properties')
+      .select('id, total_units, occupied_units')
+      .eq('account_id', accountId);
+
+    const total_units = properties?.reduce((sum, p) => sum + (p.total_units || 0), 0) || 0;
+    const occupied_units = properties?.reduce((sum, p) => sum + (p.occupied_units || 0), 0) || 0;
+    const occupancy_rate = total_units > 0 ? Math.round((occupied_units / total_units) * 100) : 0;
+
+    // Get active tenants count
+    const { count: active_tenants } = await supabase
+      .from('tenant_profiles')
+      .select('*', { count: 'exact', head: true })
+      .eq('account_id', accountId);
+
+    // Get monthly revenue
+    const now = new Date();
+    const currentMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    const previousMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const previousMonthEnd = new Date(now.getFullYear(), now.getMonth(), 0);
+
+    const { data: currentMonthPayments } = await supabase
+      .from('payments')
+      .select('amount')
+      .eq('account_id', accountId)
+      .eq('status', 'paid')
+      .gte('paid_at', currentMonthStart.toISOString());
+
+    const { data: previousMonthPayments } = await supabase
+      .from('payments')
+      .select('amount')
+      .eq('account_id', accountId)
+      .eq('status', 'paid')
+      .gte('paid_at', previousMonthStart.toISOString())
+      .lt('paid_at', currentMonthStart.toISOString());
+
+    const monthly_revenue = currentMonthPayments?.reduce((sum, p) => sum + Number(p.amount), 0) || 0;
+    const previous_revenue = previousMonthPayments?.reduce((sum, p) => sum + Number(p.amount), 0) || 0;
+    const revenue_change = previous_revenue > 0 
+      ? Math.round(((monthly_revenue - previous_revenue) / previous_revenue) * 100) 
+      : 0;
 
     return {
-      total_units: summary.kpis.totalUnits,
-      occupied_units: summary.kpis.occupiedUnits,
-      occupancy_rate: summary.properties.occupancyRate,
+      total_units,
+      occupied_units,
+      occupancy_rate,
       occupancy_change: 0,
-      active_tenants: summary.kpis.activeTenants,
-      tenant_change: summary.tenants.moveIns - summary.tenants.moveOuts,
-      monthly_revenue: summary.kpis.monthlyRevenue,
-      revenue_change: summary.revenue.percentChange,
+      active_tenants: active_tenants || 0,
+      tenant_change: 0,
+      monthly_revenue,
+      revenue_change,
     };
   } catch (error) {
     console.error('[Dashboard API] Error fetching metrics:', error);

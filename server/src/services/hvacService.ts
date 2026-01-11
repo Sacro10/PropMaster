@@ -1,5 +1,13 @@
 import { supabaseAdmin as supabase } from '../supabase';
 
+function formatPropertyAddress(property: any) {
+  if (!property) return '';
+  const parts = [property.address1, property.address2].filter(Boolean);
+  const cityStateZip = [property.city, property.state, property.zip].filter(Boolean).join(' ');
+  if (cityStateZip) parts.push(cityStateZip);
+  return parts.join(', ');
+}
+
 export interface HVACEnrollment {
   id: string;
   unitId: string;
@@ -132,7 +140,7 @@ export async function getHVACEnrollments(
       *,
       unit:units!inner(
         unit_number,
-        property:properties!inner(name, address)
+        property:properties!inner(name, address1, address2, city, state, zip)
       )
     `,
       { count: 'exact' }
@@ -163,7 +171,7 @@ export async function getHVACEnrollments(
             unitNumber: e.unit.unit_number,
             property: {
               name: e.unit.property.name,
-              address: e.unit.property.address,
+              address: formatPropertyAddress(e.unit.property),
             },
           }
         : undefined,
@@ -231,7 +239,7 @@ export async function createHVACEnrollment(
       *,
       unit:units!inner(
         unit_number,
-        property:properties!inner(name, address)
+        property:properties!inner(name, address1, address2, city, state, zip)
       )
     `
     )
@@ -252,7 +260,7 @@ export async function createHVACEnrollment(
           unitNumber: enrollment.unit.unit_number,
           property: {
             name: enrollment.unit.property.name,
-            address: enrollment.unit.property.address,
+            address: formatPropertyAddress(enrollment.unit.property),
           },
         }
       : undefined,

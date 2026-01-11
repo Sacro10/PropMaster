@@ -2,6 +2,14 @@ import { supabaseAdmin as supabase } from '../supabase';
 import { logActivityEvent } from './activityService';
 import { AiDisabledError, generateStructuredJson, getAiStatus } from './aiClient';
 
+function formatPropertyAddress(property: any) {
+  if (!property) return '';
+  const parts = [property.address1, property.address2].filter(Boolean);
+  const cityStateZip = [property.city, property.state, property.zip].filter(Boolean).join(' ');
+  if (cityStateZip) parts.push(cityStateZip);
+  return parts.join(', ');
+}
+
 export interface RentalApplication {
   id: string;
   firstName: string;
@@ -80,7 +88,7 @@ export async function getApplications(
       `
       *,
       unit:units!inner(unit_number, rent_amount),
-      property:properties!inner(name, address),
+      property:properties!inner(name, address1, address2, city, state, zip),
       screening_results(*)
     `,
       { count: 'exact' }
@@ -121,7 +129,7 @@ export async function getApplications(
           }
         : undefined,
       property: app.property
-        ? { name: app.property.name, address: app.property.address }
+        ? { name: app.property.name, address: formatPropertyAddress(app.property) }
         : undefined,
       screeningResult:
         app.screening_results && app.screening_results.length > 0
@@ -163,7 +171,7 @@ export async function getApplicationById(
       `
       *,
       unit:units!inner(unit_number, rent_amount),
-      property:properties!inner(name, address),
+      property:properties!inner(name, address1, address2, city, state, zip),
       screening_results(*)
     `
     )
@@ -198,7 +206,7 @@ export async function getApplicationById(
         }
       : undefined,
     property: data.property
-      ? { name: data.property.name, address: data.property.address }
+      ? { name: data.property.name, address: formatPropertyAddress(data.property) }
       : undefined,
     screeningResult:
       data.screening_results && data.screening_results.length > 0
@@ -273,7 +281,7 @@ export async function createApplication(
       `
       *,
       unit:units!inner(unit_number, rent_amount),
-      property:properties!inner(name, address)
+      property:properties!inner(name, address1, address2, city, state, zip)
     `
     )
     .single();
@@ -313,7 +321,7 @@ export async function createApplication(
         }
       : undefined,
     property: data.property
-      ? { name: data.property.name, address: data.property.address }
+      ? { name: data.property.name, address: formatPropertyAddress(data.property) }
       : undefined,
   };
 }
@@ -440,7 +448,7 @@ export async function approveApplication(
       `
       *,
       unit:units!inner(unit_number, rent_amount),
-      property:properties!inner(name, address)
+      property:properties!inner(name, address1, address2, city, state, zip)
     `
     )
     .single();
@@ -496,7 +504,7 @@ export async function approveApplication(
         }
       : undefined,
     property: data.property
-      ? { name: data.property.name, address: data.property.address }
+      ? { name: data.property.name, address: formatPropertyAddress(data.property) }
       : undefined,
   };
 }
@@ -519,7 +527,7 @@ export async function rejectApplication(
       `
       *,
       unit:units!inner(unit_number, rent_amount),
-      property:properties!inner(name, address)
+      property:properties!inner(name, address1, address2, city, state, zip)
     `
     )
     .single();
@@ -560,7 +568,7 @@ export async function rejectApplication(
         }
       : undefined,
     property: data.property
-      ? { name: data.property.name, address: data.property.address }
+      ? { name: data.property.name, address: formatPropertyAddress(data.property) }
       : undefined,
   };
 }

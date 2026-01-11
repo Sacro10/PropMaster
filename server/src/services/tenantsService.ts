@@ -1,5 +1,13 @@
 import { supabaseAdmin as supabase } from '../supabase';
 
+function formatPropertyAddress(property: any) {
+  if (!property) return '';
+  const parts = [property.address1, property.address2].filter(Boolean);
+  const cityStateZip = [property.city, property.state, property.zip].filter(Boolean).join(' ');
+  if (cityStateZip) parts.push(cityStateZip);
+  return parts.join(', ');
+}
+
 export interface Tenant {
   id: string;
   userId: string | null;
@@ -65,7 +73,7 @@ export async function getTenants(
       *,
       unit:units!inner(
         unit_number,
-        property:properties!inner(name, address)
+        property:properties!inner(name, address1, address2, city, state, zip)
       )
     `,
       { count: 'exact' }
@@ -117,7 +125,7 @@ export async function getTenants(
             unitNumber: t.unit.unit_number,
             property: {
               name: t.unit.property.name,
-              address: t.unit.property.address,
+              address: formatPropertyAddress(t.unit.property),
             },
           }
         : undefined,
@@ -140,7 +148,7 @@ export async function getTenantById(
       *,
       unit:units!inner(
         unit_number,
-        property:properties!inner(name, address)
+        property:properties!inner(name, address1, address2, city, state, zip)
       )
     `
     )
@@ -169,13 +177,13 @@ export async function getTenantById(
     createdAt: data.created_at,
     unit: data.unit
       ? {
-          unitNumber: data.unit.unit_number,
-          property: {
-            name: data.unit.property.name,
-            address: data.unit.property.address,
-          },
-        }
-      : undefined,
+        unitNumber: data.unit.unit_number,
+        property: {
+          name: data.unit.property.name,
+          address: formatPropertyAddress(data.unit.property),
+        },
+      }
+    : undefined,
   };
 }
 
@@ -228,7 +236,7 @@ export async function createTenant(
       *,
       unit:units!inner(
         unit_number,
-        property:properties!inner(name, address)
+        property:properties!inner(name, address1, address2, city, state, zip)
       )
     `
     )
@@ -252,13 +260,13 @@ export async function createTenant(
     createdAt: data.created_at,
     unit: data.unit
       ? {
-          unitNumber: data.unit.unit_number,
-          property: {
-            name: data.unit.property.name,
-            address: data.unit.property.address,
-          },
-        }
-      : undefined,
+        unitNumber: data.unit.unit_number,
+        property: {
+          name: data.unit.property.name,
+          address: formatPropertyAddress(data.unit.property),
+        },
+      }
+    : undefined,
   };
 }
 
@@ -292,7 +300,7 @@ export async function updateTenant(
       *,
       unit:units!inner(
         unit_number,
-        property:properties!inner(name, address)
+        property:properties!inner(name, address1, address2, city, state, zip)
       )
     `
     )
@@ -316,12 +324,12 @@ export async function updateTenant(
     createdAt: data.created_at,
     unit: data.unit
       ? {
-          unitNumber: data.unit.unit_number,
-          property: {
-            name: data.unit.property.name,
-            address: data.unit.property.address,
-          },
-        }
-      : undefined,
+        unitNumber: data.unit.unit_number,
+        property: {
+          name: data.unit.property.name,
+          address: formatPropertyAddress(data.unit.property),
+        },
+      }
+    : undefined,
   };
 }

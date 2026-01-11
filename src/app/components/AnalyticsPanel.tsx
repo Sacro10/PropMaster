@@ -20,7 +20,7 @@ import {
 
 export function AnalyticsPanel() {
   const { isDark, text, border } = useThemeStyles();
-  const [timeframe, setTimeframe] = useState<TimeframeOption>('30d');
+  const [timeframe, setTimeframe] = useState<TimeframeOption>('7m');
 
   // Feature checks for plan gating
   const standardReporting = useHasFeature('standard_reporting');
@@ -59,7 +59,7 @@ export function AnalyticsPanel() {
   const kpis = [
     {
       label: 'Total Revenue',
-      value: formatCurrencyCompact(metrics.total_revenue * 1000),
+      value: formatCurrencyCompact(metrics.total_revenue),
       change: formatPercentageChange(metrics.revenue_change),
       trend: metrics.revenue_change >= 0 ? 'up' as const : 'down' as const,
     },
@@ -104,6 +104,7 @@ export function AnalyticsPanel() {
             style={{ fontFamily: 'Work Sans, sans-serif' }}
           >
             <option value="7d">Last 7 days</option>
+            <option value="7m">Last 7 months</option>
             <option value="30d">Last 30 days</option>
             <option value="90d">Last 90 days</option>
             <option value="1y">Last year</option>
@@ -491,7 +492,7 @@ export function AnalyticsPanel() {
                 </div>
                 <div className={`p-3 ${isDark ? 'bg-white/5' : 'bg-gray-100'} rounded-lg`}>
                   <p className="text-2xl font-bold text-emerald-400 mb-1" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
-                    {formatCurrencyCompact(metrics.total_revenue * 1000)}
+                    {formatCurrencyCompact(metrics.total_revenue)}
                   </p>
                   <p className={`text-xs ${text.inactive}`}>Period Revenue</p>
                 </div>

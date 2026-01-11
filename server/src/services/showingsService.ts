@@ -1,6 +1,22 @@
 import { supabaseAdmin as supabase } from '../supabase';
 import { logActivityEvent } from './activityService';
 
+function formatPropertyAddress(property: any) {
+  if (!property) return '';
+  const parts = [property.address1, property.address2].filter(Boolean);
+  const cityStateZip = [property.city, property.state, property.zip].filter(Boolean).join(' ');
+  if (cityStateZip) parts.push(cityStateZip);
+  return parts.join(', ');
+}
+
+function isMissingTable(error: any, tableName?: string) {
+  if (!error) return false;
+  const message = typeof error.message === 'string' ? error.message : '';
+  if (error.code === '42P01') return true;
+  if (!tableName) return message.includes('does not exist');
+  return message.includes(`"${tableName}"`) && message.includes('does not exist');
+}
+
 export interface Showing {
   id: string;
   unitId: string;
@@ -82,29 +98,64 @@ export async function getShowings(
     offset = 0,
   } = filters || {};
 
-  let query = supabase
-    .from('showings')
-    .select(
+  const applyFilters = (query: any) => {
+    if (status) {
+      const statusList = status
+        .split(',')
+        .map((value) => value.trim())
+        .filter(Boolean);
+      if (statusList.length > 1) {
+        query = query.in('status', statusList);
+      } else if (statusList.length === 1) {
+        query = query.eq('status', statusList[0]);
+      }
+    }
+    if (unitId) query = query.eq('unit_id', unitId);
+    if (propertyId) query = query.eq('property_id', propertyId);
+    if (startDate) query = query.gte('scheduled_at', startDate);
+    if (endDate) query = query.lte('scheduled_at', endDate);
+
+    query = query.order('scheduled_at', { ascending: false });
+    query = query.range(offset, offset + limit - 1);
+    return query;
+  };
+
+  let query = applyFilters(
+    supabase
+      .from('showings')
+      .select(
       `
-      *,
-      unit:units!inner(unit_number, rent_amount),
-      property:properties!inner(name, address),
-      showing_outcomes(*)
-    `,
-      { count: 'exact' }
-    )
-    .eq('account_id', accountId);
+        *,
+        unit:units!inner(unit_number, rent_amount),
+        property:properties!inner(name, address1, address2, city, state, zip),
+        showing_outcomes(*)
+      `,
+        { count: 'exact' }
+      )
+      .eq('account_id', accountId)
+  );
 
-  if (status) query = query.eq('status', status);
-  if (unitId) query = query.eq('unit_id', unitId);
-  if (propertyId) query = query.eq('property_id', propertyId);
-  if (startDate) query = query.gte('showing_date', startDate);
-  if (endDate) query = query.lte('showing_date', endDate);
+  let { data, error, count } = await query;
 
-  query = query.order('showing_date', { ascending: false });
-  query = query.range(offset, offset + limit - 1);
-
-  const { data, error, count } = await query;
+  if (error && isMissingTable(error, 'showing_outcomes')) {
+    const fallbackQuery = applyFilters(
+      supabase
+        .from('showings')
+        .select(
+          `
+          *,
+          unit:units!inner(unit_number, rent_amount),
+          property:properties!inner(name, address1, address2, city, state, zip)
+        `,
+          { count: 'exact' }
+        )
+        .eq('account_id', accountId)
+    );
+    const fallbackResult = await fallbackQuery;
+    data = fallbackResult.data;
+    error = fallbackResult.error;
+    count = fallbackResult.count;
+  }
 
   if (error) throw error;
 
@@ -138,7 +189,7 @@ export async function getShowings(
           }
         : undefined,
       property: s.property
-        ? { name: s.property.name, address: s.property.address }
+        ? { name: s.property.name, address: formatPropertyAddress(s.property) }
         : undefined,
       outcome:
         s.showing_outcomes && s.showing_outcomes.length > 0
@@ -232,7 +283,7 @@ export async function createShowing(
       `
       *,
       unit:units!inner(unit_number, rent_amount),
-      property:properties!inner(name, address)
+      property:properties!inner(name, address1, address2, city, state, zip)
     `
     )
     .single();
@@ -254,7 +305,7 @@ export async function createShowing(
     id: showing.id,
     unitId: showing.unit_id,
     propertyId: showing.property_id,
-    showingDate: showing.showing_date,
+    showingDate: showing.showing_date || showing.scheduled_at,
     scheduledDate: showing.scheduled_at,
     duration: showing.duration_minutes || showing.duration,
     status: showing.status,
@@ -276,7 +327,7 @@ export async function createShowing(
         }
       : undefined,
     property: showing.property
-      ? { name: showing.property.name, address: showing.property.address }
+      ? { name: showing.property.name, address: formatPropertyAddress(showing.property) }
       : undefined,
   };
 }
@@ -399,9 +450,9 @@ export async function getShowingStatistics(accountId: string) {
 
   const { data: showings, error } = await supabase
     .from('showings')
-    .select('id, status, created_at, showing_date, scheduled_at, application_submitted')
+    .select('id, status, created_at, scheduled_at, application_submitted')
     .eq('account_id', accountId)
-    .gte('showing_date', new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString());
+    .gte('scheduled_at', new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString());
 
   if (error || !showings) {
     return {
@@ -463,7 +514,7 @@ export async function regenerateAccessCode(
   // Verify showing belongs to account
   const { data: showing, error: showingError } = await supabase
     .from('showings')
-    .select('id, showing_type, showing_date, duration_minutes')
+    .select('id, showing_type, scheduled_at, duration_minutes')
     .eq('id', showingId)
     .eq('account_id', accountId)
     .single();
@@ -483,7 +534,7 @@ export async function regenerateAccessCode(
     : codeData;
 
   // Calculate expiration (trigger will also do this, but we return it)
-  const showingDate = new Date(showing.showing_date);
+  const showingDate = new Date(showing.showing_date || showing.scheduled_at);
   const durationMinutes = showing.duration_minutes || 30;
   const expiresAt = new Date(showingDate.getTime() + durationMinutes * 60 * 1000);
 
@@ -532,11 +583,11 @@ export async function sendShowingReminder(
       visitor_name,
       visitor_email,
       visitor_phone,
-      showing_date,
+      scheduled_at,
       access_code,
       showing_type,
       unit:units!inner(unit_number),
-      property:properties!inner(name, address)
+      property:properties!inner(name, address1, address2, city, state, zip)
     `)
     .eq('id', showingId)
     .eq('account_id', accountId)
@@ -550,6 +601,7 @@ export async function sendShowingReminder(
   // For now, just log the activity and update the reminder timestamp
 
   const reminderMessage = `Reminder sent to ${showing.visitor_name} (${showing.visitor_email})`;
+  const scheduledAt = showing.showing_date || showing.scheduled_at;
   
   // Update reminder_sent_at
   const { error: updateError } = await supabase
@@ -577,7 +629,7 @@ export async function sendShowingReminder(
       metadata: {
         visitor_name: showing.visitor_name,
         visitor_email: showing.visitor_email,
-        showing_date: showing.showing_date,
+        showing_date: scheduledAt,
         access_code: showing.access_code,
       },
     }
@@ -586,7 +638,7 @@ export async function sendShowingReminder(
   console.log('[Showings] Reminder stub:', {
     to: showing.visitor_email,
     phone: showing.visitor_phone,
-    showing_date: showing.showing_date,
+    showing_date: scheduledAt,
     access_code: showing.access_code,
     property: (showing as any).property?.name,
     unit: (showing as any).unit?.unit_number,

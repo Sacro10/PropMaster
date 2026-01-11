@@ -2,6 +2,14 @@ import { supabaseAdmin as supabase } from '../supabase';
 import { logActivityEvent } from './activityService';
 import { AiDisabledError, generateStructuredJson, getAiStatus } from './aiClient';
 
+function formatPropertyAddress(property: any) {
+  if (!property) return '';
+  const parts = [property.address1, property.address2].filter(Boolean);
+  const cityStateZip = [property.city, property.state, property.zip].filter(Boolean).join(' ');
+  if (cityStateZip) parts.push(cityStateZip);
+  return parts.join(', ');
+}
+
 export interface MaintenanceRequest {
   id: string;
   title: string;
@@ -84,7 +92,7 @@ export async function getMaintenanceRequests(
     .select(
       `
       *,
-      property:properties!inner(name, address),
+      property:properties!inner(name, address1, address2, city, state, zip),
       unit:units!inner(unit_number)
     `,
       { count: 'exact' }
@@ -119,7 +127,7 @@ export async function getMaintenanceRequests(
       createdAt: r.created_at,
       updatedAt: r.updated_at,
       property: r.property
-        ? { name: r.property.name, address: r.property.address }
+        ? { name: r.property.name, address: formatPropertyAddress(r.property) }
         : undefined,
       unit: r.unit ? { unitNumber: r.unit.unit_number } : undefined,
     })) || [];
@@ -173,7 +181,7 @@ export async function createMaintenanceRequest(
     .select(
       `
       *,
-      property:properties!inner(name, address),
+      property:properties!inner(name, address1, address2, city, state, zip),
       unit:units!inner(unit_number)
     `
     )
@@ -254,7 +262,7 @@ export async function createMaintenanceRequest(
     createdAt: request.created_at,
     updatedAt: request.updated_at,
     property: request.property
-      ? { name: request.property.name, address: request.property.address }
+      ? { name: request.property.name, address: formatPropertyAddress(request.property) }
       : undefined,
     unit: request.unit ? { unitNumber: request.unit.unit_number } : undefined,
   };
@@ -282,7 +290,7 @@ export async function updateMaintenanceRequest(
     .select(
       `
       *,
-      property:properties!inner(name, address),
+      property:properties!inner(name, address1, address2, city, state, zip),
       unit:units!inner(unit_number)
     `
     )
@@ -321,7 +329,7 @@ export async function updateMaintenanceRequest(
     createdAt: data.created_at,
     updatedAt: data.updated_at,
     property: data.property
-      ? { name: data.property.name, address: data.property.address }
+      ? { name: data.property.name, address: formatPropertyAddress(data.property) }
       : undefined,
     unit: data.unit ? { unitNumber: data.unit.unit_number } : undefined,
   };

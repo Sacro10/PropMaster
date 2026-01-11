@@ -15,7 +15,7 @@ router.use(rateLimiters.analytics);
 router.use(authenticate);
 
 interface TimeframeQuery {
-  range: '7d' | '30d' | '90d' | '1y' | 'all';
+  range: '7d' | '7m' | '30d' | '90d' | '1y' | 'all';
 }
 
 interface MetricQuery extends TimeframeQuery {
@@ -32,6 +32,10 @@ function getDateRange(timeframe: string): { start: Date; end: Date } {
   switch (timeframe) {
     case '7d':
       start.setDate(start.getDate() - 7);
+      break;
+    case '7m':
+      start.setMonth(start.getMonth() - 6);
+      start.setDate(1);
       break;
     case '30d':
       start.setDate(start.getDate() - 30);
@@ -297,22 +301,57 @@ router.get('/timeseries', async (req: AnalyticsRequest, res: Response) => {
       const timeSeriesData = data?.map((item: any) => ({
         month: item.month,
         value: Number(item.revenue),
-        label: new Date(item.month).toLocaleDateString('en-US', { month: 'short', year: 'numeric' })
+        label: new Date(item.month).toLocaleDateString('en-US', { month: 'short' })
       })) || [];
 
       res.json(timeSeriesData);
 
     } else if (metric === 'occupancy') {
-      // For occupancy, we'll generate monthly snapshots
-      // This is simplified - in a real system you'd track historical occupancy
+      const { data: units, error: unitsError } = await supabase
+        .from('units')
+        .select('id')
+        .eq('account_id', accountId);
+
+      if (unitsError) {
+        throw unitsError;
+      }
+
+      const totalUnits = units?.length || 0;
+      const { data: leases, error: leasesError } = await supabase
+        .from('leases')
+        .select('unit_id, lease_start, lease_end')
+        .eq('account_id', accountId)
+        .lte('lease_start', end.toISOString())
+        .gte('lease_end', start.toISOString());
+
+      if (leasesError) {
+        throw leasesError;
+      }
+
       const months = [];
-      const current = new Date(start);
-      
-      while (current <= end) {
+      const current = new Date(start.getFullYear(), start.getMonth(), 1);
+      const endMonth = new Date(end.getFullYear(), end.getMonth(), 1);
+
+      while (current <= endMonth) {
+        const monthStart = new Date(current.getFullYear(), current.getMonth(), 1);
+        const monthEnd = new Date(current.getFullYear(), current.getMonth() + 1, 0, 23, 59, 59, 999);
+
+        const occupiedUnitIds = new Set(
+          (leases || [])
+            .filter((lease: any) => {
+              const leaseStart = new Date(lease.lease_start);
+              const leaseEnd = new Date(lease.lease_end);
+              return leaseStart <= monthEnd && leaseEnd >= monthStart;
+            })
+            .map((lease: any) => lease.unit_id)
+        );
+
+        const rate = totalUnits > 0 ? (occupiedUnitIds.size / totalUnits) * 100 : 0;
+
         months.push({
-          month: current.toISOString(),
-          value: Math.random() * 20 + 75, // Mock data - 75-95% occupancy
-          label: current.toLocaleDateString('en-US', { month: 'short', year: 'numeric' })
+          month: monthStart.toISOString(),
+          value: Number(rate.toFixed(1)),
+          label: monthStart.toLocaleDateString('en-US', { month: 'short' })
         });
         current.setMonth(current.getMonth() + 1);
       }

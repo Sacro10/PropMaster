@@ -1,5 +1,13 @@
 import { supabaseAdmin as supabase } from '../supabase';
 
+function isMissingTable(error: any, tableName?: string) {
+  if (!error) return false;
+  const message = typeof error.message === 'string' ? error.message : '';
+  if (error.code === '42P01') return true;
+  if (!tableName) return message.includes('does not exist');
+  return message.includes(`"${tableName}"`) && message.includes('does not exist');
+}
+
 export interface DashboardSummary {
   kpis: {
     totalUnits: number;
@@ -65,17 +73,27 @@ export async function getDashboardSummary(
   // Properties summary
   const { data: properties, error: propertiesError } = await supabase
     .from('properties')
-    .select('id, total_units, occupied_units, status')
+    .select('*')
     .eq('account_id', accountId);
 
   if (propertiesError) throw propertiesError;
 
   const totalProperties = properties?.length || 0;
   const activeProperties =
-    properties?.filter((p) => p.status === 'active').length || 0;
-  const totalUnits = properties?.reduce((sum, p) => sum + p.total_units, 0) || 0;
+    properties?.filter((p) =>
+      typeof p.status === 'string' ? p.status === 'active' : true
+    ).length || 0;
+
+  const { data: units, error: unitsError } = await supabase
+    .from('units')
+    .select('id, status')
+    .eq('account_id', accountId);
+
+  if (unitsError) throw unitsError;
+
+  const totalUnits = units?.length || 0;
   const occupiedUnits =
-    properties?.reduce((sum, p) => sum + p.occupied_units, 0) || 0;
+    units?.filter((unit) => unit.status === 'occupied').length || 0;
   const occupancyRate = totalUnits > 0 ? (occupiedUnits / totalUnits) * 100 : 0;
 
   // Revenue summary
@@ -150,75 +168,80 @@ export async function getDashboardSummary(
     avgResolutionTime = totalHours / completedRequests.length;
   }
 
-  // Tenants summary
-  const { data: tenants } = await supabase
-    .from('tenants')
-    .select('id, status, lease_start, lease_end')
-    .eq('account_id', accountId)
-    .eq('status', 'active');
+  // Tenants summary (based on leases + tenant profiles)
+  const { data: leases, error: leasesError } = await supabase
+    .from('leases')
+    .select('id, lease_start, lease_end, status, move_out_date')
+    .eq('account_id', accountId);
 
-  const totalTenants = tenants?.length || 0;
+  if (leasesError) throw leasesError;
+
+  const activeLeases =
+    leases?.filter((lease) =>
+      typeof lease.status === 'string' ? lease.status === 'active' : true
+    ) || [];
+
+  const totalTenants = activeLeases.length;
 
   const moveIns =
-    tenants?.filter((t) => {
-      const leaseStart = new Date(t.lease_start);
-      return (
-        leaseStart >= currentMonthStart &&
-        leaseStart <= now
-      );
+    leases?.filter((lease) => {
+      const leaseStart = new Date(lease.lease_start);
+      return leaseStart >= currentMonthStart && leaseStart <= now;
     }).length || 0;
 
-  const { data: recentMoveOuts } = await supabase
-    .from('tenants')
-    .select('id')
-    .eq('account_id', accountId)
-    .eq('status', 'moved_out')
-    .gte('updated_at', currentMonthStart.toISOString());
-
-  const moveOuts = recentMoveOuts?.length || 0;
+  const moveOuts =
+    leases?.filter((lease) => {
+      if (!lease.move_out_date) return false;
+      const moveOutDate = new Date(lease.move_out_date);
+      return moveOutDate >= currentMonthStart && moveOutDate <= now;
+    }).length || 0;
 
   const sixtyDaysFromNow = new Date(now);
   sixtyDaysFromNow.setDate(sixtyDaysFromNow.getDate() + 60);
 
   const leasesExpiring =
-    tenants?.filter((t) => {
-      const leaseEnd = new Date(t.lease_end);
+    activeLeases.filter((lease) => {
+      const leaseEnd = new Date(lease.lease_end);
       return leaseEnd >= now && leaseEnd <= sixtyDaysFromNow;
     }).length || 0;
 
   // Recent activity
-  const { data: recentActivity } = await supabase
+  const { data: recentActivity, error: recentActivityError } = await supabase
     .from('activity_events')
     .select('id, event_type, summary, created_at')
     .eq('account_id', accountId)
     .order('created_at', { ascending: false })
     .limit(10);
 
-  // System Status - Average Lease Time
-  const { data: allLeases } = await supabase
-    .from('tenants')
-    .select('lease_start, lease_end')
-    .eq('account_id', accountId);
+  if (recentActivityError && !isMissingTable(recentActivityError, 'activity_events')) {
+    throw recentActivityError;
+  }
 
+  // System Status - Average Lease Time
   let avgLeaseTime = 0;
-  if (allLeases && allLeases.length > 0) {
-    const totalDays = allLeases.reduce((sum, lease) => {
+  if (leases && leases.length > 0) {
+    const totalDays = leases.reduce((sum, lease) => {
       const start = new Date(lease.lease_start).getTime();
       const end = new Date(lease.lease_end).getTime();
+      if (Number.isNaN(start) || Number.isNaN(end)) return sum;
       return sum + (end - start) / (1000 * 60 * 60 * 24); // Convert to days
     }, 0);
-    avgLeaseTime = Math.round(totalDays / allLeases.length);
+    avgLeaseTime = Math.round(totalDays / leases.length);
   }
 
   // Eviction Rate (use tenant status = 'evicted' or activity_events with eviction)
-  const { data: evictedTenants } = await supabase
+  const { data: evictedTenants, error: evictedTenantsError } = await supabase
     .from('activity_events')
     .select('id')
     .eq('account_id', accountId)
     .eq('event_type', 'lease_terminated')
     .ilike('summary', '%evict%');
 
-  const totalLeases = allLeases?.length || 0;
+  if (evictedTenantsError && !isMissingTable(evictedTenantsError, 'activity_events')) {
+    throw evictedTenantsError;
+  }
+
+  const totalLeases = leases?.length || 0;
   const evictionCount = evictedTenants?.length || 0;
   const evictionRate = totalLeases > 0 ? (evictionCount / totalLeases) * 100 : 0;
 
@@ -227,10 +250,10 @@ export async function getDashboardSummary(
   const lastMonthEnd = new Date(now.getFullYear(), now.getMonth(), 0);
 
   const { count: lastMonthOccupiedCount } = await supabase
-    .from('tenants')
+    .from('leases')
     .select('*', { count: 'exact', head: true })
     .eq('account_id', accountId)
-    .eq('status', 'active')
+    .in('status', ['active', 'pending'])
     .lte('lease_start', lastMonthEnd.toISOString().split('T')[0])
     .gte('lease_end', lastMonthStart.toISOString().split('T')[0]);
 
@@ -259,8 +282,8 @@ export async function getDashboardSummary(
   ninetyDaysFromNow.setDate(ninetyDaysFromNow.getDate() + 90);
 
   const { data: expiringLeases } = await supabase
-    .from('tenants')
-    .select('id, first_name, last_name, lease_end, unit_id')
+    .from('leases')
+    .select('id, lease_end, unit_id, tenant_user_id')
     .eq('account_id', accountId)
     .eq('status', 'active')
     .gte('lease_end', now.toISOString().split('T')[0])
@@ -275,11 +298,11 @@ export async function getDashboardSummary(
     upcomingTasks.push({
       id: `lease-${lease.id}`,
       type: 'lease_renewal' as const,
-      title: `Renew lease for ${lease.first_name} ${lease.last_name}`,
+      title: `Renew lease`,
       dueDate: lease.lease_end,
       priority: daysUntilExpiry < 30 ? 'high' : daysUntilExpiry < 60 ? 'medium' : 'low',
       relatedEntityId: lease.id,
-      relatedEntityType: 'tenant',
+      relatedEntityType: 'lease',
     });
   });
 
@@ -311,15 +334,19 @@ export async function getDashboardSummary(
   const thirtyDaysFromNow = new Date(now);
   thirtyDaysFromNow.setDate(thirtyDaysFromNow.getDate() + 30);
 
-  const { data: hvacDeliveries } = await supabase
-    .from('hvac_program_enrollments')
-    .select('id, unit_id, next_delivery_date')
+  const { data: hvacDeliveries, error: hvacError } = await supabase
+    .from('hvac_filter_subscriptions')
+    .select('id, unit_id, next_delivery_date, status')
     .eq('account_id', accountId)
     .eq('status', 'active')
     .gte('next_delivery_date', now.toISOString().split('T')[0])
     .lte('next_delivery_date', thirtyDaysFromNow.toISOString().split('T')[0])
     .order('next_delivery_date', { ascending: true })
     .limit(5);
+
+  if (hvacError && !isMissingTable(hvacError, 'hvac_filter_subscriptions')) {
+    throw hvacError;
+  }
 
   hvacDeliveries?.forEach((delivery) => {
     upcomingTasks.push({
@@ -329,12 +356,12 @@ export async function getDashboardSummary(
       dueDate: delivery.next_delivery_date,
       priority: 'low' as const,
       relatedEntityId: delivery.id,
-      relatedEntityType: 'hvac_enrollment',
+      relatedEntityType: 'hvac_subscription',
     });
   });
 
   // 4. Active Reminder Schedules (next run)
-  const { data: reminders } = await supabase
+  const { data: reminders, error: remindersError } = await supabase
     .from('reminder_schedules')
     .select('id, name, next_run_at')
     .eq('account_id', accountId)
@@ -342,6 +369,10 @@ export async function getDashboardSummary(
     .gte('next_run_at', now.toISOString())
     .order('next_run_at', { ascending: true })
     .limit(3);
+
+  if (remindersError && !isMissingTable(remindersError, 'reminder_schedules')) {
+    throw remindersError;
+  }
 
   reminders?.forEach((reminder) => {
     upcomingTasks.push({
@@ -400,12 +431,14 @@ export async function getDashboardSummary(
       occupancyTrend,
     },
     recentActivity:
-      recentActivity?.map((activity) => ({
-        id: activity.id,
-        type: activity.event_type,
-        summary: activity.summary,
-        timestamp: activity.created_at,
-      })) || [],
+      !recentActivityError || isMissingTable(recentActivityError, 'activity_events')
+        ? recentActivity?.map((activity) => ({
+            id: activity.id,
+            type: activity.event_type,
+            summary: activity.summary,
+            timestamp: activity.created_at,
+          })) || []
+        : [],
     upcomingTasks: limitedTasks,
   };
 }

@@ -22,7 +22,7 @@ import type {
   AnalyticsInsight,
 } from '../api/types';
 
-export type TimeframeOption = '7d' | '30d' | '90d' | '1y' | 'all';
+export type TimeframeOption = '7d' | '7m' | '30d' | '90d' | '1y' | 'all';
 
 export function useAnalyticsMetrics(timeframe: TimeframeOption = '30d') {
   const [data, setData] = useState<AnalyticsMetrics | null>(null);

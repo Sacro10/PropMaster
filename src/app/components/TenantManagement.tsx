@@ -110,19 +110,6 @@ export function TenantManagement() {
     }
   };
 
-  // Show loading state
-  if (tenantsLoading || appsLoading) {
-    return <LoadingPage />;
-  }
-
-  // Show error state
-  if (tenantsError || appsError) {
-    return <ErrorState error={tenantsError || appsError} retry={() => {
-      refetchTenants();
-      refetchApps();
-    }} />;
-  }
-
   // Calculate metrics from actual data with AI-powered insights
   const calculatedMetrics = useMemo(() => {
     if (!metrics) return null;
@@ -230,6 +217,19 @@ export function TenantManagement() {
       tooltip: 'AI-powered screening available round-the-clock'
     },
   ] : [];
+
+  // Show loading state
+  if (tenantsLoading || appsLoading) {
+    return <LoadingPage />;
+  }
+
+  // Show error state
+  if (tenantsError || appsError) {
+    return <ErrorState error={tenantsError || appsError} retry={() => {
+      refetchTenants();
+      refetchApps();
+    }} />;
+  }
 
   return (
     <div className="space-y-6">

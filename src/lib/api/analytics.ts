@@ -17,7 +17,7 @@ import type {
 // API base URL
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3001';
 
-export type TimeframeOption = '7d' | '30d' | '90d' | '1y' | 'all';
+export type TimeframeOption = '7d' | '7m' | '30d' | '90d' | '1y' | 'all';
 
 /**
  * Get analytics KPI metrics
@@ -129,7 +129,7 @@ export async function getRevenueTrend(timeframe: TimeframeOption = '30d'): Promi
 
     const data = await response.json();
     return (data || []).map((item: any) => ({
-      month: item.month || item.label || item.date || '',
+      month: item.label || item.month || item.date || '',
       revenue: Number(item.revenue ?? item.value ?? 0),
     }));
   } catch (error) {
@@ -166,7 +166,7 @@ export async function getOccupancyTrend(timeframe: TimeframeOption = '30d'): Pro
 
     const data = await response.json();
     return (data || []).map((item: any) => ({
-      month: item.month || item.label || item.date || '',
+      month: item.label || item.month || item.date || '',
       rate: Number(item.rate ?? item.value ?? 0),
     }));
   } catch (error) {
