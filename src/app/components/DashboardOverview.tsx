@@ -1,4 +1,4 @@
-import { TrendingUp, TrendingDown, Users, Wrench, DollarSign, CircleCheck, Activity, Bell, ListFilter, RefreshCw, FileText, Building2, Plus } from 'lucide-react';
+import { TrendingUp, TrendingDown, Users, Wrench, DollarSign, CircleCheck, Activity, Bell, ListFilter, RefreshCw, FileText, Building2 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useThemeStyles } from '../hooks/useThemeStyles';
 import { useDashboardData } from '../../lib/hooks/useDashboardData';
@@ -8,8 +8,8 @@ import { formatCurrencyCompact, formatPercentageChange, formatNumber } from '../
 import { formatRelativeTime } from '../../lib/utils/dateHelpers';
 import { AddPropertyModal } from './AddPropertyModal';
 import { useState, useEffect } from 'react';
-import { supabase } from '@/lib/supabaseClient';
-import { getCurrentAccountId } from '@/lib/api/client';
+import { supabase } from '../../lib/supabaseClient';
+import { getCurrentAccountId } from '../../lib/api/client';
 
 export function DashboardOverview() {
   const { isDark, text, border } = useThemeStyles();
@@ -26,7 +26,7 @@ export function DashboardOverview() {
       const accountId = await getCurrentAccountId();
       if (!accountId) return;
 
-      const { data, error } = await supabase
+      const { data, error } = await (supabase as any)
         .from('properties')
         .select(`
           id,
