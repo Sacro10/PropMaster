@@ -200,14 +200,20 @@ export function TenantManagement() {
     },
     {
       label: 'Eviction Rate',
-      value: calculatedMetrics.evictionRate >= 0 
-        ? calculatedMetrics.evictionRate < 1 
-          ? '<1%' 
+      value: Number.isFinite(calculatedMetrics.evictionRate)
+        ? calculatedMetrics.evictionRate < 1
+          ? '<1%'
           : `${Math.round(calculatedMetrics.evictionRate * 10) / 10}%`
-        : 'N/A',
+        : '0%',
       change: '0%',
-      color: calculatedMetrics.evictionRate < 3 ? 'text-emerald-400' : calculatedMetrics.evictionRate < 5 ? 'text-yellow-400' : 'text-red-400',
-      tooltip: calculatedMetrics.evictionRate >= 0 ? 'Percentage of tenants who were evicted' : 'No data yet'
+      color: Number.isFinite(calculatedMetrics.evictionRate)
+        ? calculatedMetrics.evictionRate < 3
+          ? 'text-emerald-400'
+          : calculatedMetrics.evictionRate < 5
+            ? 'text-yellow-400'
+            : 'text-red-400'
+        : 'text-emerald-400',
+      tooltip: 'Percentage of tenants who were evicted'
     },
     {
       label: 'Automated Processing',
@@ -584,7 +590,11 @@ export function TenantManagement() {
                   </div>
                   <div className={`p-3 ${isDark ? 'bg-white/5' : 'bg-gray-50'} rounded-lg`}>
                     <p className="text-2xl font-bold text-emerald-400 mb-1" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
-                      {metrics.eviction_rate < 1 ? '<1%' : `${metrics.eviction_rate}%`}
+                      {Number.isFinite(metrics.eviction_rate)
+                        ? metrics.eviction_rate < 1
+                          ? '<1%'
+                          : `${metrics.eviction_rate}%`
+                        : '0%'}
                     </p>
                     <p className={`text-xs ${text.muted}`}>Eviction Rate</p>
                   </div>

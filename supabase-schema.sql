@@ -66,6 +66,36 @@ CREATE TABLE properties (
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+CREATE TABLE owner_entities (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  account_id UUID NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  email TEXT,
+  phone TEXT,
+  entity_type TEXT DEFAULT 'individual' CHECK (entity_type IN ('individual', 'llc', 'trust', 'corporation')),
+  disbursement_method TEXT DEFAULT 'manual' CHECK (disbursement_method IN ('ach', 'wire', 'check', 'manual')),
+  disbursement_schedule TEXT DEFAULT 'monthly' CHECK (disbursement_schedule IN ('weekly', 'monthly', 'quarterly', 'annual', 'on_demand')),
+  disbursement_day INTEGER DEFAULT 1,
+  management_fee_percentage NUMERIC(5, 2) DEFAULT 0,
+  management_fee_flat NUMERIC(10, 2),
+  is_active BOOLEAN DEFAULT true,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE property_owners (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  account_id UUID NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+  property_id UUID NOT NULL REFERENCES properties(id) ON DELETE CASCADE,
+  owner_id UUID NOT NULL REFERENCES owner_entities(id) ON DELETE CASCADE,
+  ownership_percentage NUMERIC(5, 2) DEFAULT 100,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(property_id, owner_id)
+);
+
+CREATE INDEX idx_owner_entities_account ON owner_entities(account_id);
+CREATE INDEX idx_property_owners_account ON property_owners(account_id);
+
 CREATE TABLE units (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   account_id UUID NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
@@ -329,6 +359,8 @@ CREATE TABLE expenses (
 CREATE TABLE owner_disbursements (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   account_id UUID NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+  owner_id UUID REFERENCES owner_entities(id) ON DELETE SET NULL,
+  property_id UUID REFERENCES properties(id) ON DELETE SET NULL,
   amount NUMERIC(12, 2) NOT NULL,
   period_start DATE NOT NULL,
   period_end DATE NOT NULL,
@@ -716,6 +748,8 @@ ALTER TABLE maintenance_requests ENABLE ROW LEVEL SECURITY;
 ALTER TABLE maintenance_assignments ENABLE ROW LEVEL SECURITY;
 ALTER TABLE maintenance_updates ENABLE ROW LEVEL SECURITY;
 ALTER TABLE payments ENABLE ROW LEVEL SECURITY;
+ALTER TABLE owner_entities ENABLE ROW LEVEL SECURITY;
+ALTER TABLE property_owners ENABLE ROW LEVEL SECURITY;
 ALTER TABLE expense_categories ENABLE ROW LEVEL SECURITY;
 ALTER TABLE expenses ENABLE ROW LEVEL SECURITY;
 ALTER TABLE owner_disbursements ENABLE ROW LEVEL SECURITY;
@@ -849,6 +883,17 @@ CREATE POLICY payments_select ON payments FOR SELECT USING (
 CREATE POLICY payments_insert ON payments FOR INSERT WITH CHECK (is_account_member(account_id));
 CREATE POLICY payments_update ON payments FOR UPDATE USING (is_account_member(account_id));
 
+-- Owner entities + ownership links: Account members
+CREATE POLICY owner_entities_select ON owner_entities FOR SELECT USING (is_account_member(account_id));
+CREATE POLICY owner_entities_insert ON owner_entities FOR INSERT WITH CHECK (is_account_member(account_id));
+CREATE POLICY owner_entities_update ON owner_entities FOR UPDATE USING (is_account_member(account_id));
+CREATE POLICY owner_entities_delete ON owner_entities FOR DELETE USING (is_account_member(account_id));
+
+CREATE POLICY property_owners_select ON property_owners FOR SELECT USING (is_account_member(account_id));
+CREATE POLICY property_owners_insert ON property_owners FOR INSERT WITH CHECK (is_account_member(account_id));
+CREATE POLICY property_owners_update ON property_owners FOR UPDATE USING (is_account_member(account_id));
+CREATE POLICY property_owners_delete ON property_owners FOR DELETE USING (is_account_member(account_id));
+
 -- Expenses: Account members
 CREATE POLICY expense_categories_select ON expense_categories FOR SELECT USING (is_account_member(account_id));
 CREATE POLICY expense_categories_insert ON expense_categories FOR INSERT WITH CHECK (is_account_member(account_id));
@@ -938,6 +983,7 @@ CREATE TRIGGER update_leases_updated_at BEFORE UPDATE ON leases FOR EACH ROW EXE
 CREATE TRIGGER update_maintenance_requests_updated_at BEFORE UPDATE ON maintenance_requests FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 CREATE TRIGGER update_maintenance_assignments_updated_at BEFORE UPDATE ON maintenance_assignments FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 CREATE TRIGGER update_payments_updated_at BEFORE UPDATE ON payments FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+CREATE TRIGGER update_owner_entities_updated_at BEFORE UPDATE ON owner_entities FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 CREATE TRIGGER update_expense_categories_updated_at BEFORE UPDATE ON expense_categories FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 CREATE TRIGGER update_expenses_updated_at BEFORE UPDATE ON expenses FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 CREATE TRIGGER update_owner_disbursements_updated_at BEFORE UPDATE ON owner_disbursements FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();

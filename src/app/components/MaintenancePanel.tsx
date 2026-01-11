@@ -9,6 +9,7 @@ import { LoadingPage } from './LoadingSpinner';
 import { ErrorState } from './ErrorBoundary';
 import { formatRelativeTime, formatDisplayDate } from '../../lib/utils/dateHelpers';
 import { CreateMaintenanceRequestModal } from './CreateMaintenanceRequestModal';
+import { CreateVendorModal } from './CreateVendorModal';
 
 export function MaintenancePanel() {
   const { isDark, bg, text, border } = useThemeStyles();
@@ -16,6 +17,7 @@ export function MaintenancePanel() {
   const [availableVendors, setAvailableVendors] = useState<any[]>([]);
   const [generatingBatch, setGeneratingBatch] = useState(false);
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const [isVendorModalOpen, setIsVendorModalOpen] = useState(false);
   const [showAllRequests, setShowAllRequests] = useState(false);
   const { assign, isAssigning } = useAssignVendor();
 
@@ -105,7 +107,13 @@ export function MaintenancePanel() {
           >
             <RefreshCw className="w-4 h-4" />
           </button>
+          <buttonVendorModalOpen(true)}
+            className="px-6 py-3 bg-gradient-to-r from-[#ff6b35] to-[#f7931e] rounded-lg font-medium hover:scale-105 transition-transform"
+          >
+            + Add Vendor
+          </button>
           <button
+            onClick={() => setIs
             onClick={() => setIsCreateModalOpen(true)}
             className="px-6 py-3 bg-gradient-to-r from-[#ff6b35] to-[#f7931e] rounded-lg font-medium hover:scale-105 transition-transform"
           >
@@ -471,6 +479,16 @@ export function MaintenancePanel() {
         onClose={() => setIsCreateModalOpen(false)}
         onSuccess={() => {
           refetchRequests();
+        }}
+      />
+
+      {/* Create Vendor Modal */}
+      <CreateVendorModal
+        isOpen={isVendorModalOpen}
+        onClose={() => setIsVendorModalOpen(false)}
+        onSuccess={() => {
+          // Optionally refresh vendor list or show success message
+          console.log('Vendor created successfully');
         }}
       />
     </div>

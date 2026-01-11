@@ -18,6 +18,11 @@ export interface ApplicationFormData {
   monthlyIncome: number;
   currentEmployer: string;
   currentAddress: string;
+  creditScore: number | null;
+  backgroundCheckStatus: string;
+  incomeVerificationStatus: string;
+  evictionHistory: boolean | null;
+  criminalHistory: boolean | null;
 }
 
 export function NewApplicationForm({ onClose, onSubmit }: NewApplicationFormProps) {
@@ -36,6 +41,11 @@ export function NewApplicationForm({ onClose, onSubmit }: NewApplicationFormProp
     monthlyIncome: 0,
     currentEmployer: '',
     currentAddress: '',
+    creditScore: null,
+    backgroundCheckStatus: '',
+    incomeVerificationStatus: '',
+    evictionHistory: null,
+    criminalHistory: null,
   });
 
   // Load available units
@@ -98,7 +108,18 @@ export function NewApplicationForm({ onClose, onSubmit }: NewApplicationFormProp
     const { name, value } = e.target;
     setFormData(prev => ({
       ...prev,
-      [name]: name === 'monthlyIncome' ? parseFloat(value) || 0 : value,
+      [name]:
+        name === 'monthlyIncome'
+          ? parseFloat(value) || 0
+          : name === 'creditScore'
+            ? value === ''
+              ? null
+              : Math.round(parseFloat(value))
+            : name === 'evictionHistory' || name === 'criminalHistory'
+              ? value === ''
+                ? null
+                : value === 'yes'
+              : value,
     }));
   };
 
@@ -354,6 +375,113 @@ export function NewApplicationForm({ onClose, onSubmit }: NewApplicationFormProp
               className={`w-full px-4 py-3 ${isDark ? 'bg-white/5' : 'bg-gray-50'} border ${border.default} rounded-lg focus:outline-none focus:border-[#ff6b35]/50 resize-none`}
               style={{ fontFamily: 'Work Sans, sans-serif' }}
             />
+          </div>
+
+          {/* Screening Inputs */}
+          <div>
+            <h3 className="text-lg font-bold mb-4" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
+              SCREENING INPUTS (OPTIONAL)
+            </h3>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className={`block text-sm ${text.muted} mb-2`}>
+                  Credit Score
+                </label>
+                <input
+                  type="number"
+                  name="creditScore"
+                  value={formData.creditScore ?? ''}
+                  onChange={handleChange}
+                  min="300"
+                  max="850"
+                  step="1"
+                  className={`w-full px-4 py-3 ${isDark ? 'bg-white/5' : 'bg-gray-50'} border ${border.default} rounded-lg focus:outline-none focus:border-[#ff6b35]/50`}
+                  style={{ fontFamily: 'Work Sans, sans-serif' }}
+                />
+              </div>
+
+              <div>
+                <label className={`block text-sm ${text.muted} mb-2`}>
+                  Background Check Status
+                </label>
+                <select
+                  name="backgroundCheckStatus"
+                  value={formData.backgroundCheckStatus}
+                  onChange={handleChange}
+                  className={`w-full px-4 py-3 ${isDark ? 'bg-white/5' : 'bg-gray-50'} border ${border.default} rounded-lg focus:outline-none focus:border-[#ff6b35]/50`}
+                  style={{ fontFamily: 'Work Sans, sans-serif' }}
+                >
+                  <option value="">Unknown</option>
+                  <option value="clear">Clear</option>
+                  <option value="flagged">Flagged</option>
+                  <option value="pending">Pending</option>
+                </select>
+              </div>
+
+              <div>
+                <label className={`block text-sm ${text.muted} mb-2`}>
+                  Income Verification Status
+                </label>
+                <select
+                  name="incomeVerificationStatus"
+                  value={formData.incomeVerificationStatus}
+                  onChange={handleChange}
+                  className={`w-full px-4 py-3 ${isDark ? 'bg-white/5' : 'bg-gray-50'} border ${border.default} rounded-lg focus:outline-none focus:border-[#ff6b35]/50`}
+                  style={{ fontFamily: 'Work Sans, sans-serif' }}
+                >
+                  <option value="">Unknown</option>
+                  <option value="verified">Verified</option>
+                  <option value="failed">Failed</option>
+                  <option value="pending">Pending</option>
+                </select>
+              </div>
+
+              <div>
+                <label className={`block text-sm ${text.muted} mb-2`}>
+                  Eviction History
+                </label>
+                <select
+                  name="evictionHistory"
+                  value={
+                    formData.evictionHistory === null
+                      ? ''
+                      : formData.evictionHistory
+                        ? 'yes'
+                        : 'no'
+                  }
+                  onChange={handleChange}
+                  className={`w-full px-4 py-3 ${isDark ? 'bg-white/5' : 'bg-gray-50'} border ${border.default} rounded-lg focus:outline-none focus:border-[#ff6b35]/50`}
+                  style={{ fontFamily: 'Work Sans, sans-serif' }}
+                >
+                  <option value="">Unknown</option>
+                  <option value="no">No</option>
+                  <option value="yes">Yes</option>
+                </select>
+              </div>
+
+              <div>
+                <label className={`block text-sm ${text.muted} mb-2`}>
+                  Criminal History
+                </label>
+                <select
+                  name="criminalHistory"
+                  value={
+                    formData.criminalHistory === null
+                      ? ''
+                      : formData.criminalHistory
+                        ? 'yes'
+                        : 'no'
+                  }
+                  onChange={handleChange}
+                  className={`w-full px-4 py-3 ${isDark ? 'bg-white/5' : 'bg-gray-50'} border ${border.default} rounded-lg focus:outline-none focus:border-[#ff6b35]/50`}
+                  style={{ fontFamily: 'Work Sans, sans-serif' }}
+                >
+                  <option value="">Unknown</option>
+                  <option value="no">No</option>
+                  <option value="yes">Yes</option>
+                </select>
+              </div>
+            </div>
           </div>
 
           {/* Footer Actions */}

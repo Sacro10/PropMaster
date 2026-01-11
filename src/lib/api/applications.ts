@@ -16,6 +16,11 @@ export interface CreateApplicationData {
   monthlyIncome: number;
   currentEmployer: string;
   currentAddress: string;
+  creditScore?: number | null;
+  backgroundCheckStatus?: string;
+  incomeVerificationStatus?: string;
+  evictionHistory?: boolean | null;
+  criminalHistory?: boolean | null;
 }
 
 /**
@@ -27,6 +32,17 @@ export async function createApplication(data: CreateApplicationData) {
     if (!accountId) {
       throw new Error('No account ID found');
     }
+
+    const screeningInputs = {
+      creditScore: data.creditScore ?? null,
+      backgroundCheckStatus: data.backgroundCheckStatus || null,
+      incomeVerificationStatus: data.incomeVerificationStatus || null,
+      evictionHistory: data.evictionHistory ?? null,
+      criminalHistory: data.criminalHistory ?? null,
+    };
+    const hasScreeningInputs = Object.values(screeningInputs).some(
+      (value) => value !== null && value !== undefined && value !== ''
+    );
 
     // Get unit's property_id
     const { data: unit, error: unitError } = await supabase
@@ -53,6 +69,7 @@ export async function createApplication(data: CreateApplicationData) {
         monthly_income: data.monthlyIncome,
         current_employer: data.currentEmployer,
         current_address: data.currentAddress,
+        ...(hasScreeningInputs ? { application_data: screeningInputs } : {}),
         status: 'pending',
         applied_at: new Date().toISOString(),
       })

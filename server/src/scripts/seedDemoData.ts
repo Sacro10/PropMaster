@@ -105,7 +105,57 @@ async function seedDemoData(accountId: string) {
     if (propError) throw propError;
     console.log(`✅ Created ${createdProperties.length} properties\n`);
 
-    // 2. Create Units
+    // 2. Create Owner Entities + Property Ownership
+    console.log('🏢 Creating owner entities...');
+    const ownerEntities = [
+      {
+        account_id: accountId,
+        name: 'Harbor Capital',
+        email: 'owners@harborcapital.com',
+        entity_type: 'llc',
+        disbursement_method: 'ach',
+        disbursement_schedule: 'monthly',
+        disbursement_day: 1,
+        management_fee_percentage: 8,
+        is_active: true,
+      },
+      {
+        account_id: accountId,
+        name: 'Lakeside Holdings',
+        email: 'finance@lakesideholdings.com',
+        entity_type: 'corporation',
+        disbursement_method: 'check',
+        disbursement_schedule: 'monthly',
+        disbursement_day: 1,
+        management_fee_percentage: 10,
+        is_active: true,
+      },
+    ];
+
+    const { data: createdOwners, error: ownersError } = await supabase
+      .from('owner_entities')
+      .insert(ownerEntities)
+      .select();
+
+    if (ownersError) throw ownersError;
+    console.log(`✅ Created ${createdOwners.length} owner entities\n`);
+
+    console.log('🔗 Linking owners to properties...');
+    const propertyOwners = createdProperties.map((property, index) => ({
+      account_id: accountId,
+      property_id: property.id,
+      owner_id: createdOwners[index % createdOwners.length].id,
+      ownership_percentage: 100,
+    }));
+
+    const { error: propertyOwnersError } = await supabase
+      .from('property_owners')
+      .insert(propertyOwners);
+
+    if (propertyOwnersError) throw propertyOwnersError;
+    console.log(`✅ Linked ${propertyOwners.length} property ownership records\n`);
+
+    // 3. Create Units
     console.log('🏠 Creating units...');
     const units: any[] = [];
     const unitConfigs = [
@@ -774,17 +824,21 @@ async function seedDemoData(accountId: string) {
       const managementFee = totalRent * 0.08;
       const netAmount = totalRent - managementFee;
 
+      const owner = createdOwners[i % createdOwners.length];
+      const status = i < 2 ? 'pending' : 'completed';
+
       disbursements.push({
         account_id: accountId,
+        owner_id: owner.id,
         period_start: periodStart.toISOString().split('T')[0],
         period_end: periodEnd.toISOString().split('T')[0],
-        status: 'completed',
+        status,
         amount: netAmount,
         total_rent_collected: totalRent,
         total_expenses: 0,
         management_fee: managementFee,
         net_amount: netAmount,
-        disbursed_at: periodEnd.toISOString(),
+        disbursed_at: status === 'completed' ? periodEnd.toISOString() : null,
       });
     }
 

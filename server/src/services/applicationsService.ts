@@ -10,6 +10,61 @@ function formatPropertyAddress(property: any) {
   return parts.join(', ');
 }
 
+export interface ScreeningInputs {
+  creditScore?: number | null;
+  backgroundCheckStatus?: string | null;
+  incomeVerificationStatus?: string | null;
+  evictionHistory?: boolean | null;
+  criminalHistory?: boolean | null;
+}
+
+function normalizeScreeningInputs(raw: any): ScreeningInputs {
+  if (!raw || typeof raw !== 'object') return {};
+
+  const creditScore =
+    typeof raw.creditScore === 'number'
+      ? raw.creditScore
+      : typeof raw.credit_score === 'number'
+        ? raw.credit_score
+        : null;
+
+  const backgroundCheckStatus =
+    typeof raw.backgroundCheckStatus === 'string'
+      ? raw.backgroundCheckStatus
+      : typeof raw.background_check_status === 'string'
+        ? raw.background_check_status
+        : null;
+
+  const incomeVerificationStatus =
+    typeof raw.incomeVerificationStatus === 'string'
+      ? raw.incomeVerificationStatus
+      : typeof raw.income_verification_status === 'string'
+        ? raw.income_verification_status
+        : null;
+
+  const evictionHistory =
+    typeof raw.evictionHistory === 'boolean'
+      ? raw.evictionHistory
+      : typeof raw.eviction_history === 'boolean'
+        ? raw.eviction_history
+        : null;
+
+  const criminalHistory =
+    typeof raw.criminalHistory === 'boolean'
+      ? raw.criminalHistory
+      : typeof raw.criminal_history === 'boolean'
+        ? raw.criminal_history
+        : null;
+
+  return {
+    creditScore,
+    backgroundCheckStatus,
+    incomeVerificationStatus,
+    evictionHistory,
+    criminalHistory,
+  };
+}
+
 export interface RentalApplication {
   id: string;
   firstName: string;
@@ -23,6 +78,7 @@ export interface RentalApplication {
   monthlyIncome: number;
   currentEmployer: string;
   currentAddress: string;
+  screeningInputs?: ScreeningInputs;
   hasScreeningResult: boolean;
   createdAt: string;
   unit?: {
@@ -65,6 +121,11 @@ export interface CreateApplicationData {
   monthlyIncome: number;
   currentEmployer: string;
   currentAddress: string;
+  creditScore?: number | null;
+  backgroundCheckStatus?: string;
+  incomeVerificationStatus?: string;
+  evictionHistory?: boolean | null;
+  criminalHistory?: boolean | null;
 }
 
 /**
@@ -120,6 +181,7 @@ export async function getApplications(
       monthlyIncome: Number(app.monthly_income),
       currentEmployer: app.current_employer,
       currentAddress: app.current_address,
+      screeningInputs: normalizeScreeningInputs(app.application_data),
       hasScreeningResult: app.screening_results && app.screening_results.length > 0,
       createdAt: app.created_at,
       unit: app.unit
@@ -197,6 +259,7 @@ export async function getApplicationById(
     monthlyIncome: Number(data.monthly_income),
     currentEmployer: data.current_employer,
     currentAddress: data.current_address,
+    screeningInputs: normalizeScreeningInputs(data.application_data),
     hasScreeningResult: data.screening_results && data.screening_results.length > 0,
     createdAt: data.created_at,
     unit: data.unit
@@ -239,6 +302,17 @@ export async function createApplication(
   accountId: string,
   applicationData: CreateApplicationData
 ): Promise<RentalApplication> {
+  const screeningInputs = {
+    creditScore: applicationData.creditScore ?? null,
+    backgroundCheckStatus: applicationData.backgroundCheckStatus || null,
+    incomeVerificationStatus: applicationData.incomeVerificationStatus || null,
+    evictionHistory: applicationData.evictionHistory ?? null,
+    criminalHistory: applicationData.criminalHistory ?? null,
+  };
+  const hasScreeningInputs = Object.values(screeningInputs).some(
+    (value) => value !== null && value !== undefined && value !== ''
+  );
+
   // Verify unit belongs to account
   const { data: unit, error: unitError } = await supabase
     .from('units')
@@ -275,6 +349,7 @@ export async function createApplication(
       monthly_income: applicationData.monthlyIncome,
       current_employer: applicationData.currentEmployer,
       current_address: applicationData.currentAddress,
+      ...(hasScreeningInputs ? { application_data: screeningInputs } : {}),
       status: 'pending',
     })
     .select(
@@ -624,33 +699,68 @@ export async function runScreening(
 
   const rentAmount = unit?.rent_amount || 1000;
   const incomeToRentRatio = application.monthlyIncome / rentAmount;
+  const screeningInputs = application.screeningInputs || {};
+
+  const normalizeStatus = (value: unknown, allowed: string[]) => {
+    if (typeof value !== 'string') return null;
+    const normalized = value.toLowerCase();
+    return allowed.includes(normalized) ? normalized : null;
+  };
 
   const nameHash = (application.firstName + application.lastName)
     .split('')
     .reduce((acc, char) => acc + char.charCodeAt(0), 0);
   const baseCreditScore = 600 + (nameHash % 200); // 600-800
 
-  const creditScore = Math.min(
-    850,
-    Math.max(
-      300,
-      baseCreditScore + (incomeToRentRatio > 3 ? 50 : incomeToRentRatio > 2.5 ? 25 : 0)
-    )
-  );
+  const providedCreditScore =
+    typeof screeningInputs.creditScore === 'number' &&
+    Number.isFinite(screeningInputs.creditScore)
+      ? Math.min(850, Math.max(300, Math.round(screeningInputs.creditScore)))
+      : null;
 
-  const incomeVerified = incomeToRentRatio >= 2.5;
-  const incomeVerificationStatus = incomeVerified ? 'verified' : 'failed';
+  const creditScore =
+    providedCreditScore ??
+    Math.min(
+      850,
+      Math.max(
+        300,
+        baseCreditScore + (incomeToRentRatio > 3 ? 50 : incomeToRentRatio > 2.5 ? 25 : 0)
+      )
+    );
 
+  const normalizedIncomeStatus = normalizeStatus(screeningInputs.incomeVerificationStatus, [
+    'verified',
+    'failed',
+    'pending',
+  ]);
+  const incomeVerificationStatus =
+    normalizedIncomeStatus ?? (incomeToRentRatio >= 2.5 ? 'verified' : 'failed');
+  const incomeVerified = incomeVerificationStatus === 'verified';
+
+  const normalizedBackgroundStatus = normalizeStatus(screeningInputs.backgroundCheckStatus, [
+    'clear',
+    'flagged',
+    'pending',
+  ]);
   const hasGoodCredit = creditScore >= 650;
-  const backgroundCheckStatus = hasGoodCredit ? 'clear' : 'flagged';
+  const backgroundCheckStatus =
+    normalizedBackgroundStatus ?? (hasGoodCredit ? 'clear' : 'flagged');
 
-  const evictionHistory = creditScore < 600;
-  const criminalHistory = creditScore < 550;
+  const evictionHistory =
+    typeof screeningInputs.evictionHistory === 'boolean'
+      ? screeningInputs.evictionHistory
+      : creditScore < 600;
+  const criminalHistory =
+    typeof screeningInputs.criminalHistory === 'boolean'
+      ? screeningInputs.criminalHistory
+      : creditScore < 550;
 
   const deterministicRiskFactors: string[] = [];
   if (creditScore < 650) deterministicRiskFactors.push('low_credit_score');
   if (!incomeVerified) deterministicRiskFactors.push('insufficient_income');
   if (incomeToRentRatio < 2.5) deterministicRiskFactors.push('low_income_ratio');
+  if (backgroundCheckStatus === 'flagged') deterministicRiskFactors.push('background_check_flagged');
+  if (incomeVerificationStatus === 'failed') deterministicRiskFactors.push('income_not_verified');
   if (evictionHistory) deterministicRiskFactors.push('eviction_history');
   if (criminalHistory) deterministicRiskFactors.push('criminal_record');
   if (!application.currentEmployer) deterministicRiskFactors.push('no_employer_info');

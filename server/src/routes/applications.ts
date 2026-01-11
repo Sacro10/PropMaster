@@ -102,6 +102,11 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
       monthlyIncome: req.body.monthlyIncome,
       currentEmployer: req.body.currentEmployer,
       currentAddress: req.body.currentAddress,
+      creditScore: req.body.creditScore ?? null,
+      backgroundCheckStatus: req.body.backgroundCheckStatus,
+      incomeVerificationStatus: req.body.incomeVerificationStatus,
+      evictionHistory: req.body.evictionHistory ?? null,
+      criminalHistory: req.body.criminalHistory ?? null,
     };
 
     // Validate required fields
