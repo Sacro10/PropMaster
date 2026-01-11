@@ -297,7 +297,7 @@ export function MaintenancePanel() {
               onClick={() => setShowAllRequests(!showAllRequests)}
               className={`w-full mt-4 py-3 ${isDark ? 'bg-white/5 hover:bg-white/10' : 'bg-gray-100 hover:bg-gray-200'} rounded-lg text-sm font-medium transition-colors`}
             >
-              {showAllRequests ? 'Show Less' : `View All ${requests.length} Requests`}
+              {showAllRequests ? 'Show Less' : 'View All Requests'}
             </button>
           )}
         </div>
