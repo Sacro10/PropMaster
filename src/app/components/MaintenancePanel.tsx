@@ -107,13 +107,13 @@ export function MaintenancePanel() {
           >
             <RefreshCw className="w-4 h-4" />
           </button>
-          <buttonVendorModalOpen(true)}
+          <button
+            onClick={() => setIsVendorModalOpen(true)}
             className="px-6 py-3 bg-gradient-to-r from-[#ff6b35] to-[#f7931e] rounded-lg font-medium hover:scale-105 transition-transform"
           >
             + Add Vendor
           </button>
           <button
-            onClick={() => setIs
             onClick={() => setIsCreateModalOpen(true)}
             className="px-6 py-3 bg-gradient-to-r from-[#ff6b35] to-[#f7931e] rounded-lg font-medium hover:scale-105 transition-transform"
           >
