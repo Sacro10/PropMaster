@@ -202,13 +202,14 @@ export async function getPropertyPerformance(timeframe: TimeframeOption = '30d')
     }
 
     const data = await response.json();
-    return (data || []).map((item: any) => ({
+    const mapped = (data || []).map((item: any) => ({
       property_id: item.property_id || item.propertyId || item.id || '',
       name: item.name || item.propertyName || 'Unknown',
       revenue: Number(item.revenue ?? item.value ?? 0),
       occupancy: Number(item.occupancy ?? item.occupancy_rate ?? 0),
       units: Number(item.units ?? item.unit_count ?? 0),
     }));
+    return mapped;
   } catch (error) {
     console.error('[Analytics API] Failed to fetch property performance:', error);
     return [];
@@ -243,11 +244,12 @@ export async function getExpenseBreakdown(timeframe: TimeframeOption = '30d'): P
 
     const palette = ['#ff6b35', '#f7931e', '#10b981', '#06b6d4', '#8b5cf6', '#f59e0b', '#3b82f6', '#ef4444'];
     const data = await response.json();
-    return (data || []).map((item: any, index: number) => ({
+    const mapped = (data || []).map((item: any, index: number) => ({
       name: item.name || 'Other',
       value: Number(item.percentage ?? item.value ?? 0),
       color: item.color || palette[index % palette.length],
     }));
+    return mapped;
   } catch (error) {
     console.error('[Analytics API] Failed to fetch expense breakdown:', error);
     return [];

@@ -75,9 +75,17 @@ async function getUserAccountId(userId: string): Promise<string> {
 }
 
 const paymentStatusValues = ['paid', 'completed'];
+const dateOnlyFields = new Set(['payment_date', 'expense_date', 'due_date']);
 
-function getPaymentDateValue(dateField: string, date: Date) {
-  return dateField === 'payment_date' ? date.toISOString().split('T')[0] : date.toISOString();
+function getDateFilterValue(dateField: string, date: Date) {
+  return dateOnlyFields.has(dateField) || dateField.endsWith('_date')
+    ? date.toISOString().split('T')[0]
+    : date.toISOString();
+}
+
+function isMissingFieldError(error: any, field: string) {
+  const message = String(error?.message || '');
+  return message.includes(`column "${field}"`) || message.includes('does not exist');
 }
 
 async function fetchPaymentsInRange({
@@ -103,16 +111,15 @@ async function fetchPaymentsInRange({
       .select(select)
       .eq('account_id', accountId)
       .in('status', statusValues)
-      .gte(dateField, getPaymentDateValue(dateField, start))
-      .lte(dateField, getPaymentDateValue(dateField, end));
+      .gte(dateField, getDateFilterValue(dateField, start))
+      .lte(dateField, getDateFilterValue(dateField, end));
 
     if (!error) {
       return { data: data || [], dateField };
     }
 
     lastError = error;
-    const message = String(error.message || '');
-    if (message.includes(`column "${dateField}"`) || message.includes('does not exist')) {
+    if (isMissingFieldError(error, dateField)) {
       continue;
     }
 
@@ -120,6 +127,96 @@ async function fetchPaymentsInRange({
   }
 
   return { data: [], dateField: null, error: lastError };
+}
+
+async function fetchMaintenanceCostsInRange({
+  accountId,
+  start,
+  end,
+  dateFields = ['completed_at', 'updated_at', 'created_at'],
+}: {
+  accountId: string;
+  start: Date;
+  end: Date;
+  dateFields?: string[];
+}) {
+  let lastError: any = null;
+
+  for (const dateField of dateFields) {
+    const { data, error } = await supabase
+      .from('maintenance_requests')
+      .select('category, actual_cost, estimated_cost')
+      .eq('account_id', accountId)
+      .or('actual_cost.not.is.null,estimated_cost.not.is.null')
+      .gte(dateField, getDateFilterValue(dateField, start))
+      .lte(dateField, getDateFilterValue(dateField, end));
+
+    if (!error) {
+      return { data: data || [], dateField };
+    }
+
+    lastError = error;
+    if (isMissingFieldError(error, dateField)) {
+      continue;
+    }
+
+    return { data: [], dateField: null, error };
+  }
+
+  return { data: [], dateField: null, error: lastError };
+}
+
+async function fetchExpensesInRange({
+  accountId,
+  start,
+  end,
+  dateFields = ['expense_date', 'created_at'],
+}: {
+  accountId: string;
+  start: Date;
+  end: Date;
+  dateFields?: string[];
+}) {
+  let lastError: any = null;
+
+  for (const dateField of dateFields) {
+    const { data, error } = await supabase
+      .from('expenses')
+      .select('amount, expense_categories(name)')
+      .eq('account_id', accountId)
+      .gte(dateField, getDateFilterValue(dateField, start))
+      .lte(dateField, getDateFilterValue(dateField, end));
+
+    if (!error) {
+      return { data: data || [], dateField };
+    }
+
+    lastError = error;
+    if (isMissingFieldError(error, dateField)) {
+      continue;
+    }
+
+    return { data: [], dateField: null, error };
+  }
+
+  return { data: [], dateField: null, error: lastError };
+}
+
+async function fetchOccupiedUnitCount(accountId: string, date: Date) {
+  const dateIso = date.toISOString();
+  const { data, error } = await supabase
+    .from('leases')
+    .select('unit_id')
+    .eq('account_id', accountId)
+    .lte('lease_start', dateIso)
+    .or(`lease_end.is.null,lease_end.gte.${dateIso}`);
+
+  if (error) {
+    throw error;
+  }
+
+  const uniqueUnitIds = new Set((data || []).map((lease: any) => lease.unit_id));
+  return uniqueUnitIds.size;
 }
 
 function buildMonthlyRevenueSeries(payments: any[], dateField: string, start: Date, end: Date) {
@@ -169,6 +266,8 @@ async function buildSummaryMetrics(accountId: string, range: TimeframeQuery['ran
     comparisonPayments,
     unitsData,
     activeLeases,
+    currentOccupiedUnits,
+    comparisonOccupiedUnits,
     currentExpenses,
   ] = await Promise.all([
     fetchPaymentsInRange({
@@ -192,16 +291,16 @@ async function buildSummaryMetrics(accountId: string, range: TimeframeQuery['ran
       .select('rent')
       .eq('account_id', accountId)
       .eq('status', 'active'),
-    supabase
-      .from('maintenance_requests')
-      .select('actual_cost, estimated_cost')
-      .eq('account_id', accountId)
-      .eq('status', 'completed')
-      .gte('completed_at', start.toISOString())
-      .lte('completed_at', end.toISOString()),
+    fetchOccupiedUnitCount(accountId, end),
+    fetchOccupiedUnitCount(accountId, comparisonEnd),
+    fetchMaintenanceCostsInRange({
+      accountId,
+      start,
+      end,
+    }),
   ]);
 
-  if (currentPayments.error || comparisonPayments.error || unitsData.error || activeLeases.error) {
+  if (currentPayments.error || comparisonPayments.error || unitsData.error || activeLeases.error || currentExpenses.error) {
     throw new Error('Failed to fetch analytics data');
   }
 
@@ -214,8 +313,9 @@ async function buildSummaryMetrics(accountId: string, range: TimeframeQuery['ran
     comparisonRevenue > 0 ? ((currentRevenue - comparisonRevenue) / comparisonRevenue) * 100 : 0;
 
   const totalUnits = unitsData.data?.length || 0;
-  const occupiedUnits = unitsData.data?.filter((u: any) => u.status === 'occupied').length || 0;
-  const occupancyRate = totalUnits > 0 ? (occupiedUnits / totalUnits) * 100 : 0;
+  const occupancyRate = totalUnits > 0 ? (currentOccupiedUnits / totalUnits) * 100 : 0;
+  const comparisonOccupancyRate = totalUnits > 0 ? (comparisonOccupiedUnits / totalUnits) * 100 : 0;
+  const occupancyChange = occupancyRate - comparisonOccupancyRate;
 
   const avgRent =
     activeLeases.data?.length > 0
@@ -239,8 +339,8 @@ async function buildSummaryMetrics(accountId: string, range: TimeframeQuery['ran
       },
       occupancyRate: {
         value: occupancyRate,
-        change: 0,
-        trend: 'neutral',
+        change: occupancyChange,
+        trend: occupancyChange >= 0.5 ? 'up' : occupancyChange <= -0.5 ? 'down' : 'neutral',
       },
       avgRentPerUnit: {
         value: avgRent,
@@ -562,14 +662,8 @@ router.get('/expenses/breakdown', async (req: AnalyticsRequest, res: Response) =
 
     let categoryTotals: Record<string, number> = {};
 
-    const expenseResult = await supabase
-      .from('expenses')
-      .select('amount, expense_date, expense_categories(name)')
-      .eq('account_id', accountId)
-      .gte('expense_date', start.toISOString().split('T')[0])
-      .lte('expense_date', end.toISOString().split('T')[0]);
-
-    if (!expenseResult.error && expenseResult.data && expenseResult.data.length > 0) {
+    const expenseResult = await fetchExpensesInRange({ accountId, start, end });
+    if (!expenseResult.error && expenseResult.data.length > 0) {
       categoryTotals = expenseResult.data.reduce((acc: Record<string, number>, item: any) => {
         const category = item.expense_categories?.name || 'Other';
         acc[category] = (acc[category] || 0) + Number(item.amount || 0);
@@ -583,24 +677,18 @@ router.get('/expenses/breakdown', async (req: AnalyticsRequest, res: Response) =
         }
       }
 
-      const { data, error } = await supabase
-        .from('maintenance_requests')
-        .select('category, actual_cost, estimated_cost')
-        .eq('account_id', accountId)
-        .eq('status', 'completed')
-        .gte('completed_at', start.toISOString())
-        .lte('completed_at', end.toISOString());
+      const maintenanceResult = await fetchMaintenanceCostsInRange({ accountId, start, end });
 
-      if (error) {
-        throw error;
+      if (maintenanceResult.error) {
+        throw maintenanceResult.error;
       }
 
-      categoryTotals = data?.reduce((acc: Record<string, number>, item: any) => {
+      categoryTotals = maintenanceResult.data.reduce((acc: Record<string, number>, item: any) => {
         const category = item.category || 'Other';
         const value = item.actual_cost ?? item.estimated_cost ?? 0;
         acc[category] = (acc[category] || 0) + Number(value);
         return acc;
-      }, {}) || {};
+      }, {});
     }
 
     // Format for donut chart

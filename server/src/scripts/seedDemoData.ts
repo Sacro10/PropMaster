@@ -277,6 +277,7 @@ async function seedDemoData(accountId: string) {
     const statuses = ['submitted', 'reviewed', 'assigned', 'in_progress', 'completed'];
 
     const maintenanceRequests: any[] = [];
+    const unitPropertyMap = new Map(createdUnits.map((unit) => [unit.id, unit.property_id]));
 
     // Use leases if available, otherwise use occupied units directly
     const maintenanceUnits = createdLeases.length > 0 
@@ -289,9 +290,15 @@ async function seedDemoData(accountId: string) {
       const priority = randomItem(priorities);
       const status = randomItem(statuses);
       const createdAt = randomDate(new Date('2025-12-01'), new Date());
+      const estimatedCost = Number((50 + Math.random() * 450).toFixed(2));
+      const isCompleted = status === 'completed';
+      const completedAt = isCompleted
+        ? new Date(createdAt.getTime() + Math.floor(Math.random() * 7) * 24 * 60 * 60 * 1000)
+        : null;
 
       maintenanceRequests.push({
         account_id: accountId,
+        property_id: unitPropertyMap.get(unitData.unit_id) || null,
         unit_id: unitData.unit_id,
         created_by_user_id: unitData.user_id,
         title: `${category.charAt(0).toUpperCase() + category.slice(1)} issue in unit`,
@@ -302,15 +309,67 @@ async function seedDemoData(accountId: string) {
         entry_allowed: Math.random() > 0.5,
         requested_at: createdAt.toISOString(),
         created_at: createdAt.toISOString(),
+        estimated_cost: isCompleted ? null : estimatedCost,
+        actual_cost: isCompleted ? Number((estimatedCost * (0.8 + Math.random() * 0.6)).toFixed(2)) : null,
+        completed_at: completedAt ? completedAt.toISOString() : null,
       });
     }
 
-    const { error: maintenanceError } = await supabase
+    const { data: createdMaintenance, error: maintenanceError } = await supabase
       .from('maintenance_requests')
-      .insert(maintenanceRequests);
+      .insert(maintenanceRequests)
+      .select();
 
     if (maintenanceError) throw maintenanceError;
     console.log(`✅ Created ${maintenanceRequests.length} maintenance requests\n`);
+
+    // 6b. Create Expense Categories + Expenses for completed maintenance
+    console.log('🧾 Creating expense categories and expenses...');
+    const categoryNames = categories.map((name) => `${name.charAt(0).toUpperCase() + name.slice(1)}`);
+
+    const { data: expenseCategories, error: categoryError } = await supabase
+      .from('expense_categories')
+      .upsert(
+        categoryNames.map((name) => ({
+          account_id: accountId,
+          name,
+          description: 'Seeded for analytics breakdown',
+          tax_deductible: true,
+        })),
+        { onConflict: 'account_id,name' }
+      )
+      .select();
+
+    if (categoryError) throw categoryError;
+
+    const categoryMap = new Map(
+      (expenseCategories || []).map((category: any) => [category.name.toLowerCase(), category.id])
+    );
+
+    const expenses: any[] = (createdMaintenance || [])
+      .filter((request: any) => request.actual_cost || request.estimated_cost)
+      .map((request: any) => ({
+        account_id: accountId,
+        property_id: request.property_id || null,
+        unit_id: request.unit_id,
+        category_id: categoryMap.get(String(request.category || 'general').toLowerCase()) || null,
+        maintenance_request_id: request.id,
+        amount: Number(request.actual_cost ?? request.estimated_cost),
+        expense_date: request.completed_at
+          ? request.completed_at.split('T')[0]
+          : request.created_at.split('T')[0],
+        description: request.title,
+        payment_method: randomItem(['manual', 'check', 'ach']),
+      }));
+
+    if (expenses.length > 0) {
+      const { error: expenseError } = await supabase
+        .from('expenses')
+        .insert(expenses);
+
+      if (expenseError) throw expenseError;
+    }
+    console.log(`✅ Created ${expenses.length} expenses\n`);
 
     // 7. Create Showings
     console.log('🔑 Creating showings...');

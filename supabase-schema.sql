@@ -300,6 +300,32 @@ CREATE TABLE payments (
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+CREATE TABLE expense_categories (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  account_id UUID NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  description TEXT,
+  tax_deductible BOOLEAN DEFAULT true,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE expenses (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  account_id UUID NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+  property_id UUID REFERENCES properties(id) ON DELETE SET NULL,
+  unit_id UUID REFERENCES units(id) ON DELETE SET NULL,
+  category_id UUID REFERENCES expense_categories(id) ON DELETE SET NULL,
+  vendor_profile_id UUID REFERENCES vendor_profiles(id) ON DELETE SET NULL,
+  maintenance_request_id UUID REFERENCES maintenance_requests(id) ON DELETE SET NULL,
+  amount NUMERIC(10, 2) NOT NULL,
+  expense_date DATE NOT NULL,
+  description TEXT,
+  payment_method TEXT DEFAULT 'manual',
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
 CREATE TABLE owner_disbursements (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   account_id UUID NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
@@ -539,6 +565,12 @@ CREATE INDEX idx_payments_tenant_user_id ON payments(tenant_user_id);
 CREATE INDEX idx_payments_status ON payments(status);
 CREATE INDEX idx_payments_due_date ON payments(due_date);
 CREATE INDEX idx_payments_created_at ON payments(created_at);
+CREATE UNIQUE INDEX idx_expense_categories_account_name ON expense_categories(account_id, name);
+CREATE INDEX idx_expenses_account_id ON expenses(account_id);
+CREATE INDEX idx_expenses_property_id ON expenses(property_id);
+CREATE INDEX idx_expenses_category_id ON expenses(category_id);
+CREATE INDEX idx_expenses_expense_date ON expenses(expense_date);
+CREATE UNIQUE INDEX idx_expenses_maintenance_request_id ON expenses(maintenance_request_id);
 
 -- Messages
 CREATE INDEX idx_messages_account_id ON messages(account_id);
@@ -684,6 +716,8 @@ ALTER TABLE maintenance_requests ENABLE ROW LEVEL SECURITY;
 ALTER TABLE maintenance_assignments ENABLE ROW LEVEL SECURITY;
 ALTER TABLE maintenance_updates ENABLE ROW LEVEL SECURITY;
 ALTER TABLE payments ENABLE ROW LEVEL SECURITY;
+ALTER TABLE expense_categories ENABLE ROW LEVEL SECURITY;
+ALTER TABLE expenses ENABLE ROW LEVEL SECURITY;
 ALTER TABLE owner_disbursements ENABLE ROW LEVEL SECURITY;
 ALTER TABLE messages ENABLE ROW LEVEL SECURITY;
 ALTER TABLE notifications ENABLE ROW LEVEL SECURITY;
@@ -815,6 +849,17 @@ CREATE POLICY payments_select ON payments FOR SELECT USING (
 CREATE POLICY payments_insert ON payments FOR INSERT WITH CHECK (is_account_member(account_id));
 CREATE POLICY payments_update ON payments FOR UPDATE USING (is_account_member(account_id));
 
+-- Expenses: Account members
+CREATE POLICY expense_categories_select ON expense_categories FOR SELECT USING (is_account_member(account_id));
+CREATE POLICY expense_categories_insert ON expense_categories FOR INSERT WITH CHECK (is_account_member(account_id));
+CREATE POLICY expense_categories_update ON expense_categories FOR UPDATE USING (is_account_member(account_id));
+CREATE POLICY expense_categories_delete ON expense_categories FOR DELETE USING (is_account_member(account_id));
+
+CREATE POLICY expenses_select ON expenses FOR SELECT USING (is_account_member(account_id));
+CREATE POLICY expenses_insert ON expenses FOR INSERT WITH CHECK (is_account_member(account_id));
+CREATE POLICY expenses_update ON expenses FOR UPDATE USING (is_account_member(account_id));
+CREATE POLICY expenses_delete ON expenses FOR DELETE USING (is_account_member(account_id));
+
 -- Owner disbursements: Only owners
 CREATE POLICY owner_disbursements_select ON owner_disbursements FOR SELECT USING (has_account_role(account_id, 'owner'));
 CREATE POLICY owner_disbursements_insert ON owner_disbursements FOR INSERT WITH CHECK (has_account_role(account_id, 'owner'));
@@ -893,6 +938,8 @@ CREATE TRIGGER update_leases_updated_at BEFORE UPDATE ON leases FOR EACH ROW EXE
 CREATE TRIGGER update_maintenance_requests_updated_at BEFORE UPDATE ON maintenance_requests FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 CREATE TRIGGER update_maintenance_assignments_updated_at BEFORE UPDATE ON maintenance_assignments FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 CREATE TRIGGER update_payments_updated_at BEFORE UPDATE ON payments FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+CREATE TRIGGER update_expense_categories_updated_at BEFORE UPDATE ON expense_categories FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+CREATE TRIGGER update_expenses_updated_at BEFORE UPDATE ON expenses FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 CREATE TRIGGER update_owner_disbursements_updated_at BEFORE UPDATE ON owner_disbursements FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 CREATE TRIGGER update_showings_updated_at BEFORE UPDATE ON showings FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 CREATE TRIGGER update_rental_applications_updated_at BEFORE UPDATE ON rental_applications FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();

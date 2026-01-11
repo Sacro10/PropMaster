@@ -103,6 +103,25 @@ VALUES
    'Dishwasher not draining', 'Water pools at bottom after cycle completes. May be clogged drain.',
    'appliance', 'medium', 'open', NOW() - INTERVAL '3 hours');
 
+-- Add costs + completion dates for analytics expense data
+UPDATE maintenance_requests
+SET estimated_cost = 180.00
+WHERE id = 'm1111111-1111-1111-1111-111111111111'::uuid;
+
+UPDATE maintenance_requests
+SET estimated_cost = 320.00
+WHERE id = 'm1111111-2222-2222-2222-222222222222'::uuid;
+
+UPDATE maintenance_requests
+SET actual_cost = 125.00,
+    completed_at = NOW() - INTERVAL '4 days',
+    updated_at = NOW() - INTERVAL '4 days'
+WHERE id = 'm1111111-3333-3333-3333-333333333333'::uuid;
+
+UPDATE maintenance_requests
+SET estimated_cost = 210.00
+WHERE id = 'm2222222-1111-1111-1111-111111111111'::uuid;
+
 -- ============================================================================
 -- 6. CREATE SAMPLE MAINTENANCE ASSIGNMENTS
 -- ============================================================================

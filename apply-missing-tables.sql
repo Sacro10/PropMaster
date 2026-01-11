@@ -430,5 +430,101 @@ $$;
 GRANT EXECUTE ON FUNCTION get_monthly_revenue(UUID, TIMESTAMPTZ, TIMESTAMPTZ) TO authenticated;
 GRANT EXECUTE ON FUNCTION get_monthly_revenue(UUID, TIMESTAMPTZ, TIMESTAMPTZ) TO service_role;
 
+-- 11. Expenses + categories (for analytics + disbursements)
+CREATE TABLE IF NOT EXISTS expense_categories (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  account_id UUID NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  description TEXT,
+  tax_deductible BOOLEAN DEFAULT true,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS expenses (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  account_id UUID NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+  property_id UUID REFERENCES properties(id) ON DELETE SET NULL,
+  unit_id UUID REFERENCES units(id) ON DELETE SET NULL,
+  category_id UUID REFERENCES expense_categories(id) ON DELETE SET NULL,
+  vendor_profile_id UUID REFERENCES vendor_profiles(id) ON DELETE SET NULL,
+  maintenance_request_id UUID REFERENCES maintenance_requests(id) ON DELETE SET NULL,
+  amount NUMERIC(10, 2) NOT NULL,
+  expense_date DATE NOT NULL,
+  description TEXT,
+  payment_method TEXT DEFAULT 'manual',
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_expense_categories_account_name ON expense_categories(account_id, name);
+CREATE INDEX IF NOT EXISTS idx_expenses_account ON expenses(account_id);
+CREATE INDEX IF NOT EXISTS idx_expenses_date ON expenses(expense_date);
+CREATE INDEX IF NOT EXISTS idx_expenses_property ON expenses(property_id);
+CREATE INDEX IF NOT EXISTS idx_expenses_category ON expenses(category_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_expenses_maintenance_request ON expenses(maintenance_request_id);
+
+-- Enable RLS + policies (account scoped)
+ALTER TABLE expense_categories ENABLE ROW LEVEL SECURITY;
+ALTER TABLE expenses ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY expense_categories_select ON expense_categories FOR SELECT USING (is_account_member(account_id));
+CREATE POLICY expense_categories_insert ON expense_categories FOR INSERT WITH CHECK (is_account_member(account_id));
+CREATE POLICY expense_categories_update ON expense_categories FOR UPDATE USING (is_account_member(account_id));
+CREATE POLICY expense_categories_delete ON expense_categories FOR DELETE USING (is_account_member(account_id));
+
+CREATE POLICY expenses_select ON expenses FOR SELECT USING (is_account_member(account_id));
+CREATE POLICY expenses_insert ON expenses FOR INSERT WITH CHECK (is_account_member(account_id));
+CREATE POLICY expenses_update ON expenses FOR UPDATE USING (is_account_member(account_id));
+CREATE POLICY expenses_delete ON expenses FOR DELETE USING (is_account_member(account_id));
+
+-- Auto-update timestamps
+CREATE TRIGGER update_expense_categories_updated_at BEFORE UPDATE ON expense_categories
+  FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+CREATE TRIGGER update_expenses_updated_at BEFORE UPDATE ON expenses
+  FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+-- Backfill categories + expenses from maintenance_requests
+INSERT INTO expense_categories (account_id, name, description, tax_deductible)
+SELECT DISTINCT
+  mr.account_id,
+  INITCAP(COALESCE(mr.category, 'Other')),
+  'Auto-created from maintenance requests',
+  true
+FROM maintenance_requests mr
+WHERE mr.category IS NOT NULL
+ON CONFLICT (account_id, name) DO NOTHING;
+
+INSERT INTO expenses (
+  account_id,
+  property_id,
+  unit_id,
+  category_id,
+  vendor_profile_id,
+  maintenance_request_id,
+  amount,
+  expense_date,
+  description,
+  payment_method
+)
+SELECT
+  mr.account_id,
+  mr.property_id,
+  mr.unit_id,
+  ec.id,
+  ma.vendor_profile_id,
+  mr.id,
+  COALESCE(mr.actual_cost, mr.estimated_cost),
+  COALESCE(mr.completed_at::date, mr.updated_at::date, mr.created_at::date),
+  mr.title,
+  'manual'
+FROM maintenance_requests mr
+LEFT JOIN maintenance_assignments ma ON ma.request_id = mr.id
+LEFT JOIN expense_categories ec
+  ON ec.account_id = mr.account_id
+  AND ec.name = INITCAP(COALESCE(mr.category, 'Other'))
+WHERE COALESCE(mr.actual_cost, mr.estimated_cost) IS NOT NULL
+ON CONFLICT (maintenance_request_id) DO NOTHING;
+
 -- Done!
 SELECT 'Migration complete! Missing tables and functions have been created.' AS status;
