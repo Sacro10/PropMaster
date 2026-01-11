@@ -4,7 +4,7 @@ import { useThemeStyles } from '../hooks/useThemeStyles';
 import { useHasFeature } from '../hooks/usePlanGating';
 import { FeatureGate, LockedFeatureCard } from './UpgradeCTA';
 import { useMaintenanceRequests, useMaintenanceMetrics, useHVACProgram, useRoutingMetrics, useAssignVendor } from '../../lib/hooks/useMaintenance';
-import { getAvailableVendors, generateHVACBatch, createEmergencyRequest } from '../../lib/api/maintenanceMetrics';
+import { getAvailableVendors, generateHVACBatch } from '../../lib/api/maintenanceMetrics';
 import { LoadingPage } from './LoadingSpinner';
 import { ErrorState } from './ErrorBoundary';
 import { formatRelativeTime, formatDisplayDate } from '../../lib/utils/dateHelpers';
@@ -17,6 +17,7 @@ export function MaintenancePanel() {
   const [availableVendors, setAvailableVendors] = useState<any[]>([]);
   const [generatingBatch, setGeneratingBatch] = useState(false);
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const [isEmergencyModalOpen, setIsEmergencyModalOpen] = useState(false);
   const [isVendorModalOpen, setIsVendorModalOpen] = useState(false);
   const [showAllRequests, setShowAllRequests] = useState(false);
   const { assign, isAssigning } = useAssignVendor();
@@ -76,8 +77,7 @@ export function MaintenancePanel() {
 
   // Handle emergency request
   const handleEmergencyClick = () => {
-    // In a real app, this would open a modal with a form
-    alert('Emergency request feature - would open form to create emergency maintenance request');
+    setIsEmergencyModalOpen(true);
   };
 
   const maintenanceStats = metrics ? [
@@ -480,6 +480,16 @@ export function MaintenancePanel() {
         onSuccess={() => {
           refetchRequests();
         }}
+      />
+
+      {/* Create Emergency Request Modal */}
+      <CreateMaintenanceRequestModal
+        isOpen={isEmergencyModalOpen}
+        onClose={() => setIsEmergencyModalOpen(false)}
+        onSuccess={() => {
+          refetchRequests();
+        }}
+        emergencyMode
       />
 
       {/* Create Vendor Modal */}

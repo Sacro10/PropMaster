@@ -3,11 +3,13 @@ import { useState, useEffect } from 'react';
 import { useThemeStyles } from '../hooks/useThemeStyles';
 import { useCreateMaintenanceRequest } from '../../lib/hooks/useMaintenance';
 import { supabase } from '../../lib/supabaseClient';
+import { createEmergencyRequest } from '../../lib/api/maintenanceMetrics';
 
 interface CreateMaintenanceRequestModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSuccess?: () => void;
+  emergencyMode?: boolean;
 }
 
 interface PropertyUnit {
@@ -40,26 +42,44 @@ const PRIORITIES = [
   { value: 'emergency', label: 'Emergency', description: 'Urgent, requires immediate action' },
 ] as const;
 
+type EmergencyChannel = 'pagerduty' | 'opsgenie' | 'twilio' | 'slack' | 'email' | 'webhook';
+
+const EMERGENCY_CHANNELS: Array<{ value: EmergencyChannel; label: string; helper: string }> = [
+  { value: 'pagerduty', label: 'PagerDuty', helper: 'Triggers an on-call incident' },
+  { value: 'opsgenie', label: 'Opsgenie', helper: 'Creates a P1 alert' },
+  { value: 'twilio', label: 'SMS (Twilio)', helper: 'Sends SMS to on-call number' },
+  { value: 'slack', label: 'Slack', helper: 'Posts to emergency channel' },
+  { value: 'email', label: 'Email', helper: 'Sends to emergency email' },
+  { value: 'webhook', label: 'Webhook', helper: 'Calls custom emergency endpoint' },
+];
+
+const DEFAULT_EMERGENCY_CHANNELS: EmergencyChannel[] = EMERGENCY_CHANNELS.map((channel) => channel.value);
+
 export function CreateMaintenanceRequestModal({
   isOpen,
   onClose,
   onSuccess,
+  emergencyMode = false,
 }: CreateMaintenanceRequestModalProps) {
   const { isDark, text, border } = useThemeStyles();
   const { create, loading } = useCreateMaintenanceRequest();
+  const [emergencyLoading, setEmergencyLoading] = useState(false);
 
-  const [formData, setFormData] = useState({
+  const getDefaultFormData = (isEmergency: boolean) => ({
     unit_id: '',
     property_id: '',
     title: '',
     description: '',
     category: 'general' as typeof MAINTENANCE_CATEGORIES[number],
-    priority: 'normal' as 'low' | 'normal' | 'high' | 'emergency',
+    priority: (isEmergency ? 'emergency' : 'normal') as 'low' | 'normal' | 'high' | 'emergency',
   });
+
+  const [formData, setFormData] = useState(getDefaultFormData(emergencyMode));
 
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [availableUnits, setAvailableUnits] = useState<PropertyUnit[]>([]);
   const [loadingUnits, setLoadingUnits] = useState(true);
+  const [emergencyChannels, setEmergencyChannels] = useState<EmergencyChannel[]>(DEFAULT_EMERGENCY_CHANNELS);
 
   // Fetch available properties and units
   useEffect(() => {
@@ -125,6 +145,14 @@ export function CreateMaintenanceRequestModal({
     }
   }, [isOpen]);
 
+  useEffect(() => {
+    if (isOpen) {
+      setFormData(getDefaultFormData(emergencyMode));
+      setErrors({});
+      setEmergencyChannels(DEFAULT_EMERGENCY_CHANNELS);
+    }
+  }, [isOpen, emergencyMode]);
+
   const validateForm = () => {
     const newErrors: Record<string, string> = {};
 
@@ -133,6 +161,9 @@ export function CreateMaintenanceRequestModal({
     if (!formData.description.trim()) newErrors.description = 'Description is required';
     if (!formData.category) newErrors.category = 'Category is required';
     if (!formData.priority) newErrors.priority = 'Priority is required';
+    if (emergencyMode && emergencyChannels.length === 0) {
+      newErrors.notificationChannels = 'Select at least one notification channel';
+    }
 
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
@@ -145,18 +176,29 @@ export function CreateMaintenanceRequestModal({
       return;
     }
 
-    const result = await create(formData);
+    const result = emergencyMode
+      ? await (async () => {
+          try {
+            setEmergencyLoading(true);
+            const response = await createEmergencyRequest({
+              title: formData.title,
+              description: formData.description,
+              category: formData.category,
+              unitId: formData.unit_id,
+              notificationChannels: emergencyChannels,
+            });
+            return { success: true, response };
+          } catch (error) {
+            return { success: false, error };
+          } finally {
+            setEmergencyLoading(false);
+          }
+        })()
+      : await create(formData);
 
     if (result.success) {
       // Reset form
-      setFormData({
-        unit_id: '',
-        property_id: '',
-        title: '',
-        description: '',
-        category: 'general',
-        priority: 'normal',
-      });
+      setFormData(getDefaultFormData(emergencyMode));
       setErrors({});
 
       // Call success callback
@@ -168,22 +210,25 @@ export function CreateMaintenanceRequestModal({
       onClose();
 
       // Show success message
-      alert('Maintenance request created successfully!');
+      if (emergencyMode && result.response?.notifications) {
+        const failed = result.response.notifications.filter((notification: any) => !notification.sent);
+        if (failed.length > 0) {
+          const failedList = failed.map((notification: any) => notification.channel).join(', ');
+          alert(`Emergency request created. Notifications failed for: ${failedList}`);
+        } else {
+          alert('Emergency request created and notifications sent!');
+        }
+      } else {
+        alert(emergencyMode ? 'Emergency request created successfully!' : 'Maintenance request created successfully!');
+      }
     } else {
-      alert('Failed to create maintenance request. Please try again.');
+      alert(emergencyMode ? 'Failed to create emergency request. Please try again.' : 'Failed to create maintenance request. Please try again.');
     }
   };
 
   const handleClose = () => {
     // Reset form when closing
-    setFormData({
-      unit_id: '',
-      property_id: '',
-      title: '',
-      description: '',
-      category: 'general',
-      priority: 'normal',
-    });
+    setFormData(getDefaultFormData(emergencyMode));
     setErrors({});
     onClose();
   };
@@ -195,6 +240,14 @@ export function CreateMaintenanceRequestModal({
       unit_id: unitId,
       property_id: selectedUnit?.property_id || '',
     });
+  };
+
+  const toggleEmergencyChannel = (channel: EmergencyChannel) => {
+    setEmergencyChannels((prev) =>
+      prev.includes(channel)
+        ? prev.filter((item) => item !== channel)
+        : [...prev, channel]
+    );
   };
 
   if (!isOpen) return null;
@@ -216,7 +269,7 @@ export function CreateMaintenanceRequestModal({
         {/* Header */}
         <div className="flex items-center justify-between p-6 border-b border-white/10">
           <h2 className="text-2xl" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
-            CREATE MAINTENANCE REQUEST
+            {emergencyMode ? 'CREATE EMERGENCY REQUEST' : 'CREATE MAINTENANCE REQUEST'}
           </h2>
           <button
             onClick={handleClose}
@@ -322,37 +375,82 @@ export function CreateMaintenanceRequestModal({
             >
               Priority *
             </label>
-            <div className="grid grid-cols-2 gap-3">
-              {PRIORITIES.map((priority) => (
-                <button
-                  key={priority.value}
-                  type="button"
-                  onClick={() =>
-                    setFormData({
-                      ...formData,
-                      priority: priority.value as 'low' | 'normal' | 'high' | 'emergency',
-                    })
-                  }
-                  className={`px-4 py-3 rounded-lg border transition-all text-left ${
-                    formData.priority === priority.value
-                      ? 'bg-gradient-to-r from-[#ff6b35] to-[#f7931e] border-[#ff6b35] text-white font-semibold'
-                      : isDark
-                      ? 'bg-white/5 border-white/10 hover:bg-white/10'
-                      : 'bg-gray-50 border-gray-300 hover:bg-gray-100'
-                  }`}
-                  style={{ fontFamily: 'Work Sans, sans-serif' }}
-                >
-                  <div className="font-semibold mb-1">{priority.label}</div>
-                  <div className={`text-xs ${formData.priority === priority.value ? 'text-white/80' : text.muted}`}>
-                    {priority.description}
-                  </div>
-                </button>
-              ))}
-            </div>
+            {emergencyMode ? (
+              <div className="px-4 py-3 rounded-lg border bg-gradient-to-r from-[#ff6b35] to-[#f7931e] border-[#ff6b35] text-white font-semibold">
+                Emergency - Urgent, requires immediate action
+              </div>
+            ) : (
+              <div className="grid grid-cols-2 gap-3">
+                {PRIORITIES.map((priority) => (
+                  <button
+                    key={priority.value}
+                    type="button"
+                    onClick={() =>
+                      setFormData({
+                        ...formData,
+                        priority: priority.value as 'low' | 'normal' | 'high' | 'emergency',
+                      })
+                    }
+                    className={`px-4 py-3 rounded-lg border transition-all text-left ${
+                      formData.priority === priority.value
+                        ? 'bg-gradient-to-r from-[#ff6b35] to-[#f7931e] border-[#ff6b35] text-white font-semibold'
+                        : isDark
+                        ? 'bg-white/5 border-white/10 hover:bg-white/10'
+                        : 'bg-gray-50 border-gray-300 hover:bg-gray-100'
+                    }`}
+                    style={{ fontFamily: 'Work Sans, sans-serif' }}
+                  >
+                    <div className="font-semibold mb-1">{priority.label}</div>
+                    <div className={`text-xs ${formData.priority === priority.value ? 'text-white/80' : text.muted}`}>
+                      {priority.description}
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
             {errors.priority && (
               <p className="text-red-400 text-sm mt-1">{errors.priority}</p>
             )}
           </div>
+
+          {emergencyMode && (
+            <div>
+              <label
+                className={`block text-sm font-medium mb-2 ${text.primary}`}
+                style={{ fontFamily: 'Work Sans, sans-serif' }}
+              >
+                Notify via *
+              </label>
+              <div className="grid grid-cols-2 gap-3">
+                {EMERGENCY_CHANNELS.map((channel) => (
+                  <button
+                    key={channel.value}
+                    type="button"
+                    onClick={() => toggleEmergencyChannel(channel.value)}
+                    className={`px-4 py-3 rounded-lg border transition-all text-left ${
+                      emergencyChannels.includes(channel.value)
+                        ? 'bg-gradient-to-r from-[#ff6b35] to-[#f7931e] border-[#ff6b35] text-white font-semibold'
+                        : isDark
+                        ? 'bg-white/5 border-white/10 hover:bg-white/10'
+                        : 'bg-gray-50 border-gray-300 hover:bg-gray-100'
+                    }`}
+                    style={{ fontFamily: 'Work Sans, sans-serif' }}
+                  >
+                    <div className="font-semibold mb-1">{channel.label}</div>
+                    <div className={`text-xs ${emergencyChannels.includes(channel.value) ? 'text-white/80' : text.muted}`}>
+                      {channel.helper}
+                    </div>
+                  </button>
+                ))}
+              </div>
+              {errors.notificationChannels && (
+                <p className="text-red-400 text-sm mt-1">{errors.notificationChannels}</p>
+              )}
+              <p className={`text-xs mt-2 ${text.muted}`} style={{ fontFamily: 'Work Sans, sans-serif' }}>
+                Unconfigured channels will be skipped and reported.
+              </p>
+            </div>
+          )}
 
           {/* Description */}
           <div>
@@ -391,11 +489,11 @@ export function CreateMaintenanceRequestModal({
             </button>
             <button
               type="submit"
-              disabled={loading}
+              disabled={emergencyMode ? emergencyLoading : loading}
               className="px-6 py-3 bg-gradient-to-r from-[#ff6b35] to-[#f7931e] rounded-lg font-medium hover:scale-105 transition-transform disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
               style={{ fontFamily: 'Work Sans, sans-serif' }}
             >
-              {loading ? 'Creating...' : 'Create Request'}
+              {(emergencyMode ? emergencyLoading : loading) ? 'Creating...' : (emergencyMode ? 'Create Emergency Request' : 'Create Request')}
             </button>
           </div>
         </form>
