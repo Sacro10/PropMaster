@@ -19,7 +19,7 @@ function calculateTenantRiskScore(tenant: any, lease: any): number | null {
     parts.push({ score: Math.round(normalized), weight: 0.4 });
   }
 
-  const rent = lease?.rent ? Number(lease.rent) : 0;
+  const rent = lease?.rent ? Number(lease.rent) : (lease?.rent_amount ? Number(lease.rent_amount) : 0);
   if (tenant?.monthly_income !== null && tenant?.monthly_income !== undefined && rent > 0) {
     const ratio = Number(tenant.monthly_income) / rent;
     const ratioScore =
@@ -184,7 +184,28 @@ export async function getTenants(params: PaginationParams = {}) {
       const mergedTenant = fallbackTenant ? { ...fallbackTenant, ...tenant } : tenant;
       const unit = lease.units || {};
       const property = unit.properties || {};
-      const calculatedRiskScore = mergedTenant.ai_risk_score ?? calculateTenantRiskScore(mergedTenant, lease);
+      
+      // Calculate risk score if not already present
+      let calculatedRiskScore = mergedTenant.ai_risk_score;
+      if (calculatedRiskScore == null) {
+        // Prepare lease data with fallback to unit rent
+        const leaseWithRent = {
+          ...lease,
+          rent: lease.rent || unit.rent_amount || 0
+        };
+        calculatedRiskScore = calculateTenantRiskScore(mergedTenant, leaseWithRent);
+        
+        // Log if calculation failed to help debug
+        if (calculatedRiskScore == null) {
+          console.log('[Tenants API] Could not calculate risk score for tenant:', {
+            hasCredit: !!mergedTenant.credit_score,
+            hasIncome: !!mergedTenant.monthly_income,
+            hasBackground: !!mergedTenant.background_check_status,
+            hasEmployment: !!mergedTenant.employment_status,
+            rent: leaseWithRent.rent
+          });
+        }
+      }
 
       if (mergedTenant.user_id && mergedTenant.ai_risk_score == null && calculatedRiskScore != null) {
         pendingRiskUpdates.push(
@@ -199,7 +220,7 @@ export async function getTenants(params: PaginationParams = {}) {
       return {
         ...mergedTenant,
         account_id: accountId,
-        ai_risk_score: calculatedRiskScore ?? mergedTenant.ai_risk_score ?? null,
+        ai_risk_score: calculatedRiskScore,
         lease: {
           id: lease.id,
           unit_id: lease.unit_id,
