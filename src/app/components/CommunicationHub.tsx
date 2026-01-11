@@ -54,6 +54,7 @@ export function CommunicationHub() {
   const [composerError, setComposerError] = useState<string | null>(null);
   const [recipientSearch, setRecipientSearch] = useState('');
   const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null);
+  const [conversationSearch, setConversationSearch] = useState('');
   const [reminderModalOpen, setReminderModalOpen] = useState(false);
   const [editingReminder, setEditingReminder] = useState<any | null>(null);
   const [templateModalOpen, setTemplateModalOpen] = useState(false);
@@ -141,15 +142,22 @@ export function CommunicationHub() {
     return match?.user_id || '';
   };
 
+  const buildFallbackDraft = () => (
+    'Thanks for reaching out. I received your message and will follow up shortly.'
+  );
+
   const handleAiDraft = async () => {
     setComposerOpen(true);
     if (!activeConversationId) {
       clearSuggestion();
+      setComposerBody((prev) => prev.trim() || buildFallbackDraft());
       return;
     }
     const result = await generateSuggestion(activeConversationId);
     if (result.success && result.data?.suggestion) {
       setComposerBody(result.data.suggestion);
+    } else {
+      setComposerBody((prev) => prev.trim() || buildFallbackDraft());
     }
     aiPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
   };
@@ -261,6 +269,20 @@ export function CommunicationHub() {
       status,
       frequency,
     };
+  });
+
+  const filteredConversations = conversations.filter((conversation) => {
+    const term = conversationSearch.trim().toLowerCase();
+    if (!term) return true;
+    const haystack = [
+      conversation.tenant,
+      conversation.property,
+      conversation.lastMessage,
+    ]
+      .filter(Boolean)
+      .join(' ')
+      .toLowerCase();
+    return haystack.includes(term);
   });
 
   return (
@@ -541,6 +563,8 @@ export function CommunicationHub() {
                 <input
                   type="text"
                   placeholder="Search messages..."
+                  value={conversationSearch}
+                  onChange={(e) => setConversationSearch(e.target.value)}
                   className={`pl-10 pr-4 py-2 ${isDark ? 'bg-white/5 border-white/10' : 'bg-gray-100 border-gray-200'} border rounded-lg text-sm focus:outline-none focus:border-[#ff6b35]/50`}
                   style={{ fontFamily: 'Work Sans, sans-serif' }}
                 />
@@ -548,16 +572,16 @@ export function CommunicationHub() {
             </div>
           </div>
 
-          {conversations.length === 0 ? (
+          {filteredConversations.length === 0 ? (
             <div className="text-center py-12">
               <MessageSquare className={`w-12 h-12 mx-auto mb-4 ${text.inactive}`} />
               <p className={text.muted} style={{ fontFamily: 'Work Sans, sans-serif' }}>
-                No conversations yet
+                {conversationSearch.trim() ? 'No matching conversations' : 'No conversations yet'}
               </p>
             </div>
           ) : (
             <div className="space-y-3">
-              {conversations.map((conversation, index) => (
+              {filteredConversations.map((conversation) => (
               <div
                 key={conversation.id}
                 onClick={() => {

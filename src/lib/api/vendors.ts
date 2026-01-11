@@ -61,7 +61,31 @@ export async function createVendor(data: CreateVendorData): Promise<{ success: b
         account_id: accountId,
         user_id: user.id,
         business_name: data.business_name,
+        phone: data.phone,
+        email: data.email,
+        address1: data.address1,
+        address2: data.address2 || null,
+        city: data.city,
+        state: data.state,
+        zip: data.zip,
+        license_number: data.license_number || null,
+        insurance_policy_number: data.insurance_policy_number || null,
+        insurance_expiry: data.insurance_expiry || null,
+        is_active: true,
+      },
+      {
+        account_id: accountId,
+        user_id: user.id,
+        business_name: data.business_name,
         contact_name: data.contact_name,
+        phone: data.phone,
+        email: data.email,
+        is_active: true,
+      },
+      {
+        account_id: accountId,
+        user_id: user.id,
+        business_name: data.business_name,
         phone: data.phone,
         email: data.email,
         is_active: true,
@@ -76,8 +100,23 @@ export async function createVendor(data: CreateVendorData): Promise<{ success: b
       },
       {
         account_id: accountId,
+        business_name: data.business_name,
+        phone: data.phone,
+        email: data.email,
+        is_active: true,
+      },
+      {
+        account_id: accountId,
         company_name: data.business_name,
         contact_name: data.contact_name,
+        phone: data.phone,
+        email: data.email,
+        category,
+        is_active: true,
+      },
+      {
+        account_id: accountId,
+        company_name: data.business_name,
         phone: data.phone,
         email: data.email,
         category,
@@ -98,7 +137,13 @@ export async function createVendor(data: CreateVendorData): Promise<{ success: b
         return await insertVendorServices(accountId, vendorProfile.id, data.services);
       }
 
-      if (vendorError?.code === '42703') {
+      if (
+        vendorError?.code === '42703' ||
+        vendorError?.code === 'PGRST204' ||
+        vendorError?.message?.includes('schema cache') ||
+        vendorError?.message?.includes('Could not find the') ||
+        vendorError?.message?.includes('contact_name')
+      ) {
         lastError = vendorError;
         continue;
       }

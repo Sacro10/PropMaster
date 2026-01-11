@@ -19,6 +19,7 @@ import { useState } from 'react';
 export function RentCollection() {
   const { isDark, text, border } = useThemeStyles();
   const [processingDisbursement, setProcessingDisbursement] = useState<string | null>(null);
+  const [showAllTransactions, setShowAllTransactions] = useState(false);
 
   // Feature checks for plan gating
   const integratedAccounting = useHasFeature('integrated_accounting');
@@ -150,7 +151,7 @@ export function RentCollection() {
           ) : (
             <>
               <div className="space-y-3">
-                {recentPayments.slice(0, 5).map((payment) => {
+                {(showAllTransactions ? recentPayments : recentPayments.slice(0, 5)).map((payment) => {
                   const propertyName = payment.property?.name || 'Unknown Property';
                   const unitNumber = payment.unit?.unit_number || '';
                   const fullName = unitNumber ? `${propertyName} #${unitNumber}` : propertyName;
@@ -211,12 +212,17 @@ export function RentCollection() {
                 })}
               </div>
 
-              <button
-                className={`w-full mt-4 py-3 ${isDark ? 'bg-white/5 hover:bg-white/10' : 'bg-gray-100 hover:bg-gray-200'} rounded-lg text-sm font-medium transition-colors`}
-                style={{ fontFamily: 'Work Sans, sans-serif' }}
-              >
-                View All Transactions
-              </button>
+              {recentPayments.length > 5 && (
+                <button
+                  type="button"
+                  onClick={() => setShowAllTransactions((prev) => !prev)}
+                  className={`w-full mt-4 py-3 ${isDark ? 'bg-white/5 hover:bg-white/10' : 'bg-gray-100 hover:bg-gray-200'} rounded-lg text-sm font-medium transition-colors`}
+                  style={{ fontFamily: 'Work Sans, sans-serif' }}
+                  aria-expanded={showAllTransactions}
+                >
+                  {showAllTransactions ? 'Show Recent Transactions' : 'View All Transactions'}
+                </button>
+              )}
             </>
           )}
         </div>

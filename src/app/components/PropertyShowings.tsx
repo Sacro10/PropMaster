@@ -216,35 +216,35 @@ export function PropertyShowings() {
                         </div>
                       </div>
 
-                      {showing.access_code && (
-                        <div className={`flex items-center justify-between p-3 ${isDark ? 'bg-white/5' : 'bg-gray-100'} rounded-lg border ${border.default}`}>
-                          <div className="flex items-center gap-3">
-                            <div className="p-2 bg-gradient-to-br from-[#ff6b35] to-[#f7931e] rounded-lg">
-                              <Key className="w-4 h-4 text-white" />
-                            </div>
-                            <div>
-                              <p className={`text-xs ${text.inactive} mb-1`}>Access Code</p>
-                              <p className="font-mono font-semibold text-[#ff6b35]">{showing.access_code}</p>
-                            </div>
+                      <div className={`flex items-center justify-between p-3 ${isDark ? 'bg-white/5' : 'bg-gray-100'} rounded-lg border ${border.default}`}>
+                        <div className="flex items-center gap-3">
+                          <div className="p-2 bg-gradient-to-br from-[#ff6b35] to-[#f7931e] rounded-lg">
+                            <Key className="w-4 h-4 text-white" />
                           </div>
-                          <div className="flex gap-2">
-                            <button
-                              onClick={() => handleSendReminder(showing.id)}
-                              disabled={sendingReminder === showing.id}
-                              className={`px-4 py-2 ${isDark ? 'bg-white/5 hover:bg-white/10' : 'bg-gray-200 hover:bg-gray-300'} rounded-lg text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed`}
-                              style={{ fontFamily: 'Work Sans, sans-serif' }}
-                            >
-                              {sendingReminder === showing.id ? 'Sending...' : 'Send Reminder'}
-                            </button>
-                            <button
-                              className={`px-4 py-2 ${isDark ? 'bg-white/5 hover:bg-white/10' : 'bg-gray-200 hover:bg-gray-300'} rounded-lg text-sm transition-colors`}
-                              style={{ fontFamily: 'Work Sans, sans-serif' }}
-                            >
-                              Details
-                            </button>
+                          <div>
+                            <p className={`text-xs ${text.inactive} mb-1`}>Access Code</p>
+                            <p className="font-mono font-semibold text-[#ff6b35]">
+                              {showing.access_code || '—'}
+                            </p>
                           </div>
                         </div>
-                      )}
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => handleSendReminder(showing.id)}
+                            disabled={sendingReminder === showing.id}
+                            className={`px-4 py-2 ${isDark ? 'bg-white/5 hover:bg-white/10' : 'bg-gray-200 hover:bg-gray-300'} rounded-lg text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed`}
+                            style={{ fontFamily: 'Work Sans, sans-serif' }}
+                          >
+                            {sendingReminder === showing.id ? 'Sending...' : 'Send Reminder'}
+                          </button>
+                          <button
+                            className={`px-4 py-2 ${isDark ? 'bg-white/5 hover:bg-white/10' : 'bg-gray-200 hover:bg-gray-300'} rounded-lg text-sm transition-colors`}
+                            style={{ fontFamily: 'Work Sans, sans-serif' }}
+                          >
+                            Details
+                          </button>
+                        </div>
+                      </div>
                     </div>
                   );
                 })}
