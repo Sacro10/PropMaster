@@ -16,6 +16,7 @@ export function MaintenancePanel() {
   const [availableVendors, setAvailableVendors] = useState<any[]>([]);
   const [generatingBatch, setGeneratingBatch] = useState(false);
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const [showAllRequests, setShowAllRequests] = useState(false);
   const { assign, isAssigning } = useAssignVendor();
 
   // Feature checks for plan gating
@@ -177,7 +178,7 @@ export function MaintenancePanel() {
                 </p>
               </div>
             ) : (
-              requests.slice(0, 5).map((request) => {
+              requests.slice(0, showAllRequests ? requests.length : 5).map((request) => {
                 const propertyDisplay = request.property && request.unit
                   ? `${request.property.name} #${request.unit.unit_number}`
                   : request.property?.name || 'Unknown';
@@ -292,8 +293,11 @@ export function MaintenancePanel() {
           </div>
 
           {requests.length > 5 && (
-            <button className={`w-full mt-4 py-3 ${isDark ? 'bg-white/5 hover:bg-white/10' : 'bg-gray-100 hover:bg-gray-200'} rounded-lg text-sm font-medium transition-colors`}>
-              View All {requests.length} Requests
+            <button 
+              onClick={() => setShowAllRequests(!showAllRequests)}
+              className={`w-full mt-4 py-3 ${isDark ? 'bg-white/5 hover:bg-white/10' : 'bg-gray-100 hover:bg-gray-200'} rounded-lg text-sm font-medium transition-colors`}
+            >
+              {showAllRequests ? 'Show Less' : `View All ${requests.length} Requests`}
             </button>
           )}
         </div>
