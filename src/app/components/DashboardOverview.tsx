@@ -324,6 +324,48 @@ export function DashboardOverview() {
               const now = new Date();
               const daysUntilDue = Math.ceil((dueDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
 
+              let dueDateDisplay = '';
+              if (daysUntilDue < 0) {
+                dueDateDisplay = 'Overdue';
+              } else if (daysUntilDue === 0) {
+                dueDateDisplay = 'Today';
+              } else if (daysUntilDue === 1) {
+                dueDateDisplay = 'Tomorrow';
+              } else if (daysUntilDue <= 7) {
+                dueDateDisplay = `${daysUntilDue} days`;
+              } else {
+                dueDateDisplay = dueDate.toLocaleDateString();
+              }
+
+              return (
+                <div
+                  key={task.id}
+                  className={`p-4 ${isDark ? 'bg-white/5' : 'bg-gray-50'} rounded-lg border ${border.default} hover:border-[#ff6b35]/50 transition-all group`}
+                >
+                  <div className="flex items-start justify-between mb-3">
+                    <div className={`px-2 py-1 rounded text-xs font-medium ${
+                      task.priority === 'urgent' || task.priority === 'high' ? 'bg-red-500/20 text-red-400' :
+                      task.priority === 'medium' ? 'bg-amber-500/20 text-amber-400' :
+                      'bg-blue-500/20 text-blue-400'
+                    }`}>
+                      {task.priority.toUpperCase()}
+                    </div>
+                  </div>
+                  <p className="font-medium mb-2" style={{ fontFamily: 'Work Sans, sans-serif' }}>
+                    {task.title}
+                  </p>
+                  <p className={`text-sm ${text.muted} mb-2`} style={{ fontFamily: 'Work Sans, sans-serif' }}>
+                    {task.type.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
+                  </p>
+                  <p className={`text-xs ${text.inactive}`} style={{ fontFamily: 'Work Sans, sans-serif' }}>
+                    Due: {dueDateDisplay}
+                  </p>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
 
       {/* Properties Section */}
       <div className={`${isDark ? 'bg-gradient-to-br from-[#1a1f35] to-[#0f1523]' : 'bg-white shadow-md'} border ${border.default} rounded-xl p-6`}>
@@ -333,11 +375,9 @@ export function DashboardOverview() {
           </h3>
           <button
             onClick={() => setIsPropertyModalOpen(true)}
-            className="px-6 py-3 bg-gradient-to-r from-[#ff6b35] to-[#f7931e] rounded-lg font-medium hover:scale-105 transition-transform flex items-center gap-2"
-            style={{ fontFamily: 'Work Sans, sans-serif' }}
+            className="px-6 py-3 bg-gradient-to-r from-[#ff6b35] to-[#f7931e] rounded-lg font-medium hover:scale-105 transition-transform"
           >
-            <Plus className="w-4 h-4" />
-            Add Property
+            + Add Property
           </button>
         </div>
 
