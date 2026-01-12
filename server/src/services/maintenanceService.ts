@@ -638,8 +638,10 @@ export async function assignVendorToRequest(
         .single();
 
       const subject = `Maintenance assignment: ${requestDetails?.title || 'New request'}`;
-      const propertyName = requestDetails?.properties?.name || 'Property';
-      const unitNumber = requestDetails?.units?.unit_number ? ` #${requestDetails.units.unit_number}` : '';
+      const propertyName = requestDetails?.properties?.[0]?.name || 'Property';
+      const unitNumber = requestDetails?.units?.[0]?.unit_number
+        ? ` #${requestDetails.units[0].unit_number}`
+        : '';
       const body = [
         `You have been assigned a maintenance request.`,
         `Title: ${requestDetails?.title || 'N/A'}`,
@@ -679,7 +681,7 @@ export async function getMaintenanceRequestVendorContext(
 
   return {
     category: data.category || 'general',
-    propertyZip: data.properties?.zip || null,
+    propertyZip: data.properties?.[0]?.zip || null,
   };
 }
 
