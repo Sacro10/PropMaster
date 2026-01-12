@@ -11,6 +11,56 @@ function clamp(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max);
 }
 
+function splitFullName(fullName?: string | null) {
+  if (!fullName) return { firstName: '', lastName: '' };
+  const parts = fullName.trim().split(/\s+/);
+  return {
+    firstName: parts[0] || '',
+    lastName: parts.slice(1).join(' ') || '',
+  };
+}
+
+function getApplicationNameParts(application: any) {
+  const applicationData = application?.application_data || application?.applicationData || {};
+  const firstName =
+    applicationData.firstName ||
+    applicationData.first_name ||
+    '';
+  const lastName =
+    applicationData.lastName ||
+    applicationData.last_name ||
+    '';
+
+  if (firstName || lastName) {
+    return { firstName, lastName };
+  }
+
+  return splitFullName(application?.full_name || application?.fullName || '');
+}
+
+function getApplicationAddress(application: any) {
+  const applicationData = application?.application_data || application?.applicationData || {};
+  return (
+    applicationData.currentAddress ||
+    applicationData.current_address ||
+    application?.current_address ||
+    application?.currentAddress ||
+    null
+  );
+}
+
+function getApplicationEmployer(application: any) {
+  const applicationData = application?.application_data || application?.applicationData || {};
+  return (
+    application?.employer ||
+    application?.current_employer ||
+    applicationData.currentEmployer ||
+    applicationData.current_employer ||
+    application?.currentEmployer ||
+    null
+  );
+}
+
 function calculateTenantRiskScore(tenant: any, lease: any): number | null {
   const parts: Array<{ score: number; weight: number }> = [];
 
@@ -318,9 +368,16 @@ export async function getRentalApplications(params: PaginationParams = {}) {
     const applications: RentalApplication[] = (data || []).map((app: any) => {
       const unit = app.units || {};
       const property = unit.properties || {};
+      const { firstName, lastName } = getApplicationNameParts(app);
 
       return {
         ...app,
+        firstName,
+        lastName,
+        moveInDate: app.desired_move_in_date || app.move_in_date || null,
+        currentEmployer: getApplicationEmployer(app),
+        currentAddress: getApplicationAddress(app),
+        monthlyIncome: app.monthly_income ?? null,
         unit: unit.id ? {
           id: unit.id,
           property_id: unit.property_id,
@@ -475,11 +532,14 @@ export async function approveApplication(applicationId: string) {
       throw new Error('No account ID found');
     }
 
+    const { data: { user } } = await supabase.auth.getUser();
+
     const { data, error } = await supabase
       .from('rental_applications')
       .update({
         status: 'approved',
         reviewed_at: new Date().toISOString(),
+        reviewed_by: user?.id || null,
       })
       .eq('id', applicationId)
       .eq('account_id', accountId)
@@ -507,12 +567,15 @@ export async function rejectApplication(applicationId: string, notes?: string) {
       throw new Error('No account ID found');
     }
 
+    const { data: { user } } = await supabase.auth.getUser();
+
     const { data, error } = await supabase
       .from('rental_applications')
       .update({
         status: 'rejected',
         reviewed_at: new Date().toISOString(),
-        notes: notes || null,
+        reviewed_by: user?.id || null,
+        rejection_reason: notes || null,
       })
       .eq('id', applicationId)
       .eq('account_id', accountId)

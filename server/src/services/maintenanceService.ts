@@ -497,17 +497,56 @@ export async function getAvailableVendors(
     p_limit: 10,
   });
 
-  if (error) throw error;
+  if (!error && data) {
+    return (
+      data?.map((v: any) => ({
+        id: v.vendor_id,
+        businessName: v.business_name,
+        rating: v.rating ?? 0,
+        jobsCompleted: v.jobs_completed ?? 0,
+        hourlyRate: v.hourly_rate ?? 85,
+      })) || []
+    );
+  }
 
-  return (
-    data?.map((v: any) => ({
-      id: v.vendor_id,
-      businessName: v.business_name,
-      rating: v.rating,
-      jobsCompleted: v.jobs_completed,
-      hourlyRate: 85, // Default if not in response
-    })) || []
-  );
+  // Fallback: fetch vendors directly when RPC is unavailable or misconfigured.
+  const { data: vendorProfiles, error: vendorError } = await supabase
+    .from('vendor_profiles')
+    .select('id, business_name, avg_rating, total_jobs_completed, is_active')
+    .eq('account_id', accountId)
+    .eq('is_active', true);
+
+  if (vendorError) {
+    throw vendorError;
+  }
+
+  let eligibleVendorIds = new Set<string>((vendorProfiles || []).map((v) => v.id));
+
+  if (category) {
+    const { data: vendorServices, error: servicesError } = await supabase
+      .from('vendor_services')
+      .select('vendor_profile_id, vendor_id, service_type')
+      .eq('account_id', accountId)
+      .eq('service_type', category);
+
+    if (!servicesError && vendorServices && vendorServices.length > 0) {
+      eligibleVendorIds = new Set(
+        vendorServices
+          .map((s: any) => s.vendor_profile_id || s.vendor_id)
+          .filter(Boolean)
+      );
+    }
+  }
+
+  return (vendorProfiles || [])
+    .filter((v) => eligibleVendorIds.has(v.id))
+    .map((v) => ({
+      id: v.id,
+      businessName: v.business_name ?? 'Unknown Vendor',
+      rating: v.avg_rating ?? 0,
+      jobsCompleted: v.total_jobs_completed ?? 0,
+      hourlyRate: 85,
+    }));
 }
 
 /**
@@ -580,6 +619,68 @@ export async function assignVendorToRequest(
       metadata: { vendorProfileId, etaHours },
     }
   );
+
+  // Notify assigned vendor
+  try {
+    const { data: vendorProfile, error: vendorError } = await supabase
+      .from('vendor_profiles')
+      .select('user_id, business_name')
+      .eq('id', vendorProfileId)
+      .eq('account_id', accountId)
+      .single();
+
+    if (!vendorError && vendorProfile?.user_id) {
+      const { data: requestDetails } = await supabase
+        .from('maintenance_requests')
+        .select('title, priority, category, property_id, unit_id, properties(name), units(unit_number)')
+        .eq('id', requestId)
+        .eq('account_id', accountId)
+        .single();
+
+      const subject = `Maintenance assignment: ${requestDetails?.title || 'New request'}`;
+      const propertyName = requestDetails?.properties?.name || 'Property';
+      const unitNumber = requestDetails?.units?.unit_number ? ` #${requestDetails.units.unit_number}` : '';
+      const body = [
+        `You have been assigned a maintenance request.`,
+        `Title: ${requestDetails?.title || 'N/A'}`,
+        `Property: ${propertyName}${unitNumber}`,
+        `Priority: ${requestDetails?.priority || 'normal'}`,
+        `Category: ${requestDetails?.category || 'general'}`,
+      ].join('\n');
+
+      const { sendMessage } = await import('./communicationsService');
+      await sendMessage(accountId, userId || vendorProfile.user_id, {
+        recipientId: vendorProfile.user_id,
+        subject,
+        body,
+        propertyId: requestDetails?.property_id || undefined,
+        unitId: requestDetails?.unit_id || undefined,
+      });
+    }
+  } catch (error) {
+    console.warn('[assignVendorToRequest] Failed to notify vendor:', error);
+  }
+}
+
+export async function getMaintenanceRequestVendorContext(
+  accountId: string,
+  requestId: string
+): Promise<{ category: string; propertyZip: string | null }> {
+  const { data, error } = await supabase
+    .from('maintenance_requests')
+    .select('category, properties(zip)')
+    .eq('id', requestId)
+    .eq('account_id', accountId)
+    .single();
+
+  if (error || !data) {
+    throw error || new Error('Request not found');
+  }
+
+  return {
+    category: data.category || 'general',
+    propertyZip: data.properties?.zip || null,
+  };
 }
 
 /**

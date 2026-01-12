@@ -40,9 +40,14 @@ export async function createApplication(data: CreateApplicationData) {
       evictionHistory: data.evictionHistory ?? null,
       criminalHistory: data.criminalHistory ?? null,
     };
-    const hasScreeningInputs = Object.values(screeningInputs).some(
-      (value) => value !== null && value !== undefined && value !== ''
-    );
+    const applicationData = {
+      ...screeningInputs,
+      firstName: data.firstName,
+      lastName: data.lastName,
+      currentEmployer: data.currentEmployer,
+      currentAddress: data.currentAddress,
+    };
+    const fullName = [data.firstName, data.lastName].filter(Boolean).join(' ').trim();
 
     // Get unit's property_id
     const { data: unit, error: unitError } = await supabase
@@ -61,17 +66,14 @@ export async function createApplication(data: CreateApplicationData) {
         account_id: accountId,
         unit_id: data.unitId,
         property_id: unit.property_id,
-        first_name: data.firstName,
-        last_name: data.lastName,
+        full_name: fullName,
         email: data.email,
         phone: data.phone,
-        move_in_date: data.moveInDate,
+        desired_move_in_date: data.moveInDate,
         monthly_income: data.monthlyIncome,
-        current_employer: data.currentEmployer,
-        current_address: data.currentAddress,
-        ...(hasScreeningInputs ? { application_data: screeningInputs } : {}),
-        status: 'pending',
-        applied_at: new Date().toISOString(),
+        employer: data.currentEmployer,
+        application_data: applicationData,
+        status: 'submitted',
       })
       .select()
       .single();

@@ -19,6 +19,7 @@ export function PropertyShowings() {
   const [sendingReminder, setSendingReminder] = useState<string | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedUnitId, setSelectedUnitId] = useState<string | undefined>(undefined);
+  const [selectedShowing, setSelectedShowing] = useState<any | null>(null);
 
   // Feature checks for plan gating - Electronic showings require Premium
   const electronicShowings = useHasFeature('electronic_showings');
@@ -59,6 +60,14 @@ export function PropertyShowings() {
   // Handle successful showing creation
   const handleShowingSuccess = () => {
     refetchShowings();
+  };
+
+  const handleOpenDetails = (showing: any) => {
+    setSelectedShowing(showing);
+  };
+
+  const handleCloseDetails = () => {
+    setSelectedShowing(null);
   };
 
   // Transform available properties for modal
@@ -229,20 +238,21 @@ export function PropertyShowings() {
                           </div>
                         </div>
                         <div className="flex gap-2">
-                          <button
-                            onClick={() => handleSendReminder(showing.id)}
-                            disabled={sendingReminder === showing.id}
-                            className={`px-4 py-2 ${isDark ? 'bg-white/5 hover:bg-white/10' : 'bg-gray-200 hover:bg-gray-300'} rounded-lg text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed`}
-                            style={{ fontFamily: 'Work Sans, sans-serif' }}
-                          >
-                            {sendingReminder === showing.id ? 'Sending...' : 'Send Reminder'}
-                          </button>
-                          <button
-                            className={`px-4 py-2 ${isDark ? 'bg-white/5 hover:bg-white/10' : 'bg-gray-200 hover:bg-gray-300'} rounded-lg text-sm transition-colors`}
-                            style={{ fontFamily: 'Work Sans, sans-serif' }}
-                          >
-                            Details
-                          </button>
+                            <button
+                              onClick={() => handleSendReminder(showing.id)}
+                              disabled={sendingReminder === showing.id}
+                              className={`px-4 py-2 ${isDark ? 'bg-white/5 hover:bg-white/10' : 'bg-gray-200 hover:bg-gray-300'} rounded-lg text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed`}
+                              style={{ fontFamily: 'Work Sans, sans-serif' }}
+                            >
+                              {sendingReminder === showing.id ? 'Sending...' : 'Send Reminder'}
+                            </button>
+                            <button
+                              onClick={() => handleOpenDetails(showing)}
+                              className={`px-4 py-2 ${isDark ? 'bg-white/5 hover:bg-white/10' : 'bg-gray-200 hover:bg-gray-300'} rounded-lg text-sm transition-colors`}
+                              style={{ fontFamily: 'Work Sans, sans-serif' }}
+                            >
+                              Details
+                            </button>
                         </div>
                       </div>
                     </div>
@@ -409,6 +419,93 @@ export function PropertyShowings() {
         preSelectedUnitId={selectedUnitId}
         availableUnits={modalUnits}
       />
+
+      {/* Showing Details Modal */}
+      {selectedShowing && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div
+            className="absolute inset-0 bg-black/50 backdrop-blur-sm"
+            onClick={handleCloseDetails}
+          />
+          <div
+            className={`relative w-full max-w-2xl ${
+              isDark ? 'bg-gradient-to-br from-[#1a1f35] to-[#0f1523]' : 'bg-white'
+            } border ${border.default} rounded-xl shadow-2xl max-h-[90vh] overflow-y-auto`}
+          >
+            <div className="flex items-center justify-between p-6 border-b border-white/10">
+              <h2 className="text-2xl" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
+                SHOWING DETAILS
+              </h2>
+              <button
+                onClick={handleCloseDetails}
+                className={`px-4 py-2 ${
+                  isDark ? 'bg-white/5 hover:bg-white/10' : 'bg-gray-100 hover:bg-gray-200'
+                } rounded-lg text-sm transition-colors`}
+                style={{ fontFamily: 'Work Sans, sans-serif' }}
+              >
+                Close
+              </button>
+            </div>
+            <div className="p-6 space-y-4">
+              <div>
+                <p className={`text-xs ${text.inactive}`}>Property</p>
+                <p className={`text-lg ${text.primary}`}>
+                  {selectedShowing.property?.name || 'Unknown Property'}
+                  {selectedShowing.unit?.unit_number ? ` #${selectedShowing.unit.unit_number}` : ''}
+                </p>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <p className={`text-xs ${text.inactive}`}>Status</p>
+                  <p className={text.primary}>{selectedShowing.status}</p>
+                </div>
+                <div>
+                  <p className={`text-xs ${text.inactive}`}>Type</p>
+                  <p className={text.primary}>{selectedShowing.showing_type}</p>
+                </div>
+                <div>
+                  <p className={`text-xs ${text.inactive}`}>Date</p>
+                  <p className={text.primary}>
+                    {new Date(selectedShowing.showing_date).toLocaleString('en-US', {
+                      weekday: 'short',
+                      month: 'short',
+                      day: 'numeric',
+                      hour: 'numeric',
+                      minute: '2-digit',
+                    })}
+                  </p>
+                </div>
+                <div>
+                  <p className={`text-xs ${text.inactive}`}>Access Code</p>
+                  <p className={`font-mono ${text.primary}`}>
+                    {selectedShowing.access_code || '—'}
+                  </p>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <p className={`text-xs ${text.inactive}`}>Visitor</p>
+                  <p className={text.primary}>{selectedShowing.visitor_name}</p>
+                </div>
+                <div>
+                  <p className={`text-xs ${text.inactive}`}>Email</p>
+                  <p className={text.primary}>{selectedShowing.visitor_email}</p>
+                </div>
+                <div>
+                  <p className={`text-xs ${text.inactive}`}>Phone</p>
+                  <p className={text.primary}>{selectedShowing.visitor_phone || '—'}</p>
+                </div>
+              </div>
+              {selectedShowing.notes && (
+                <div>
+                  <p className={`text-xs ${text.inactive}`}>Notes</p>
+                  <p className={text.primary}>{selectedShowing.notes}</p>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </FeatureGate>
   );
 }

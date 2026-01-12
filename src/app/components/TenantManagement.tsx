@@ -165,7 +165,7 @@ export function TenantManagement() {
 
       // AI-enhanced accuracy: also check application AI scores
       if (aiAccuracy === 0) {
-        const appsWithScores = applications.filter(a => a.ai_risk_score !== null && a.status && a.status !== 'pending' && a.status !== 'under_review');
+        const appsWithScores = applications.filter(a => a.ai_risk_score !== null && a.status && !['pending', 'submitted', 'under_review'].includes(a.status));
         if (appsWithScores.length > 0) {
           const accurate = appsWithScores.filter(a =>
             (a.ai_risk_score! >= 75 && a.status === 'approved') ||

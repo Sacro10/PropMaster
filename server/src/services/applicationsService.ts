@@ -65,6 +65,49 @@ function normalizeScreeningInputs(raw: any): ScreeningInputs {
   };
 }
 
+function splitFullName(fullName?: string | null) {
+  if (!fullName) return { firstName: '', lastName: '' };
+  const parts = fullName.trim().split(/\s+/);
+  return {
+    firstName: parts[0] || '',
+    lastName: parts.slice(1).join(' ') || '',
+  };
+}
+
+function getNameParts(fullName: string | null, applicationData: any) {
+  const firstName =
+    applicationData?.firstName ||
+    applicationData?.first_name ||
+    '';
+  const lastName =
+    applicationData?.lastName ||
+    applicationData?.last_name ||
+    '';
+
+  if (firstName || lastName) {
+    return { firstName, lastName };
+  }
+
+  return splitFullName(fullName);
+}
+
+function getCurrentEmployer(employer: string | null, applicationData: any) {
+  return (
+    applicationData?.currentEmployer ||
+    applicationData?.current_employer ||
+    employer ||
+    ''
+  );
+}
+
+function getCurrentAddress(applicationData: any) {
+  return (
+    applicationData?.currentAddress ||
+    applicationData?.current_address ||
+    ''
+  );
+}
+
 export interface RentalApplication {
   id: string;
   firstName: string;
@@ -128,6 +171,60 @@ export interface CreateApplicationData {
   criminalHistory?: boolean | null;
 }
 
+function mapApplicationRow(app: any): RentalApplication {
+  const applicationData = app.application_data || {};
+  const { firstName, lastName } = getNameParts(app.full_name, applicationData);
+
+  return {
+    id: app.id,
+    firstName,
+    lastName,
+    email: app.email,
+    phone: app.phone,
+    unitId: app.unit_id,
+    propertyId: app.property_id,
+    status: app.status,
+    moveInDate: app.desired_move_in_date || app.move_in_date,
+    monthlyIncome: Number(app.monthly_income),
+    currentEmployer: getCurrentEmployer(app.employer, applicationData),
+    currentAddress: getCurrentAddress(applicationData),
+    screeningInputs: normalizeScreeningInputs(applicationData),
+    hasScreeningResult: app.screening_results && app.screening_results.length > 0,
+    createdAt: app.created_at,
+    unit: app.unit
+      ? {
+          unitNumber: app.unit.unit_number,
+          rentAmount: Number(app.unit.rent_amount),
+        }
+      : undefined,
+    property: app.property
+      ? { name: app.property.name, address: formatPropertyAddress(app.property) }
+      : undefined,
+    screeningResult:
+      app.screening_results && app.screening_results.length > 0
+        ? {
+            id: app.screening_results[0].id,
+            applicationId: app.screening_results[0].application_id,
+            provider: app.screening_results[0].provider,
+            creditScore: app.screening_results[0].credit_score,
+            backgroundCheckStatus: app.screening_results[0].background_check_status,
+            evictionHistory: app.screening_results[0].eviction_history,
+            criminalHistory: app.screening_results[0].criminal_history,
+            incomeVerificationStatus:
+              app.screening_results[0].income_verification_status,
+            riskScore: app.screening_results[0].risk_score,
+            riskLevel: app.screening_results[0].raw_data?.risk_level || null,
+            recommendation: app.screening_results[0].raw_data?.recommendation || null,
+            reasons: app.screening_results[0].raw_data?.reasons || [],
+            notes: app.screening_results[0].raw_data?.notes || null,
+            riskFactors: app.screening_results[0].risk_factors || [],
+            recommendations: app.screening_results[0].recommendations,
+            screenedAt: app.screening_results[0].screened_at,
+          }
+        : undefined,
+  };
+}
+
 /**
  * Get rental applications with filtering
  */
@@ -156,7 +253,8 @@ export async function getApplications(
     )
     .eq('account_id', accountId);
 
-  if (status) query = query.eq('status', status);
+  const normalizedStatus = status === 'pending' ? 'submitted' : status;
+  if (normalizedStatus) query = query.eq('status', normalizedStatus);
   if (unitId) query = query.eq('unit_id', unitId);
   if (propertyId) query = query.eq('property_id', propertyId);
 
@@ -167,55 +265,7 @@ export async function getApplications(
 
   if (error) throw error;
 
-  const applications: RentalApplication[] =
-    data?.map((app: any) => ({
-      id: app.id,
-      firstName: app.first_name,
-      lastName: app.last_name,
-      email: app.email,
-      phone: app.phone,
-      unitId: app.unit_id,
-      propertyId: app.property_id,
-      status: app.status,
-      moveInDate: app.move_in_date,
-      monthlyIncome: Number(app.monthly_income),
-      currentEmployer: app.current_employer,
-      currentAddress: app.current_address,
-      screeningInputs: normalizeScreeningInputs(app.application_data),
-      hasScreeningResult: app.screening_results && app.screening_results.length > 0,
-      createdAt: app.created_at,
-      unit: app.unit
-        ? {
-            unitNumber: app.unit.unit_number,
-            rentAmount: Number(app.unit.rent_amount),
-          }
-        : undefined,
-      property: app.property
-        ? { name: app.property.name, address: formatPropertyAddress(app.property) }
-        : undefined,
-      screeningResult:
-        app.screening_results && app.screening_results.length > 0
-          ? {
-              id: app.screening_results[0].id,
-              applicationId: app.screening_results[0].application_id,
-              provider: app.screening_results[0].provider,
-              creditScore: app.screening_results[0].credit_score,
-              backgroundCheckStatus: app.screening_results[0].background_check_status,
-              evictionHistory: app.screening_results[0].eviction_history,
-              criminalHistory: app.screening_results[0].criminal_history,
-              incomeVerificationStatus:
-                app.screening_results[0].income_verification_status,
-              riskScore: app.screening_results[0].risk_score,
-              riskLevel: app.screening_results[0].raw_data?.risk_level || null,
-              recommendation: app.screening_results[0].raw_data?.recommendation || null,
-              reasons: app.screening_results[0].raw_data?.reasons || [],
-              notes: app.screening_results[0].raw_data?.notes || null,
-              riskFactors: app.screening_results[0].risk_factors || [],
-              recommendations: app.screening_results[0].recommendations,
-              screenedAt: app.screening_results[0].screened_at,
-            }
-          : undefined,
-    })) || [];
+  const applications: RentalApplication[] = data?.map(mapApplicationRow) || [];
 
   return { applications, total: count || 0 };
 }
@@ -246,53 +296,7 @@ export async function getApplicationById(
     throw error;
   }
 
-  return {
-    id: data.id,
-    firstName: data.first_name,
-    lastName: data.last_name,
-    email: data.email,
-    phone: data.phone,
-    unitId: data.unit_id,
-    propertyId: data.property_id,
-    status: data.status,
-    moveInDate: data.move_in_date,
-    monthlyIncome: Number(data.monthly_income),
-    currentEmployer: data.current_employer,
-    currentAddress: data.current_address,
-    screeningInputs: normalizeScreeningInputs(data.application_data),
-    hasScreeningResult: data.screening_results && data.screening_results.length > 0,
-    createdAt: data.created_at,
-    unit: data.unit
-      ? {
-          unitNumber: data.unit.unit_number,
-          rentAmount: Number(data.unit.rent_amount),
-        }
-      : undefined,
-    property: data.property
-      ? { name: data.property.name, address: formatPropertyAddress(data.property) }
-      : undefined,
-    screeningResult:
-      data.screening_results && data.screening_results.length > 0
-        ? {
-            id: data.screening_results[0].id,
-            applicationId: data.screening_results[0].application_id,
-            provider: data.screening_results[0].provider,
-            creditScore: data.screening_results[0].credit_score,
-            backgroundCheckStatus: data.screening_results[0].background_check_status,
-            evictionHistory: data.screening_results[0].eviction_history,
-            criminalHistory: data.screening_results[0].criminal_history,
-            incomeVerificationStatus: data.screening_results[0].income_verification_status,
-            riskScore: data.screening_results[0].risk_score,
-            riskLevel: data.screening_results[0].raw_data?.risk_level || null,
-            recommendation: data.screening_results[0].raw_data?.recommendation || null,
-            reasons: data.screening_results[0].raw_data?.reasons || [],
-            notes: data.screening_results[0].raw_data?.notes || null,
-            riskFactors: data.screening_results[0].risk_factors || [],
-            recommendations: data.screening_results[0].recommendations,
-            screenedAt: data.screening_results[0].screened_at,
-          }
-        : undefined,
-  };
+  return mapApplicationRow(data);
 }
 
 /**
@@ -309,9 +313,14 @@ export async function createApplication(
     evictionHistory: applicationData.evictionHistory ?? null,
     criminalHistory: applicationData.criminalHistory ?? null,
   };
-  const hasScreeningInputs = Object.values(screeningInputs).some(
-    (value) => value !== null && value !== undefined && value !== ''
-  );
+  const applicationPayload = {
+    ...screeningInputs,
+    firstName: applicationData.firstName,
+    lastName: applicationData.lastName,
+    currentEmployer: applicationData.currentEmployer,
+    currentAddress: applicationData.currentAddress,
+  };
+  const fullName = [applicationData.firstName, applicationData.lastName].filter(Boolean).join(' ').trim();
 
   // Verify unit belongs to account
   const { data: unit, error: unitError } = await supabase
@@ -341,16 +350,14 @@ export async function createApplication(
       account_id: accountId,
       unit_id: applicationData.unitId,
       property_id: unit.property_id,
-      first_name: applicationData.firstName,
-      last_name: applicationData.lastName,
+      full_name: fullName,
       email: applicationData.email,
       phone: applicationData.phone,
-      move_in_date: applicationData.moveInDate,
+      desired_move_in_date: applicationData.moveInDate,
       monthly_income: applicationData.monthlyIncome,
-      current_employer: applicationData.currentEmployer,
-      current_address: applicationData.currentAddress,
-      ...(hasScreeningInputs ? { application_data: screeningInputs } : {}),
-      status: 'pending',
+      employer: applicationData.currentEmployer,
+      application_data: applicationPayload,
+      status: 'submitted',
     })
     .select(
       `
@@ -374,31 +381,7 @@ export async function createApplication(
     }
   );
 
-  return {
-    id: data.id,
-    firstName: data.first_name,
-    lastName: data.last_name,
-    email: data.email,
-    phone: data.phone,
-    unitId: data.unit_id,
-    propertyId: data.property_id,
-    status: data.status,
-    moveInDate: data.move_in_date,
-    monthlyIncome: Number(data.monthly_income),
-    currentEmployer: data.current_employer,
-    currentAddress: data.current_address,
-    hasScreeningResult: false,
-    createdAt: data.created_at,
-    unit: data.unit
-      ? {
-          unitNumber: data.unit.unit_number,
-          rentAmount: Number(data.unit.rent_amount),
-        }
-      : undefined,
-    property: data.property
-      ? { name: data.property.name, address: formatPropertyAddress(data.property) }
-      : undefined,
-  };
+  return mapApplicationRow(data);
 }
 
 /**
@@ -415,7 +398,7 @@ export async function approveApplication(
     throw new Error('Application not found');
   }
 
-  if (application.status !== 'pending') {
+  if (!['submitted', 'pending'].includes(application.status)) {
     throw new Error(`Application is already ${application.status}`);
   }
 
@@ -516,7 +499,11 @@ export async function approveApplication(
   // 6. Update application status
   const { data, error } = await supabase
     .from('rental_applications')
-    .update({ status: 'approved' })
+    .update({
+      status: 'approved',
+      reviewed_at: new Date().toISOString(),
+      reviewed_by: userId,
+    })
     .eq('id', applicationId)
     .eq('account_id', accountId)
     .select(
@@ -557,31 +544,7 @@ export async function approveApplication(
     }
   );
 
-  return {
-    id: data.id,
-    firstName: data.first_name,
-    lastName: data.last_name,
-    email: data.email,
-    phone: data.phone,
-    unitId: data.unit_id,
-    propertyId: data.property_id,
-    status: data.status,
-    moveInDate: data.move_in_date,
-    monthlyIncome: Number(data.monthly_income),
-    currentEmployer: data.current_employer,
-    currentAddress: data.current_address,
-    hasScreeningResult: false,
-    createdAt: data.created_at,
-    unit: data.unit
-      ? {
-          unitNumber: data.unit.unit_number,
-          rentAmount: Number(data.unit.rent_amount),
-        }
-      : undefined,
-    property: data.property
-      ? { name: data.property.name, address: formatPropertyAddress(data.property) }
-      : undefined,
-  };
+  return mapApplicationRow(data);
 }
 
 /**
@@ -595,7 +558,12 @@ export async function rejectApplication(
 ): Promise<RentalApplication> {
   const { data, error } = await supabase
     .from('rental_applications')
-    .update({ status: 'rejected' })
+    .update({
+      status: 'rejected',
+      reviewed_at: new Date().toISOString(),
+      reviewed_by: userId,
+      rejection_reason: reason || null,
+    })
     .eq('id', applicationId)
     .eq('account_id', accountId)
     .select(
@@ -609,11 +577,13 @@ export async function rejectApplication(
 
   if (error) throw error;
 
+  const { firstName, lastName } = getNameParts(data.full_name, data.application_data);
+
   await logActivityEvent(
     accountId,
     userId,
     'application_rejected',
-    `Rejected application for ${data.first_name} ${data.last_name}`,
+    `Rejected application for ${firstName} ${lastName}`.trim(),
     {
       entityType: 'rental_application',
       entityId: applicationId,
@@ -621,31 +591,7 @@ export async function rejectApplication(
     }
   );
 
-  return {
-    id: data.id,
-    firstName: data.first_name,
-    lastName: data.last_name,
-    email: data.email,
-    phone: data.phone,
-    unitId: data.unit_id,
-    propertyId: data.property_id,
-    status: data.status,
-    moveInDate: data.move_in_date,
-    monthlyIncome: Number(data.monthly_income),
-    currentEmployer: data.current_employer,
-    currentAddress: data.current_address,
-    hasScreeningResult: false,
-    createdAt: data.created_at,
-    unit: data.unit
-      ? {
-          unitNumber: data.unit.unit_number,
-          rentAmount: Number(data.unit.rent_amount),
-        }
-      : undefined,
-    property: data.property
-      ? { name: data.property.name, address: formatPropertyAddress(data.property) }
-      : undefined,
-  };
+  return mapApplicationRow(data);
 }
 
 /**

@@ -22,6 +22,33 @@ export function ApplicationDetailModal({
 
   if (!application) return null;
 
+  const applicationData = application.application_data || application.applicationData || {};
+  const fallbackName = `${application.firstName || application.first_name || ''} ${application.lastName || application.last_name || ''}`.trim();
+  const fullName =
+    application.full_name ||
+    application.fullName ||
+    applicationData.fullName ||
+    fallbackName ||
+    'Unknown Applicant';
+  const moveInDate =
+    application.moveInDate ||
+    application.move_in_date ||
+    application.desired_move_in_date ||
+    null;
+  const currentEmployer =
+    application.currentEmployer ||
+    application.current_employer ||
+    application.employer ||
+    applicationData.currentEmployer ||
+    applicationData.current_employer ||
+    'N/A';
+  const currentAddress =
+    application.currentAddress ||
+    application.current_address ||
+    applicationData.currentAddress ||
+    applicationData.current_address ||
+    'N/A';
+
   const screening = application.screeningResult || application.screening_result;
   const riskScore = screening?.riskScore || screening?.risk_score || 0;
   const creditScore = screening?.creditScore || screening?.credit_score || 0;
@@ -45,6 +72,7 @@ export function ApplicationDetailModal({
     screening?.riskFactors ||
     screening?.risk_factors ||
     [];
+  const isActionable = ['pending', 'submitted'].includes(application.status);
 
   const handleApprove = async () => {
     if (onApprove && !isProcessing) {
@@ -75,7 +103,7 @@ export function ApplicationDetailModal({
               APPLICATION REVIEW
             </h2>
             <p className={`${text.muted} mt-1`} style={{ fontFamily: 'Work Sans, sans-serif' }}>
-              {application.firstName || application.first_name} {application.lastName || application.last_name}
+              {fullName}
             </p>
           </div>
           <button
@@ -100,7 +128,7 @@ export function ApplicationDetailModal({
                   <p className={`text-sm ${text.muted}`}>Full Name</p>
                 </div>
                 <p className="font-medium">
-                  {application.firstName || application.first_name} {application.lastName || application.last_name}
+                  {fullName}
                 </p>
               </div>
 
@@ -126,7 +154,7 @@ export function ApplicationDetailModal({
                   <p className={`text-sm ${text.muted}`}>Move-in Date</p>
                 </div>
                 <p className="font-medium">
-                  {formatDisplayDate(application.moveInDate || application.move_in_date)}
+                  {moveInDate ? formatDisplayDate(moveInDate) : 'N/A'}
                 </p>
               </div>
             </div>
@@ -177,7 +205,7 @@ export function ApplicationDetailModal({
                   <Briefcase className="w-4 h-4 text-[#ff6b35]" />
                   <p className={`text-sm ${text.muted}`}>Current Employer</p>
                 </div>
-                <p className="font-medium">{application.currentEmployer || application.current_employer || 'N/A'}</p>
+                <p className="font-medium">{currentEmployer}</p>
               </div>
 
               <div className={`p-4 ${isDark ? 'bg-white/5' : 'bg-gray-50'} rounded-lg`}>
@@ -185,7 +213,7 @@ export function ApplicationDetailModal({
                   <MapPin className="w-4 h-4 text-[#ff6b35]" />
                   <p className={`text-sm ${text.muted}`}>Current Address</p>
                 </div>
-                <p className="font-medium text-sm">{application.currentAddress || application.current_address || 'N/A'}</p>
+                <p className="font-medium text-sm">{currentAddress}</p>
               </div>
             </div>
           </div>
@@ -328,7 +356,7 @@ export function ApplicationDetailModal({
             <button
               onClick={handleReject}
               className={`px-6 py-3 bg-red-500/20 text-red-400 hover:bg-red-500/30 rounded-lg font-medium transition-colors disabled:opacity-50`}
-              disabled={isProcessing || application.status !== 'pending'}
+              disabled={isProcessing || !isActionable}
             >
               {isProcessing ? 'Processing...' : 'Reject'}
             </button>
@@ -337,7 +365,7 @@ export function ApplicationDetailModal({
             <button
               onClick={handleApprove}
               className="px-6 py-3 bg-gradient-to-r from-[#ff6b35] to-[#f7931e] rounded-lg font-medium hover:scale-105 transition-transform disabled:opacity-50 disabled:cursor-not-allowed"
-              disabled={isProcessing || application.status !== 'pending'}
+              disabled={isProcessing || !isActionable}
             >
               {isProcessing ? 'Approving...' : 'Approve Application'}
             </button>

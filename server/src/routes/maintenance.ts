@@ -8,6 +8,7 @@ import {
   getSLAMetrics,
   getMaintenanceStats,
   getAvailableVendors,
+  getMaintenanceRequestVendorContext,
   assignVendorToRequest,
   createEmergencyRequest,
   getEmergencySupportConfig,
@@ -215,13 +216,15 @@ router.get(
         return;
       }
 
-      // Get request to determine category and property
       const requestId = req.params.id;
-      // For now, use default category and zip
+      const context = await getMaintenanceRequestVendorContext(
+        req.user.accountId,
+        requestId
+      );
       const vendors = await getAvailableVendors(
         req.user.accountId,
-        'general',
-        '78701'
+        context.category || 'general',
+        context.propertyZip || '00000'
       );
       res.json(vendors);
     } catch (error) {
