@@ -1,5 +1,5 @@
 import { Key, Clock, CircleCheck, Calendar, RefreshCw } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useHasFeature } from '../hooks/usePlanGating';
 import { useThemeStyles } from '../hooks/useThemeStyles';
 import { FeatureGate } from './UpgradeCTA';
@@ -10,10 +10,9 @@ import {
   useAvailableProperties,
   useShowingStats,
 } from '../../lib/hooks/useShowings';
-import { sendShowingReminder } from '../../lib/api/showings';
 import { formatRelativeTime } from '../../lib/utils/dateHelpers';
 import { ScheduleShowingModal } from './ScheduleShowingModal';
-import { getGmailConnectUrl, getGmailStatus } from '../../lib/api/integrations';
+import { markShowingReminderSent } from '../../lib/api/showings';
 
 export function PropertyShowings() {
   const { isDark, text, border } = useThemeStyles();
@@ -21,7 +20,7 @@ export function PropertyShowings() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedUnitId, setSelectedUnitId] = useState<string | undefined>(undefined);
   const [selectedShowing, setSelectedShowing] = useState<any | null>(null);
-  const [gmailStatus, setGmailStatus] = useState<{ connected: boolean; email?: string | null } | null>(null);
+  const [reminderConfirmShowing, setReminderConfirmShowing] = useState<any | null>(null);
 
   // Feature checks for plan gating - Electronic showings require Premium
   const electronicShowings = useHasFeature('electronic_showings');
@@ -31,61 +30,29 @@ export function PropertyShowings() {
   const { data: availableProperties, loading: propertiesLoading } = useAvailableProperties();
   const { data: stats, loading: statsLoading } = useShowingStats();
 
-  useEffect(() => {
-    const searchParams = new URLSearchParams(window.location.search);
-    const gmailResult = searchParams.get('gmail');
-    if (gmailResult) {
-      if (gmailResult === 'connected') {
-        alert('Gmail connected successfully!');
-      } else if (gmailResult === 'error') {
-        alert('Gmail connection failed. Please try again.');
-      }
-      searchParams.delete('gmail');
-      const newUrl = `${window.location.pathname}?${searchParams.toString()}`.replace(/\?$/, '');
-      window.history.replaceState({}, '', newUrl);
-    }
-  }, []);
-
-  useEffect(() => {
-    const loadStatus = async () => {
-      try {
-        const status = await getGmailStatus();
-        setGmailStatus(status);
-      } catch (error) {
-        console.error('Failed to load Gmail status:', error);
-      }
-    };
-    loadStatus();
-  }, []);
-
   // Handle sending reminder
-  const handleSendReminder = async (showingId: string) => {
+  const handleSendReminder = async (showing: any) => {
     try {
-      setSendingReminder(showingId);
-      await sendShowingReminder(showingId);
-      // Refetch to update reminder_sent_at
-      await refetchShowings();
-      alert('Reminder sent successfully!');
+      setSendingReminder(showing.id);
+      const propertyName = showing.property?.name || 'Property';
+      const unitNumber = showing.unit?.unit_number ? ` #${showing.unit.unit_number}` : '';
+      const subject = `Showing reminder: ${propertyName}${unitNumber}`;
+      const body = `Reminder: Your showing is scheduled for ${new Date(showing.showing_date).toLocaleString('en-US', {
+        weekday: 'short',
+        month: 'short',
+        day: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+      })} at ${propertyName}${unitNumber}. Access code: ${showing.access_code || 'N/A'}.`;
+
+      const mailto = `mailto:${encodeURIComponent(showing.visitor_email)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+      window.location.href = mailto;
+      setReminderConfirmShowing(showing);
     } catch (error) {
       console.error('Error sending reminder:', error);
-      const code = (error as Error & { code?: string }).code;
-      if (code === 'GMAIL_NOT_CONNECTED') {
-        alert('Please connect Gmail before sending reminders.');
-      } else {
-        alert('Failed to send reminder. Please try again.');
-      }
+      alert('Failed to open email client. Please try again.');
     } finally {
       setSendingReminder(null);
-    }
-  };
-
-  const handleConnectGmail = async () => {
-    try {
-      const url = await getGmailConnectUrl();
-      window.location.href = url;
-    } catch (error) {
-      console.error('Failed to start Gmail OAuth:', error);
-      alert('Failed to connect Gmail. Please try again.');
     }
   };
 
@@ -167,15 +134,6 @@ export function PropertyShowings() {
             >
               <RefreshCw className="w-4 h-4" />
             </button>
-            {gmailStatus && !gmailStatus.connected && (
-              <button
-                onClick={handleConnectGmail}
-                className={`px-4 py-2 ${isDark ? 'bg-white/5 hover:bg-white/10' : 'bg-gray-100 hover:bg-gray-200'} rounded-lg text-sm transition-colors`}
-                style={{ fontFamily: 'Work Sans, sans-serif' }}
-              >
-                Connect Gmail
-              </button>
-            )}
             <button
               onClick={() => handleOpenModal()}
               className="px-6 py-3 bg-gradient-to-r from-[#ff6b35] to-[#f7931e] rounded-lg font-medium hover:scale-105 transition-transform"
@@ -292,7 +250,7 @@ export function PropertyShowings() {
                         </div>
                         <div className="flex gap-2">
                             <button
-                              onClick={() => handleSendReminder(showing.id)}
+                              onClick={() => handleSendReminder(showing)}
                               disabled={sendingReminder === showing.id}
                               className={`px-4 py-2 ${isDark ? 'bg-white/5 hover:bg-white/10' : 'bg-gray-200 hover:bg-gray-300'} rounded-lg text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed`}
                               style={{ fontFamily: 'Work Sans, sans-serif' }}
@@ -555,6 +513,56 @@ export function PropertyShowings() {
                   <p className={text.primary}>{selectedShowing.notes}</p>
                 </div>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Reminder Confirmation Modal */}
+      {reminderConfirmShowing && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div
+            className="absolute inset-0 bg-black/50 backdrop-blur-sm"
+            onClick={() => setReminderConfirmShowing(null)}
+          />
+          <div
+            className={`relative w-full max-w-md ${
+              isDark ? 'bg-gradient-to-br from-[#1a1f35] to-[#0f1523]' : 'bg-white'
+            } border ${border.default} rounded-xl shadow-2xl p-6`}
+          >
+            <h3 className="text-xl mb-2" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
+              REMINDER SENT?
+            </h3>
+            <p className={text.secondary} style={{ fontFamily: 'Work Sans, sans-serif' }}>
+              Did you send the reminder email to {reminderConfirmShowing.visitor_name}?
+            </p>
+            <div className="flex items-center justify-end gap-3 mt-6">
+              <button
+                onClick={() => setReminderConfirmShowing(null)}
+                className={`px-4 py-2 ${
+                  isDark ? 'bg-white/5 hover:bg-white/10' : 'bg-gray-100 hover:bg-gray-200'
+                } rounded-lg text-sm transition-colors`}
+                style={{ fontFamily: 'Work Sans, sans-serif' }}
+              >
+                No
+              </button>
+              <button
+                onClick={async () => {
+                  try {
+                    await markShowingReminderSent(reminderConfirmShowing.id);
+                    await refetchShowings();
+                  } catch (error) {
+                    console.error('Error marking reminder sent:', error);
+                    alert('Failed to mark reminder sent. Please try again.');
+                  } finally {
+                    setReminderConfirmShowing(null);
+                  }
+                }}
+                className="px-4 py-2 bg-gradient-to-r from-[#ff6b35] to-[#f7931e] rounded-lg text-sm font-medium hover:scale-105 transition-transform"
+                style={{ fontFamily: 'Work Sans, sans-serif' }}
+              >
+                Yes, sent
+              </button>
             </div>
           </div>
         </div>

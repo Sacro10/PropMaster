@@ -242,10 +242,11 @@ async function getRecipients(reminder: Reminder): Promise<Tenant[]> {
       break;
 
     default:
-      // Apply custom filters from recipient_filter if provided
-      if (reminder.recipient_filter && Object.keys(reminder.recipient_filter).length > 0) {
-        // Custom filtering logic here
-      }
+      break;
+  }
+
+  if (reminder.recipient_filter?.tenantIds?.length) {
+    query = query.in('user_id', reminder.recipient_filter.tenantIds);
   }
 
   const { data, error } = await query;

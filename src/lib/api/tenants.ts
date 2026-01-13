@@ -7,6 +7,8 @@ import { supabase } from '../supabaseClient';
 import { getCurrentAccountId, handleSupabaseError, getPaginationRange, calculatePaginationMeta, type PaginationParams } from './client';
 import type { TenantWithLease, RentalApplication, PaginatedResponse } from './types';
 
+const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+
 function clamp(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max);
 }
@@ -527,30 +529,30 @@ export async function getTenantScreeningMetrics() {
  */
 export async function approveApplication(applicationId: string) {
   try {
-    const accountId = await getCurrentAccountId();
-    if (!accountId) {
-      throw new Error('No account ID found');
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) {
+      throw new Error('No active session');
     }
 
-    const { data: { user } } = await supabase.auth.getUser();
+    const response = await fetch(`${API_BASE}/api/applications/${applicationId}/approve`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${session.access_token}`,
+        'Content-Type': 'application/json',
+      },
+    });
 
-    const { data, error } = await supabase
-      .from('rental_applications')
-      .update({
-        status: 'approved',
-        reviewed_at: new Date().toISOString(),
-        reviewed_by: user?.id || null,
-      })
-      .eq('id', applicationId)
-      .eq('account_id', accountId)
-      .select()
-      .single();
-
-    if (error) {
-      throw handleSupabaseError(error, 'approve application');
+    if (!response.ok) {
+      const contentType = response.headers.get('content-type') || '';
+      if (contentType.includes('application/json')) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to approve application');
+      }
+      const errorText = await response.text();
+      throw new Error(errorText || 'Failed to approve application');
     }
 
-    return data;
+    return await response.json();
   } catch (error) {
     console.error('[Tenants API] Error approving application:', error);
     throw error;
@@ -562,31 +564,31 @@ export async function approveApplication(applicationId: string) {
  */
 export async function rejectApplication(applicationId: string, notes?: string) {
   try {
-    const accountId = await getCurrentAccountId();
-    if (!accountId) {
-      throw new Error('No account ID found');
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) {
+      throw new Error('No active session');
     }
 
-    const { data: { user } } = await supabase.auth.getUser();
+    const response = await fetch(`${API_BASE}/api/applications/${applicationId}/reject`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${session.access_token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ reason: notes || null }),
+    });
 
-    const { data, error } = await supabase
-      .from('rental_applications')
-      .update({
-        status: 'rejected',
-        reviewed_at: new Date().toISOString(),
-        reviewed_by: user?.id || null,
-        rejection_reason: notes || null,
-      })
-      .eq('id', applicationId)
-      .eq('account_id', accountId)
-      .select()
-      .single();
-
-    if (error) {
-      throw handleSupabaseError(error, 'reject application');
+    if (!response.ok) {
+      const contentType = response.headers.get('content-type') || '';
+      if (contentType.includes('application/json')) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to reject application');
+      }
+      const errorText = await response.text();
+      throw new Error(errorText || 'Failed to reject application');
     }
 
-    return data;
+    return await response.json();
   } catch (error) {
     console.error('[Tenants API] Error rejecting application:', error);
     throw error;

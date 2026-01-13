@@ -3,12 +3,14 @@ import { useEffect, useState } from 'react';
 import { useThemeStyles } from '../hooks/useThemeStyles';
 import { useCreateReminder, useUpdateReminder } from '../../lib/hooks/useCommunications';
 import type { AutomatedReminder } from '../../lib/api/communicationsClient';
+import type { TenantWithLease } from '../../lib/api/types';
 
 interface NewReminderModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSuccess?: () => void;
   reminder?: AutomatedReminder | null;
+  tenants: TenantWithLease[];
   templates: Array<{
     id: string;
     name: string;
@@ -26,6 +28,8 @@ type ReminderFormShape = {
   templateId: string;
   messageSubject: string;
   messageBody: string;
+  recipientScope: 'all' | 'selected';
+  recipientIds: string[];
 };
 
 export function NewReminderModal({
@@ -33,6 +37,7 @@ export function NewReminderModal({
   onClose,
   onSuccess,
   reminder,
+  tenants,
   templates,
 }: NewReminderModalProps) {
   const { isDark, text, border } = useThemeStyles();
@@ -40,17 +45,25 @@ export function NewReminderModal({
   const { update, loading: updating } = useUpdateReminder();
   const isEditing = Boolean(reminder?.id);
 
-  const buildFormData = (source?: AutomatedReminder | null): ReminderFormShape => ({
-    name: source?.name || '',
-    reminderType: source?.reminderType || (source as any)?.reminder_type || 'payment',
-    frequency: source?.frequency || 'monthly',
-    customSchedule: source?.customSchedule || (source as any)?.custom_schedule || '',
-    templateId: source?.templateId || (source as any)?.template_id || '',
-    messageSubject: source?.messageSubject || (source as any)?.message_subject || '',
-    messageBody: source?.messageBody || (source as any)?.message_body || '',
-  });
+  const buildFormData = (source?: AutomatedReminder | null): ReminderFormShape => {
+    const recipientFilter = (source as any)?.recipientFilter || (source as any)?.recipient_filter || {};
+    const tenantIds = Array.isArray(recipientFilter.tenantIds) ? recipientFilter.tenantIds : [];
+
+    return {
+      name: source?.name || '',
+      reminderType: source?.reminderType || (source as any)?.reminder_type || 'payment',
+      frequency: source?.frequency || 'monthly',
+      customSchedule: source?.customSchedule || (source as any)?.custom_schedule || '',
+      templateId: source?.templateId || (source as any)?.template_id || '',
+      messageSubject: source?.messageSubject || (source as any)?.message_subject || '',
+      messageBody: source?.messageBody || (source as any)?.message_body || '',
+      recipientScope: tenantIds.length > 0 ? 'selected' : 'all',
+      recipientIds: tenantIds,
+    };
+  };
 
   const [formData, setFormData] = useState<ReminderFormShape>(() => buildFormData(reminder));
+  const [tenantSearch, setTenantSearch] = useState('');
 
   const [errors, setErrors] = useState<Record<string, string>>({});
 
@@ -78,6 +91,9 @@ export function NewReminderModal({
     if (!formData.frequency) newErrors.frequency = 'Frequency is required';
     if (formData.frequency === 'custom' && !formData.customSchedule.trim()) {
       newErrors.customSchedule = 'Custom schedule is required for custom frequency';
+    }
+    if (formData.recipientScope === 'selected' && formData.recipientIds.length === 0) {
+      newErrors.recipients = 'Select at least one recipient';
     }
     if (!formData.messageSubject.trim()) newErrors.messageSubject = 'Subject is required';
     if (!formData.messageBody.trim()) newErrors.messageBody = 'Message body is required';
@@ -108,6 +124,10 @@ export function NewReminderModal({
       return;
     }
 
+    const recipientFilter = formData.recipientScope === 'selected'
+      ? { tenantIds: formData.recipientIds }
+      : {};
+
     const basePayload = {
       name: formData.name,
       frequency: formData.frequency,
@@ -117,12 +137,16 @@ export function NewReminderModal({
     };
 
     const result = isEditing && reminder?.id
-      ? await update(reminder.id, { ...basePayload, templateId: formData.templateId || null })
+      ? await update(reminder.id, {
+        ...basePayload,
+        templateId: formData.templateId || null,
+        recipientFilter,
+      })
       : await create({
         ...basePayload,
         reminderType: formData.reminderType,
         templateId: formData.templateId || undefined,
-        recipientFilter: {},
+        recipientFilter,
       });
 
     if (result.success) {
@@ -149,6 +173,7 @@ export function NewReminderModal({
     // Reset form when closing
     setFormData(buildFormData(null));
     setErrors({});
+    setTenantSearch('');
     onClose();
   };
 
@@ -156,6 +181,7 @@ export function NewReminderModal({
     if (!isOpen) return;
     setFormData(buildFormData(reminder));
     setErrors({});
+    setTenantSearch('');
   }, [isOpen, reminder?.id]);
 
   if (!isOpen) return null;
@@ -273,6 +299,87 @@ export function NewReminderModal({
                 <p className="text-red-400 text-sm mt-1">{errors.frequency}</p>
               )}
             </div>
+          </div>
+
+          {/* Recipients */}
+          <div>
+            <label
+              className={`block text-sm font-medium mb-2 ${text.primary}`}
+              style={{ fontFamily: 'Work Sans, sans-serif' }}
+            >
+              Recipients *
+            </label>
+            <div className="space-y-3">
+              <div className="flex items-center gap-3 text-sm">
+                <label className="flex items-center gap-2">
+                  <input
+                    type="radio"
+                    checked={formData.recipientScope === 'all'}
+                    onChange={() => setFormData({ ...formData, recipientScope: 'all', recipientIds: [] })}
+                  />
+                  <span>All tenants</span>
+                </label>
+                <label className="flex items-center gap-2">
+                  <input
+                    type="radio"
+                    checked={formData.recipientScope === 'selected'}
+                    onChange={() => setFormData({ ...formData, recipientScope: 'selected' })}
+                  />
+                  <span>Select tenants</span>
+                </label>
+              </div>
+
+              {formData.recipientScope === 'selected' && (
+                <div className={`border ${border.default} rounded-lg p-3 space-y-3`}>
+                  <input
+                    type="text"
+                    value={tenantSearch}
+                    onChange={(e) => setTenantSearch(e.target.value)}
+                    placeholder="Search tenants by name or email"
+                    className={`w-full px-3 py-2 ${
+                      isDark ? 'bg-white/5 border-white/10' : 'bg-gray-50 border-gray-300'
+                    } border rounded-lg text-sm ${text.primary} focus:outline-none focus:border-[#ff6b35] transition-colors`}
+                    style={{ fontFamily: 'Work Sans, sans-serif' }}
+                  />
+                  <div className="max-h-48 overflow-y-auto space-y-2">
+                    {(tenants || [])
+                      .filter((tenant) => {
+                        const term = tenantSearch.trim().toLowerCase();
+                        if (!term) return true;
+                        const name = (tenant.full_name || '').toLowerCase();
+                        const email = (tenant.email || '').toLowerCase();
+                        return name.includes(term) || email.includes(term);
+                      })
+                      .map((tenant) => {
+                        const isChecked = formData.recipientIds.includes(tenant.user_id);
+                        return (
+                          <label key={tenant.user_id} className="flex items-center gap-2 text-sm">
+                            <input
+                              type="checkbox"
+                              checked={isChecked}
+                              onChange={(e) => {
+                                const next = e.target.checked
+                                  ? [...formData.recipientIds, tenant.user_id]
+                                  : formData.recipientIds.filter((id) => id !== tenant.user_id);
+                                setFormData({ ...formData, recipientIds: next });
+                              }}
+                            />
+                            <span>
+                              {tenant.full_name || 'Unnamed'} {tenant.email ? `(${tenant.email})` : ''}
+                            </span>
+                          </label>
+                        );
+                      })}
+                    {(tenants || []).length === 0 && (
+                      <p className={`text-xs ${text.muted}`}>No tenants available.</p>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+            {errors.recipients && (
+              <p className="text-red-400 text-sm mt-2">{errors.recipients}</p>
+            )}
           </div>
 
           {/* Custom Schedule (shown only if frequency is custom) */}

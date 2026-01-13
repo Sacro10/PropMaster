@@ -958,6 +958,7 @@ export function CommunicationHub() {
           setEditingReminder(null);
         }}
         reminder={editingReminder}
+        tenants={tenants}
         templates={templates}
       />
     </FeatureGate>

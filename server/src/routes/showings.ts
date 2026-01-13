@@ -9,6 +9,7 @@ import {
   getShowingStatistics,
   regenerateAccessCode,
   sendShowingReminder,
+  markShowingReminderSent,
   getAvailableUnits,
   CreateShowingData,
 } from '../services/showingsService';
@@ -281,6 +282,33 @@ router.post(
       }
       res.status(500).json({
         error: 'Failed to send reminder',
+        details: error instanceof Error ? error.message : 'Unknown error',
+      });
+    }
+  }
+);
+
+/**
+ * POST /api/showings/:id/reminder-sent
+ * Mark reminder as sent (client-composed email)
+ */
+router.post(
+  '/:id/reminder-sent',
+  authenticate,
+  Permissions.updateShowings,
+  async (req: AuthRequest, res) => {
+    try {
+      if (!req.user?.accountId) {
+        res.status(400).json({ error: 'Account ID required' });
+        return;
+      }
+
+      await markShowingReminderSent(req.user.accountId, req.user.id, req.params.id);
+      res.json({ success: true });
+    } catch (error) {
+      console.error('Mark reminder sent error:', error);
+      res.status(500).json({
+        error: 'Failed to mark reminder as sent',
         details: error instanceof Error ? error.message : 'Unknown error',
       });
     }

@@ -853,7 +853,31 @@ export async function runScreening(
     .select()
     .single();
 
-  if (error) throw error;
+  if (error) {
+    if (error.code === '42P01' || error.code === '42703') {
+      console.warn('[Screening] screening_results table unavailable; returning computed result only.');
+      return {
+        id: `screening-${applicationId}`,
+        applicationId,
+        provider: screeningProvider,
+        creditScore,
+        backgroundCheckStatus,
+        evictionHistory,
+        criminalHistory,
+        incomeVerificationStatus,
+        riskScore,
+        riskLevel,
+        recommendation,
+        reasons,
+        notes,
+        riskFactors: mergedRiskFactors,
+        recommendations: mergedRecommendations,
+        screenedAt: new Date().toISOString(),
+      };
+    }
+
+    throw error;
+  }
 
   await logActivityEvent(
     accountId,

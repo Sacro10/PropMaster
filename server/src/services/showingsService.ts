@@ -692,6 +692,47 @@ export async function sendShowingReminder(
   });
 }
 
+export async function markShowingReminderSent(
+  accountId: string,
+  userId: string,
+  showingId: string
+): Promise<void> {
+  const { data: showing, error: showingError } = await supabase
+    .from('showings')
+    .select('id, visitor_name, visitor_email')
+    .eq('id', showingId)
+    .eq('account_id', accountId)
+    .single();
+
+  if (showingError || !showing) {
+    throw new Error('Showing not found');
+  }
+
+  const { error: updateError } = await supabase
+    .from('showings')
+    .update({
+      reminder_sent_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', showingId)
+    .eq('account_id', accountId);
+
+  if (updateError) {
+    throw updateError;
+  }
+
+  await logActivityEvent(
+    accountId,
+    userId,
+    'showing_reminder_sent',
+    `Reminder marked as sent to ${showing.visitor_name} (${showing.visitor_email})`,
+    {
+      entityType: 'showing',
+      entityId: showingId,
+    }
+  );
+}
+
 /**
  * Get available units for showings
  */

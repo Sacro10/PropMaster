@@ -6,6 +6,8 @@
 import { supabase } from '../supabaseClient';
 import { getCurrentAccountId, handleSupabaseError } from './client';
 
+const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+
 export interface MaintenanceMetrics {
   active_requests: number;
   avg_response_time_hours: number;
@@ -278,7 +280,7 @@ export async function assignMaintenanceRequest(requestId: string, vendorProfileI
     }
 
     // Use backend endpoint for assignment logic
-    const response = await fetch(`/api/maintenance/${requestId}/assign`, {
+    const response = await fetch(`${API_BASE}/api/maintenance/${requestId}/assign`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -307,7 +309,7 @@ export async function getAvailableVendors(requestId: string): Promise<Array<{
   hourlyRate: number;
 }>> {
   try {
-    const response = await fetch(`/api/maintenance/${requestId}/vendors`);
+    const response = await fetch(`${API_BASE}/api/maintenance/${requestId}/vendors`);
 
     if (response.ok) {
       const vendors = await response.json();
@@ -327,7 +329,7 @@ export async function getAvailableVendors(requestId: string): Promise<Array<{
 
     const { data, error } = await supabase
       .from('vendor_profiles')
-      .select('id, business_name, company_name, avg_rating, total_jobs_completed, is_active')
+      .select('id, business_name, avg_rating, total_jobs_completed, is_active')
       .eq('account_id', accountId)
       .eq('is_active', true);
 
@@ -337,7 +339,7 @@ export async function getAvailableVendors(requestId: string): Promise<Array<{
 
     return (data || []).map((vendor: any) => ({
       id: vendor.id,
-      businessName: vendor.business_name || vendor.company_name || 'Vendor',
+      businessName: vendor.business_name || 'Vendor',
       rating: vendor.avg_rating ?? 0,
       jobsCompleted: vendor.total_jobs_completed ?? 0,
       hourlyRate: 85,
@@ -359,7 +361,7 @@ export async function createEmergencyRequest(data: {
   notificationChannels?: string[];
 }): Promise<any> {
   try {
-    const response = await fetch('/api/maintenance/emergency', {
+    const response = await fetch(`${API_BASE}/api/maintenance/emergency`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -380,7 +382,7 @@ export async function createEmergencyRequest(data: {
 }
 
 export async function getEmergencySupportConfig(): Promise<EmergencySupportConfig> {
-  const response = await fetch('/api/maintenance/emergency-config');
+  const response = await fetch(`${API_BASE}/api/maintenance/emergency-config`);
 
   if (!response.ok) {
     const error = await response.json();
@@ -391,7 +393,7 @@ export async function getEmergencySupportConfig(): Promise<EmergencySupportConfi
 }
 
 export async function updateEmergencySupportConfig(data: EmergencySupportConfig): Promise<EmergencySupportConfig> {
-  const response = await fetch('/api/maintenance/emergency-config', {
+  const response = await fetch(`${API_BASE}/api/maintenance/emergency-config`, {
     method: 'PUT',
     headers: {
       'Content-Type': 'application/json',
@@ -415,7 +417,7 @@ export async function sendEmergencyTest(data: {
   propertyId?: string;
   notificationChannels?: string[];
 }): Promise<{ notifications: Array<{ channel: string; sent: boolean; status?: number; error?: string }> }> {
-  const response = await fetch('/api/maintenance/emergency-test', {
+  const response = await fetch(`${API_BASE}/api/maintenance/emergency-test`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',

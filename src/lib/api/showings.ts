@@ -299,6 +299,41 @@ export async function sendShowingReminder(showingId: string) {
 }
 
 /**
+ * Mark reminder as sent (client-composed email)
+ */
+export async function markShowingReminderSent(showingId: string) {
+  try {
+    const accountId = await getCurrentAccountId();
+    if (!accountId) {
+      throw new Error('No account ID found');
+    }
+
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) {
+      throw new Error('No active session');
+    }
+
+    const response = await fetch(`${API_BASE}/api/showings/${showingId}/reminder-sent`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${session.access_token}`,
+        'Content-Type': 'application/json',
+      },
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.error || 'Failed to mark reminder as sent');
+    }
+
+    return await response.json();
+  } catch (error) {
+    console.error('[Showings API] Error marking reminder sent:', error);
+    throw error;
+  }
+}
+
+/**
  * Regenerate access code
  */
 export async function regenerateAccessCode(showingId: string) {
