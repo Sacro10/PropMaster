@@ -6,6 +6,8 @@
 import { supabase } from '../supabaseClient';
 import { getCurrentAccountId, handleSupabaseError } from './client';
 
+const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+
 export interface CreateApplicationData {
   firstName: string;
   lastName: string;
@@ -99,17 +101,28 @@ export async function runScreening(applicationId: string) {
       throw new Error('No account ID found');
     }
 
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) {
+      throw new Error('No active session');
+    }
+
     // Call the backend API to run screening
-    const response = await fetch(`/api/applications/${applicationId}/screen`, {
+    const response = await fetch(`${API_BASE}/api/applications/${applicationId}/screen`, {
       method: 'POST',
       headers: {
+        'Authorization': `Bearer ${session.access_token}`,
         'Content-Type': 'application/json',
       },
     });
 
     if (!response.ok) {
-      const errorData = await response.json();
-      throw new Error(errorData.error || 'Failed to run screening');
+      const contentType = response.headers.get('content-type') || '';
+      if (contentType.includes('application/json')) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to run screening');
+      }
+      const errorText = await response.text();
+      throw new Error(errorText || 'Failed to run screening');
     }
 
     const data = await response.json();

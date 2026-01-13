@@ -82,19 +82,39 @@ async function processReminder(reminder: Reminder): Promise<void> {
 
     // Get recipients based on reminder type
     const recipients = await getRecipients(reminder);
-    recipientsCount = recipients.length;
+    const recipientsWithEmail = recipients.filter((recipient) => recipient.email);
+    recipientsCount = recipientsWithEmail.length;
 
     console.log(`[Reminders Job] Found ${recipientsCount} recipients for ${reminder.name}`);
 
     if (recipientsCount === 0) {
       console.log(`[Reminders Job] No recipients found for ${reminder.name}, skipping`);
+      await supabase
+        .from('automated_reminders')
+        .update({ recipient_count: 0 })
+        .eq('id', reminder.id)
+        .eq('account_id', reminder.account_id);
       await updateReminderNextSend(reminder);
       return;
     }
 
+    await supabase
+      .from('automated_reminders')
+      .update({ recipient_count: recipientsCount })
+      .eq('id', reminder.id)
+      .eq('account_id', reminder.account_id);
+
     // Send messages to all recipients
     for (const recipient of recipients) {
       try {
+        if (!recipient.email) {
+          console.warn(
+            `[Reminders Job] Skipping ${recipient.user_id} for ${reminder.name} (missing email)`
+          );
+          messagesFailed++;
+          continue;
+        }
+
         const body = replaceVariables(reminder.message_body, reminder, recipient);
         const subject = replaceVariables(reminder.message_subject, reminder, recipient);
 
@@ -237,16 +257,19 @@ async function getRecipients(reminder: Reminder): Promise<Tenant[]> {
 
   // Transform to Tenant format
   return (
-    data?.map((tp: any) => ({
-      id: tp.id,
-      user_id: tp.user_id,
-      account_id: tp.account_id,
-      email: tp.user?.email || '',
-      full_name: tp.user?.raw_user_meta_data?.full_name || tp.user?.email || 'Tenant',
-      lease_id: tp.lease?.id,
-      unit_id: tp.lease?.unit_id,
-      property_id: tp.lease?.property_id,
-    })) || []
+    data?.map((tp: any) => {
+      const email = tp.email || tp.user?.email || '';
+      return {
+        id: tp.id,
+        user_id: tp.user_id,
+        account_id: tp.account_id,
+        email,
+        full_name: tp.full_name || tp.user?.raw_user_meta_data?.full_name || email || 'Tenant',
+        lease_id: tp.lease?.id,
+        unit_id: tp.lease?.unit_id,
+        property_id: tp.lease?.property_id,
+      };
+    }) || []
   );
 }
 

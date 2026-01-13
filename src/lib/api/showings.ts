@@ -286,7 +286,9 @@ export async function sendShowingReminder(showingId: string) {
 
     if (!response.ok) {
       const error = await response.json();
-      throw new Error(error.error || 'Failed to send reminder');
+      const err = new Error(error.error || 'Failed to send reminder') as Error & { code?: string };
+      err.code = error.code;
+      throw err;
     }
 
     return await response.json();

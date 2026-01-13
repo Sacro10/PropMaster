@@ -309,11 +309,39 @@ export async function getAvailableVendors(requestId: string): Promise<Array<{
   try {
     const response = await fetch(`/api/maintenance/${requestId}/vendors`);
 
-    if (!response.ok) {
-      throw new Error('Failed to fetch available vendors');
+    if (response.ok) {
+      const vendors = await response.json();
+      if (Array.isArray(vendors) && vendors.length > 0) {
+        return vendors;
+      }
+    }
+  } catch (error) {
+    console.warn('[Maintenance Metrics API] API vendor fetch failed, falling back to direct query:', error);
+  }
+
+  try {
+    const accountId = await getCurrentAccountId();
+    if (!accountId) {
+      throw new Error('No account ID found');
     }
 
-    return await response.json();
+    const { data, error } = await supabase
+      .from('vendor_profiles')
+      .select('id, business_name, company_name, avg_rating, total_jobs_completed, is_active')
+      .eq('account_id', accountId)
+      .eq('is_active', true);
+
+    if (error) {
+      throw handleSupabaseError(error, 'fetch available vendors');
+    }
+
+    return (data || []).map((vendor: any) => ({
+      id: vendor.id,
+      businessName: vendor.business_name || vendor.company_name || 'Vendor',
+      rating: vendor.avg_rating ?? 0,
+      jobsCompleted: vendor.total_jobs_completed ?? 0,
+      hourlyRate: 85,
+    }));
   } catch (error) {
     console.error('[Maintenance Metrics API] Error fetching vendors:', error);
     return [];

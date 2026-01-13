@@ -17,6 +17,7 @@ import communicationsRoutes from './routes/communications';
 import analyticsRoutes from './routes/analytics';
 import demoRoutes from './routes/demo';
 import systemRoutes from './routes/system';
+import integrationsRoutes from './routes/integrations';
 import { errorHandler } from './middleware/errorHandler';
 import { rateLimiters } from './middleware/rateLimiter';
 import { startJobs, stopJobs } from './jobs';
@@ -134,6 +135,7 @@ app.use('/api/messages', messagesRoutes);
 app.use('/api/demo', demoRoutes);
 app.use('/api/analytics', analyticsRoutes);
 app.use('/api/system', systemRoutes);
+app.use('/api/integrations', integrationsRoutes);
 app.use('/api', checkoutRoutes);
 
 // 404 handler

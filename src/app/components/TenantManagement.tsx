@@ -82,7 +82,11 @@ export function TenantManagement() {
       const newApp = await createApplication(data);
       // Automatically run screening
       if (newApp.id) {
-        await runScreening(newApp.id);
+        try {
+          await runScreening(newApp.id);
+        } catch (screeningError) {
+          console.error('Failed to run screening:', screeningError);
+        }
       }
       await refetchApps();
     } catch (error) {

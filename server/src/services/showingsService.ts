@@ -1,5 +1,6 @@
 import { supabaseAdmin as supabase } from '../supabase';
 import { logActivityEvent } from './activityService';
+import { sendGmailMessage } from './gmailService';
 
 function formatPropertyAddress(property: any) {
   if (!property) return '';
@@ -600,7 +601,25 @@ export async function sendShowingReminder(
 
   const reminderMessage = `Reminder sent to ${showing.visitor_name} (${showing.visitor_email})`;
   const scheduledAt = showing.scheduled_at;
-  
+  const propertyName = (showing as any).property?.name || 'Property';
+  const unitNumber = (showing as any).unit?.unit_number ? ` #${(showing as any).unit.unit_number}` : '';
+  const subject = `Showing reminder: ${propertyName}${unitNumber}`;
+  const body = `Reminder: Your showing is scheduled for ${new Date(scheduledAt).toLocaleString('en-US', {
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  })} at ${propertyName}${unitNumber}. Access code: ${showing.access_code || 'N/A'}.`;
+
+  await sendGmailMessage({
+    accountId,
+    userId,
+    to: showing.visitor_email,
+    subject,
+    body,
+  });
+
   // Update reminder_sent_at
   const { error: updateError } = await supabase
     .from('showings')
@@ -615,17 +634,6 @@ export async function sendShowingReminder(
     console.error('Error updating reminder timestamp:', updateError);
   }
 
-  const propertyName = (showing as any).property?.name || 'Property';
-  const unitNumber = (showing as any).unit?.unit_number ? ` #${(showing as any).unit.unit_number}` : '';
-  const subject = `Showing reminder: ${propertyName}${unitNumber}`;
-  const body = `Reminder: Your showing is scheduled for ${new Date(scheduledAt).toLocaleString('en-US', {
-    weekday: 'short',
-    month: 'short',
-    day: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-  })} at ${propertyName}${unitNumber}. Access code: ${showing.access_code || 'N/A'}.`;
-
   try {
     const { data: outbound, error: outboundError } = await supabase
       .from('outbound_messages')
@@ -637,8 +645,10 @@ export async function sendShowingReminder(
         subject,
         body,
         channel: 'email',
-        status: 'pending',
+        status: 'sent',
         retry_count: 0,
+        provider: 'gmail',
+        sent_at: new Date().toISOString(),
       })
       .select()
       .single();
@@ -647,16 +657,11 @@ export async function sendShowingReminder(
       throw outboundError;
     }
 
-    await supabase
-      .from('outbound_messages')
-      .update({
-        status: 'sent',
-        sent_at: new Date().toISOString(),
-        provider: 'stub',
-      })
-      .eq('id', outbound.id);
+    if (!outbound) {
+      return;
+    }
   } catch (error) {
-    console.error('Error sending showing reminder:', error);
+    console.error('Error logging outbound message:', error);
   }
 
   // Log activity

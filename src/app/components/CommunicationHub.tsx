@@ -850,6 +850,9 @@ export function CommunicationHub() {
                     <span className={text.muted}>Recipients</span>
                     <span className="font-medium">{reminder.recipientCount}</span>
                   </div>
+                  {reminder.recipientCount === 0 && (
+                    <p className="text-xs text-amber-500">No recipients with email on file</p>
+                  )}
                   <div className="flex items-center justify-between text-sm">
                     <span className={text.muted}>Frequency</span>
                     <span className="font-medium capitalize">{reminder.frequency}</span>

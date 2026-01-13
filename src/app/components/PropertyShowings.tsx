@@ -1,5 +1,5 @@
 import { Key, Clock, CircleCheck, Calendar, RefreshCw } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useHasFeature } from '../hooks/usePlanGating';
 import { useThemeStyles } from '../hooks/useThemeStyles';
 import { FeatureGate } from './UpgradeCTA';
@@ -13,6 +13,7 @@ import {
 import { sendShowingReminder } from '../../lib/api/showings';
 import { formatRelativeTime } from '../../lib/utils/dateHelpers';
 import { ScheduleShowingModal } from './ScheduleShowingModal';
+import { getGmailConnectUrl, getGmailStatus } from '../../lib/api/integrations';
 
 export function PropertyShowings() {
   const { isDark, text, border } = useThemeStyles();
@@ -20,6 +21,7 @@ export function PropertyShowings() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedUnitId, setSelectedUnitId] = useState<string | undefined>(undefined);
   const [selectedShowing, setSelectedShowing] = useState<any | null>(null);
+  const [gmailStatus, setGmailStatus] = useState<{ connected: boolean; email?: string | null } | null>(null);
 
   // Feature checks for plan gating - Electronic showings require Premium
   const electronicShowings = useHasFeature('electronic_showings');
@@ -28,6 +30,33 @@ export function PropertyShowings() {
   const { data: showings, loading: showingsLoading, error: showingsError, refetch: refetchShowings } = useUpcomingShowings();
   const { data: availableProperties, loading: propertiesLoading } = useAvailableProperties();
   const { data: stats, loading: statsLoading } = useShowingStats();
+
+  useEffect(() => {
+    const searchParams = new URLSearchParams(window.location.search);
+    const gmailResult = searchParams.get('gmail');
+    if (gmailResult) {
+      if (gmailResult === 'connected') {
+        alert('Gmail connected successfully!');
+      } else if (gmailResult === 'error') {
+        alert('Gmail connection failed. Please try again.');
+      }
+      searchParams.delete('gmail');
+      const newUrl = `${window.location.pathname}?${searchParams.toString()}`.replace(/\?$/, '');
+      window.history.replaceState({}, '', newUrl);
+    }
+  }, []);
+
+  useEffect(() => {
+    const loadStatus = async () => {
+      try {
+        const status = await getGmailStatus();
+        setGmailStatus(status);
+      } catch (error) {
+        console.error('Failed to load Gmail status:', error);
+      }
+    };
+    loadStatus();
+  }, []);
 
   // Handle sending reminder
   const handleSendReminder = async (showingId: string) => {
@@ -39,9 +68,24 @@ export function PropertyShowings() {
       alert('Reminder sent successfully!');
     } catch (error) {
       console.error('Error sending reminder:', error);
-      alert('Failed to send reminder. Please try again.');
+      const code = (error as Error & { code?: string }).code;
+      if (code === 'GMAIL_NOT_CONNECTED') {
+        alert('Please connect Gmail before sending reminders.');
+      } else {
+        alert('Failed to send reminder. Please try again.');
+      }
     } finally {
       setSendingReminder(null);
+    }
+  };
+
+  const handleConnectGmail = async () => {
+    try {
+      const url = await getGmailConnectUrl();
+      window.location.href = url;
+    } catch (error) {
+      console.error('Failed to start Gmail OAuth:', error);
+      alert('Failed to connect Gmail. Please try again.');
     }
   };
 
@@ -123,6 +167,15 @@ export function PropertyShowings() {
             >
               <RefreshCw className="w-4 h-4" />
             </button>
+            {gmailStatus && !gmailStatus.connected && (
+              <button
+                onClick={handleConnectGmail}
+                className={`px-4 py-2 ${isDark ? 'bg-white/5 hover:bg-white/10' : 'bg-gray-100 hover:bg-gray-200'} rounded-lg text-sm transition-colors`}
+                style={{ fontFamily: 'Work Sans, sans-serif' }}
+              >
+                Connect Gmail
+              </button>
+            )}
             <button
               onClick={() => handleOpenModal()}
               className="px-6 py-3 bg-gradient-to-r from-[#ff6b35] to-[#f7931e] rounded-lg font-medium hover:scale-105 transition-transform"

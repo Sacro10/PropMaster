@@ -272,6 +272,13 @@ router.post(
       res.json({ success: true, message: 'Reminder sent successfully' });
     } catch (error) {
       console.error('Send reminder error:', error);
+      if (error instanceof Error && error.message === 'GMAIL_NOT_CONNECTED') {
+        res.status(400).json({
+          error: 'Gmail not connected',
+          code: 'GMAIL_NOT_CONNECTED',
+        });
+        return;
+      }
       res.status(500).json({
         error: 'Failed to send reminder',
         details: error instanceof Error ? error.message : 'Unknown error',

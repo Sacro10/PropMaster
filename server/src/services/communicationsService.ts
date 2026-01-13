@@ -1025,6 +1025,15 @@ export async function sendOutboundMessage(
 ): Promise<OutboundMessage> {
   // Get recipient details
   const { data: user } = await supabase.auth.admin.getUserById(data.recipientUserId);
+  const { data: profile } = await supabase
+    .from('tenant_profiles')
+    .select('email, phone')
+    .eq('account_id', accountId)
+    .eq('user_id', data.recipientUserId)
+    .maybeSingle();
+
+  const recipientEmail = profile?.email || user?.user?.email || null;
+  const recipientPhone = profile?.phone || user?.user?.user_metadata?.phone || null;
 
   const { data: outbound, error } = await supabase
     .from('outbound_messages')
@@ -1034,8 +1043,8 @@ export async function sendOutboundMessage(
       conversation_id: data.conversationId,
       reminder_id: data.reminderId,
       recipient_user_id: data.recipientUserId,
-      recipient_email: user?.user?.email,
-      recipient_phone: user?.user?.user_metadata?.phone,
+      recipient_email: recipientEmail,
+      recipient_phone: recipientPhone,
       subject: data.subject,
       body: data.body,
       channel: data.channel,
@@ -1189,18 +1198,5 @@ function buildFallbackSuggestion(
     return 'Thanks for reaching out. I received your message and will follow up shortly.';
   }
 
-  const latest = messages[0];
-  const subject = latest.subject?.trim();
-  const body = latest.body?.trim();
-  const snippetSource = subject || body || '';
-  const snippet =
-    snippetSource.length > 120
-      ? `${snippetSource.slice(0, 117)}...`
-      : snippetSource;
-
-  if (!snippet) {
-    return 'Thanks for the update. I will review this and get back to you shortly.';
-  }
-
-  return `Thanks for the update about "${snippet}". I will review this and get back to you shortly.`;
+  return 'Thanks for the update. I will review this and get back to you shortly.';
 }
