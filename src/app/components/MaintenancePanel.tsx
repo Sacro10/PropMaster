@@ -272,6 +272,16 @@ export function MaintenancePanel() {
                   </option>
                 ))}
               </select>
+              <button
+                onClick={() => {
+                  setSelectedPriority('all');
+                  setSelectedStatus('all');
+                  setShowAllRequests(false);
+                }}
+                className={`px-4 py-2 ${isDark ? 'bg-white/5 hover:bg-white/10' : 'bg-gray-50 hover:bg-gray-100'} border ${border.default} rounded-lg text-sm transition-colors`}
+              >
+                Clear Filters
+              </button>
               <button className={`p-2 ${isDark ? 'bg-white/5 hover:bg-white/10' : 'bg-gray-50 hover:bg-gray-100'} rounded-lg transition-colors`}>
                 <ListFilter className="w-4 h-4" />
               </button>
@@ -450,74 +460,87 @@ export function MaintenancePanel() {
               />
             }
           >
-            <div className={`${isDark ? 'bg-gradient-to-br from-[#1a1f35] to-[#0f1523]' : 'bg-white shadow-md'} border ${border.default} rounded-xl p-6`}>
-              <div className="flex items-center gap-3 mb-6">
-                <div className="p-2 bg-gradient-to-br from-[#10b981] to-[#06b6d4] rounded-lg">
-                  <Activity className="w-5 h-5 text-white" />
+            <div className={`relative overflow-hidden ${isDark ? 'bg-gradient-to-br from-[#171c31] via-[#12182a] to-[#0c1220] shadow-[0_20px_60px_rgba(0,0,0,0.45)]' : 'bg-white shadow-md'} border ${border.default} rounded-2xl p-7`}>
+              {isDark && (
+                <div
+                  className="pointer-events-none absolute inset-0 opacity-40"
+                  style={{
+                    backgroundImage: 'radial-gradient(circle at 20% 20%, rgba(16,185,129,0.12), transparent 55%), radial-gradient(circle at 90% 10%, rgba(14,165,233,0.12), transparent 45%), linear-gradient(rgba(255,255,255,0.03) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px)',
+                    backgroundSize: '100% 100%, 100% 100%, 28px 28px, 28px 28px',
+                    backgroundPosition: 'center, center, -1px -1px, -1px -1px',
+                  }}
+                />
+              )}
+              <div className="relative z-10">
+                <div className="flex items-center gap-4 mb-6">
+                  <div className="p-3 bg-gradient-to-br from-[#10b981] to-[#06b6d4] rounded-2xl shadow-[0_8px_24px_rgba(16,185,129,0.35)]">
+                    <Activity className="w-6 h-6 text-white" />
+                  </div>
+                  <div>
+                    <h3 className="text-2xl tracking-wide" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
+                      HVAC FILTER PROGRAM
+                    </h3>
+                    <p className={`text-sm ${text.secondary}`} style={{ fontFamily: 'Work Sans, sans-serif' }}>
+                      Monthly tenant filter delivery program
+                    </p>
+                  </div>
                 </div>
-                <h3 className="text-xl" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
-                  HVAC FILTER PROGRAM
-                </h3>
-              </div>
 
-              <p className={`text-sm ${text.secondary} mb-4`} style={{ fontFamily: 'Work Sans, sans-serif' }}>
-                Monthly tenant filter delivery program
-              </p>
-
-              {hvacLoading ? (
-                <div className="space-y-3">
-                  {[...Array(3)].map((_, i) => (
-                    <div key={i} className={`p-3 ${isDark ? 'bg-white/5' : 'bg-gray-50'} rounded-lg animate-pulse`}>
-                      <div className="h-4 bg-white/10 rounded w-1/2 mb-2"></div>
-                      <div className="h-3 bg-white/10 rounded w-3/4"></div>
-                    </div>
-                  ))}
-                </div>
-              ) : hvacProgram.length === 0 ? (
-                <div className="text-center py-8">
-                  <p className={`text-sm ${text.muted}`}>No active HVAC subscriptions</p>
-                </div>
-              ) : (
-                <>
-                  <div className="space-y-3">
-                    {hvacProgram.map((property) => (
-                      <div
-                        key={property.property_id}
-                        className={`p-3 ${isDark ? 'bg-white/5' : 'bg-gray-50'} rounded-lg border ${border.default}`}
-                      >
-                        <div className="flex items-center justify-between mb-2">
-                          <p className="font-medium text-sm" style={{ fontFamily: 'Work Sans, sans-serif' }}>
-                            {property.property_name}
-                          </p>
-                          <span className={`text-xs ${text.muted}`}>{property.unit_count} units</span>
-                        </div>
-                        <div className="flex items-center justify-between text-xs">
-                          <span className={text.muted}>
-                            Next delivery: {property.next_delivery ? formatDisplayDate(property.next_delivery, 'MMM d') : 'Not scheduled'}
-                          </span>
-                          <span className="text-emerald-400">{property.total_filters} filters</span>
-                        </div>
+                {hvacLoading ? (
+                  <div className="space-y-4">
+                    {[...Array(3)].map((_, i) => (
+                      <div key={i} className={`p-4 ${isDark ? 'bg-white/5' : 'bg-gray-50'} rounded-xl animate-pulse`}>
+                        <div className="h-4 bg-white/10 rounded w-1/2 mb-2"></div>
+                        <div className="h-3 bg-white/10 rounded w-3/4"></div>
                       </div>
                     ))}
                   </div>
-
-                  <div className={`mt-4 p-3 ${isDark ? 'bg-emerald-500/10' : 'bg-emerald-50'} border border-emerald-500/20 rounded-lg`}>
-                    <p className="text-sm text-emerald-400 mb-1 font-medium">
-                      {hvacProgram.reduce((sum, p) => sum + p.total_filters, 0)} filters scheduled
-                    </p>
-                    <p className={`text-xs ${text.muted} mb-3`}>
-                      Across {hvacProgram.length} properties
-                    </p>
-                    <button
-                      onClick={handleGenerateBatch}
-                      disabled={generatingBatch}
-                      className={`w-full py-2 ${isDark ? 'bg-emerald-500/20 hover:bg-emerald-500/30' : 'bg-emerald-100 hover:bg-emerald-200'} text-emerald-400 rounded-lg text-xs font-medium transition-colors ${generatingBatch ? 'opacity-50 cursor-not-allowed' : ''}`}
-                    >
-                      {generatingBatch ? 'Generating...' : 'Generate Next Batch'}
-                    </button>
+                ) : hvacProgram.length === 0 ? (
+                  <div className="text-center py-10">
+                    <p className={`text-sm ${text.muted}`}>No active HVAC subscriptions</p>
                   </div>
-                </>
-              )}
+                ) : (
+                  <>
+                    <div className="space-y-4">
+                      {hvacProgram.map((property) => (
+                        <div
+                          key={property.property_id}
+                          className={`p-4 ${isDark ? 'bg-white/5 backdrop-blur-sm' : 'bg-gray-50'} rounded-2xl border ${border.default}`}
+                        >
+                          <div className="flex items-center justify-between mb-2">
+                            <p className="font-semibold text-sm tracking-wide" style={{ fontFamily: 'Work Sans, sans-serif' }}>
+                              {property.property_name}
+                            </p>
+                            <span className={`text-xs ${text.muted}`}>{property.unit_count} units</span>
+                          </div>
+                          <div className="flex items-center justify-between text-xs">
+                            <span className={text.muted}>
+                              Next delivery: {property.next_delivery ? formatDisplayDate(property.next_delivery, 'MMM d') : 'Not scheduled'}
+                            </span>
+                            <span className="text-emerald-400 font-semibold">{property.total_filters} filters</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className={`mt-5 p-4 ${isDark ? 'bg-emerald-500/10' : 'bg-emerald-50'} border border-emerald-500/30 rounded-2xl`}>
+                      <p className={`text-base ${isDark ? 'text-emerald-300' : 'text-emerald-700'} mb-1 font-semibold`}>
+                        {hvacProgram.reduce((sum, p) => sum + p.total_filters, 0)} filters scheduled
+                      </p>
+                      <p className={`text-sm ${text.muted} mb-4`}>
+                        Across {hvacProgram.length} properties
+                      </p>
+                      <button
+                        onClick={handleGenerateBatch}
+                        disabled={generatingBatch}
+                        className={`w-full py-3 ${isDark ? 'bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300' : 'bg-emerald-100 hover:bg-emerald-200 text-emerald-700'} rounded-xl text-sm font-semibold transition-colors ${generatingBatch ? 'opacity-50 cursor-not-allowed' : ''}`}
+                      >
+                        {generatingBatch ? 'Generating...' : 'Generate Next Batch'}
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
             </div>
           </FeatureGate>
 

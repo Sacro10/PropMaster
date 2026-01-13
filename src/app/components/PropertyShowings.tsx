@@ -21,6 +21,7 @@ export function PropertyShowings() {
   const [selectedUnitId, setSelectedUnitId] = useState<string | undefined>(undefined);
   const [selectedShowing, setSelectedShowing] = useState<any | null>(null);
   const [reminderConfirmShowing, setReminderConfirmShowing] = useState<any | null>(null);
+  const [showAllShowings, setShowAllShowings] = useState(false);
 
   // Feature checks for plan gating - Electronic showings require Premium
   const electronicShowings = useHasFeature('electronic_showings');
@@ -80,6 +81,9 @@ export function PropertyShowings() {
   const handleCloseDetails = () => {
     setSelectedShowing(null);
   };
+
+  const visibleShowings = showAllShowings ? showings : showings.slice(0, 5);
+  const hasExtraShowings = showings.length > 5;
 
   // Transform available properties for modal
   const modalUnits = availableProperties.map((prop) => ({
@@ -178,7 +182,7 @@ export function PropertyShowings() {
               </div>
             ) : (
               <div className="space-y-4">
-                {showings.map((showing) => {
+                {visibleShowings.map((showing) => {
                   const property = showing.property;
                   const unit = showing.unit;
                   const propertyName = property?.name || 'Unknown Property';
@@ -269,6 +273,17 @@ export function PropertyShowings() {
                     </div>
                   );
                 })}
+                {hasExtraShowings && (
+                  <div className="pt-2">
+                    <button
+                      onClick={() => setShowAllShowings((prev) => !prev)}
+                      className={`px-4 py-2 ${isDark ? 'bg-white/5 hover:bg-white/10' : 'bg-gray-100 hover:bg-gray-200'} rounded-lg text-sm transition-colors`}
+                      style={{ fontFamily: 'Work Sans, sans-serif' }}
+                    >
+                      {showAllShowings ? 'Show less' : 'Show all showings'}
+                    </button>
+                  </div>
+                )}
               </div>
             )}
           </div>
