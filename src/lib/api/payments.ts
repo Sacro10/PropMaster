@@ -191,7 +191,7 @@ export async function getOverduePayments(): Promise<Payment[]> {
       tenant: {
         id: p.tenantUserId || p.tenant_user_id || '',
         name: p.tenantName || p.tenant_name || 'Unknown',
-        email: '',
+        email: p.tenantEmail || p.tenant_email || '',
       },
       unit: {
         id: p.unitId || p.unit_id || '',
@@ -226,6 +226,7 @@ export async function getPendingPayments() {
       return {
         id: payment.id,
         tenant: payment.tenant?.name || 'Unknown Tenant',
+        tenantEmail: payment.tenant?.email || '',
         property: payment.property?.name || 'Unknown Property',
         unit: payment.unit?.unit_number || '',
         amount: payment.amount,

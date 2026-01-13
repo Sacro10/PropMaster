@@ -1,4 +1,4 @@
-import { DollarSign, TrendingUp, CircleCheck, Clock, Activity, RefreshCw, AlertCircle } from 'lucide-react';
+import { DollarSign, TrendingUp, CircleCheck, Clock, Activity, RefreshCw, X } from 'lucide-react';
 import { useHasFeature } from '../hooks/usePlanGating';
 import { useThemeStyles } from '../hooks/useThemeStyles';
 import { FeatureGate } from './UpgradeCTA';
@@ -9,7 +9,6 @@ import {
   usePendingPayments,
   useOwnerDisbursements,
   useCollectionStats,
-  useSendPaymentReminder,
 } from '../../lib/hooks/usePayments';
 import { processDisbursement } from '../../lib/api/payments';
 import { formatCurrency, formatCurrencyCompact } from '../../lib/utils/currencyHelpers';
@@ -21,16 +20,16 @@ export function RentCollection() {
   const [processingDisbursement, setProcessingDisbursement] = useState<string | null>(null);
   const [showAllTransactions, setShowAllTransactions] = useState(false);
   const [showAllPendingPayments, setShowAllPendingPayments] = useState(false);
+  const [selectedPendingPayment, setSelectedPendingPayment] = useState<any | null>(null);
 
   // Feature checks for plan gating
   const integratedAccounting = useHasFeature('integrated_accounting');
 
   // Fetch data
   const { data: recentPayments, loading: paymentsLoading, error: paymentsError, refetch: refetchPayments } = useRecentPayments();
-  const { data: pendingPayments, loading: pendingLoading, refetch: refetchPending } = usePendingPayments();
+  const { data: pendingPayments, loading: pendingLoading } = usePendingPayments();
   const { data: disbursements, loading: disbursementsLoading, refetch: refetchDisbursements } = useOwnerDisbursements();
   const { data: stats, loading: statsLoading } = useCollectionStats();
-  const { sendReminder, loading: sendingReminder } = useSendPaymentReminder();
 
   // Show loading state
   if (paymentsLoading || statsLoading) {
@@ -50,18 +49,34 @@ export function RentCollection() {
     { label: 'Avg. Collection Time', value: `${stats.avg_collection_time} days` },
   ] : [];
   const autoPayEnrolledPercent = stats ? Number(stats.auto_pay_enrolled) : 0;
-  const visiblePendingPayments = showAllPendingPayments ? pendingPayments : pendingPayments.slice(0, 5);
-  const hasExtraPendingPayments = pendingPayments.length > 5;
+  const visiblePendingPayments = showAllPendingPayments ? pendingPayments : pendingPayments.slice(0, 3);
+  const hasExtraPendingPayments = pendingPayments.length > 3;
+
+  const buildReminderMailto = (payment: any) => {
+    const propertyLabel = payment.unit ? `${payment.property} #${payment.unit}` : payment.property;
+    const subject = `Rent payment overdue - ${propertyLabel}`;
+    const body = [
+      `Hi ${payment.tenant},`,
+      '',
+      `This is a friendly reminder that your rent payment of ${formatCurrency(payment.amount)} for ${propertyLabel} was due on ${formatDisplayDate(payment.dueDate)} and is currently ${payment.daysOverdue} day${payment.daysOverdue !== 1 ? 's' : ''} overdue.`,
+      '',
+      'Please submit payment at your earliest convenience.',
+      '',
+      'Thank you,',
+      'Property Management',
+    ].join('\n');
+
+    return `mailto:${payment.tenantEmail}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+  };
 
   // Handle send reminder
-  const handleSendReminder = async (paymentId: string) => {
-    const result = await sendReminder(paymentId);
-    if (result.success) {
-      console.log('Reminder sent successfully');
-      refetchPending();
-    } else {
-      console.error('Failed to send reminder:', result.error);
+  const handleSendReminder = (payment: any) => {
+    if (!payment.tenantEmail) {
+      alert('No tenant email on file. Please add an email address to send a reminder.');
+      return;
     }
+
+    window.location.href = buildReminderMailto(payment);
   };
 
   // Handle process disbursement
@@ -287,14 +302,16 @@ export function RentCollection() {
 
                     <div className="flex gap-2">
                       <button
-                        onClick={() => handleSendReminder(payment.id)}
-                        disabled={sendingReminder}
+                        onClick={() => handleSendReminder(payment)}
+                        disabled={!payment.tenantEmail}
                         className="flex-1 px-3 py-2 bg-gradient-to-r from-[#ff6b35] to-[#f7931e] rounded-lg text-sm font-medium hover:scale-105 transition-transform disabled:opacity-50 disabled:cursor-not-allowed"
                         style={{ fontFamily: 'Work Sans, sans-serif' }}
+                        title={payment.tenantEmail ? 'Send reminder email' : 'Add a tenant email to send a reminder'}
                       >
-                        {sendingReminder ? 'Sending...' : 'Send Reminder'}
+                        Send Reminder
                       </button>
                       <button
+                        onClick={() => setSelectedPendingPayment(payment)}
                         className={`px-3 py-2 ${isDark ? 'bg-white/5 hover:bg-white/10' : 'bg-gray-200 hover:bg-gray-300'} rounded-lg text-sm transition-colors`}
                         style={{ fontFamily: 'Work Sans, sans-serif' }}
                       >
@@ -490,6 +507,81 @@ export function RentCollection() {
           </div>
         </div>
       </FeatureGate>
+
+      {/* Pending Payment Details Modal */}
+      {selectedPendingPayment && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div
+            className="absolute inset-0 bg-black/50 backdrop-blur-sm"
+            onClick={() => setSelectedPendingPayment(null)}
+          />
+          <div
+            className={`relative w-full max-w-lg ${
+              isDark ? 'bg-gradient-to-br from-[#1a1f35] to-[#0f1523]' : 'bg-white'
+            } border ${border.default} rounded-xl shadow-2xl`}
+          >
+            <div className="flex items-center justify-between p-6 border-b border-white/10">
+              <h3 className="text-2xl" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
+                PAYMENT DETAILS
+              </h3>
+              <button
+                onClick={() => setSelectedPendingPayment(null)}
+                className={`p-2 ${isDark ? 'hover:bg-white/10' : 'hover:bg-gray-100'} rounded-lg transition-colors`}
+                aria-label="Close details"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="p-6 space-y-4">
+              <div className="flex items-center justify-between">
+                <span className={`text-sm ${text.muted}`}>Tenant</span>
+                <span className={text.primary}>{selectedPendingPayment.tenant}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className={`text-sm ${text.muted}`}>Email</span>
+                <span className={text.primary}>{selectedPendingPayment.tenantEmail || 'No email on file'}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className={`text-sm ${text.muted}`}>Property</span>
+                <span className={text.primary}>
+                  {selectedPendingPayment.property}{selectedPendingPayment.unit ? ` #${selectedPendingPayment.unit}` : ''}
+                </span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className={`text-sm ${text.muted}`}>Amount Due</span>
+                <span className="text-lg font-semibold text-red-400" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
+                  {formatCurrency(selectedPendingPayment.amount)}
+                </span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className={`text-sm ${text.muted}`}>Due Date</span>
+                <span className={text.primary}>{formatDisplayDate(selectedPendingPayment.dueDate)}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className={`text-sm ${text.muted}`}>Days Overdue</span>
+                <span className={text.primary}>{selectedPendingPayment.daysOverdue}</span>
+              </div>
+              <div className="flex gap-2 pt-2">
+                <button
+                  onClick={() => handleSendReminder(selectedPendingPayment)}
+                  disabled={!selectedPendingPayment.tenantEmail}
+                  className="flex-1 px-3 py-2 bg-gradient-to-r from-[#ff6b35] to-[#f7931e] rounded-lg text-sm font-medium hover:scale-105 transition-transform disabled:opacity-50 disabled:cursor-not-allowed"
+                  style={{ fontFamily: 'Work Sans, sans-serif' }}
+                >
+                  Send Reminder
+                </button>
+                <button
+                  onClick={() => setSelectedPendingPayment(null)}
+                  className={`px-3 py-2 ${isDark ? 'bg-white/5 hover:bg-white/10' : 'bg-gray-200 hover:bg-gray-300'} rounded-lg text-sm transition-colors`}
+                  style={{ fontFamily: 'Work Sans, sans-serif' }}
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

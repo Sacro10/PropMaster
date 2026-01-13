@@ -17,6 +17,7 @@ export function TenantManagement() {
   const { isDark, bg, text, border } = useThemeStyles();
   const [isApproving, setIsApproving] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [showAllTenants, setShowAllTenants] = useState(false);
   const [selectedApplication, setSelectedApplication] = useState<any>(null);
   const [showNewApplicationForm, setShowNewApplicationForm] = useState(false);
 
@@ -47,6 +48,10 @@ export function TenantManagement() {
              unitNumber.includes(searchLower);
     });
   }, [tenants, searchQuery]);
+  const visibleTenants = (!showAllTenants && !searchQuery.trim())
+    ? filteredTenants.slice(0, 6)
+    : filteredTenants;
+  const hasExtraTenants = !searchQuery.trim() && filteredTenants.length > 6;
 
   // Handle approve
   const handleApprove = async (applicationId: string) => {
@@ -370,7 +375,7 @@ export function TenantManagement() {
                 </p>
               </div>
             ) : (
-              filteredTenants.map((tenant) => {
+              visibleTenants.map((tenant) => {
                 const initials = tenant.full_name
                   ? tenant.full_name.split(' ').map(n => n[0]).join('').substring(0, 2)
                   : 'T';
@@ -445,6 +450,17 @@ export function TenantManagement() {
               })
             )}
           </div>
+          {hasExtraTenants && (
+            <button
+              type="button"
+              onClick={() => setShowAllTenants((prev) => !prev)}
+              className={`w-full mt-4 py-3 ${isDark ? 'bg-white/5 hover:bg-white/10' : 'bg-gray-100 hover:bg-gray-200'} rounded-lg text-sm font-medium transition-colors`}
+              style={{ fontFamily: 'Work Sans, sans-serif' }}
+              aria-expanded={showAllTenants}
+            >
+              {showAllTenants ? 'Show less' : 'Show all tenants'}
+            </button>
+          )}
         </div>
 
         {/* Pending Applications - Gated by Pro plan (tenant_screening) */}

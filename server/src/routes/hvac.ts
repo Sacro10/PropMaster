@@ -201,9 +201,15 @@ router.post(
         });
         return;
       }
+      const details =
+        error instanceof Error
+          ? error.message
+          : typeof error === 'string'
+            ? error
+            : (error as { message?: string } | null)?.message || 'Unknown error';
       res.status(500).json({
         error: 'Failed to generate batch',
-        details: error instanceof Error ? error.message : 'Unknown error',
+        details,
       });
     }
   }

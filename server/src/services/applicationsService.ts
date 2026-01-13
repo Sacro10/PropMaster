@@ -1,3 +1,4 @@
+import { randomBytes } from 'crypto';
 import { supabaseAdmin as supabase } from '../supabase';
 import { logActivityEvent } from './activityService';
 import { AiDisabledError, generateStructuredJson, getAiStatus } from './aiClient';
@@ -443,8 +444,12 @@ export async function approveApplication(
     const fullName = `${application.firstName} ${application.lastName}`.trim();
     let resolvedUserId: string | null = null;
 
+    const temporaryPassword = randomBytes(18)
+      .toString('base64')
+      .replace(/[^a-zA-Z0-9]/g, '');
     const { data: createdUser, error: createUserError } = await supabase.auth.admin.createUser({
       email: application.email,
+      password: temporaryPassword,
       email_confirm: true,
       user_metadata: {
         full_name: fullName,

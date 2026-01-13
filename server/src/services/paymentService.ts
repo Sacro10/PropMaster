@@ -47,6 +47,7 @@ export interface OverduePayment {
   dueDate: string;
   daysOverdue: number;
   tenantName: string;
+  tenantEmail: string;
   propertyName: string;
   unitNumber: string;
 }
@@ -141,6 +142,19 @@ export async function getOverduePayments(accountId: string): Promise<OverduePaym
 
   if (error) throw error;
 
+  const tenantIds = Array.from(new Set((data || []).map((p: any) => p.tenant_user_id).filter(Boolean)));
+  const { data: tenantProfiles } = tenantIds.length > 0
+    ? await supabase
+        .from('tenant_profiles')
+        .select('user_id, email')
+        .eq('account_id', accountId)
+        .in('user_id', tenantIds)
+    : { data: [] as any[] };
+
+  const tenantEmailMap = new Map(
+    (tenantProfiles || []).map((t: any) => [t.user_id, t.email])
+  );
+
   return (data || []).map((p: any) => ({
     id: p.payment_id,
     leaseId: p.lease_id,
@@ -150,6 +164,7 @@ export async function getOverduePayments(accountId: string): Promise<OverduePaym
     dueDate: p.due_date,
     daysOverdue: p.days_overdue,
     tenantName: p.tenant_name,
+    tenantEmail: tenantEmailMap.get(p.tenant_user_id) || '',
     propertyName: p.property_name,
     unitNumber: p.unit_number,
   }));

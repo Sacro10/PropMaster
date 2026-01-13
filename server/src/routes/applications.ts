@@ -168,9 +168,15 @@ router.post(
       res.json(application);
     } catch (error) {
       console.error('Approve application error:', error);
+      const details =
+        error instanceof Error
+          ? error.message
+          : typeof error === 'string'
+            ? error
+            : (error as { message?: string } | null)?.message || 'Unknown error';
       res.status(500).json({
         error: 'Failed to approve application',
-        details: error instanceof Error ? error.message : 'Unknown error',
+        details,
       });
     }
   }
