@@ -546,7 +546,7 @@ export async function approveApplication(applicationId: string) {
       const contentType = response.headers.get('content-type') || '';
       if (contentType.includes('application/json')) {
         const errorData = await response.json();
-        throw new Error(errorData.error || 'Failed to approve application');
+        throw new Error(errorData.details || errorData.error || 'Failed to approve application');
       }
       const errorText = await response.text();
       throw new Error(errorText || 'Failed to approve application');
@@ -582,7 +582,7 @@ export async function rejectApplication(applicationId: string, notes?: string) {
       const contentType = response.headers.get('content-type') || '';
       if (contentType.includes('application/json')) {
         const errorData = await response.json();
-        throw new Error(errorData.error || 'Failed to reject application');
+        throw new Error(errorData.details || errorData.error || 'Failed to reject application');
       }
       const errorText = await response.text();
       throw new Error(errorText || 'Failed to reject application');

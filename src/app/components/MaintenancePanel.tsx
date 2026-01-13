@@ -117,7 +117,8 @@ export function MaintenancePanel() {
       alert('HVAC delivery batch generated successfully!');
     } catch (error) {
       console.error('Failed to generate batch:', error);
-      alert('Failed to generate batch. Please try again.');
+      const message = error instanceof Error ? error.message : 'Failed to generate batch. Please try again.';
+      alert(message);
     } finally {
       setGeneratingBatch(false);
     }

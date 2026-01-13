@@ -38,7 +38,130 @@ CREATE TABLE IF NOT EXISTS hvac_delivery_batches (
 
 CREATE INDEX IF NOT EXISTS idx_hvac_batches_account ON hvac_delivery_batches(account_id, delivery_date DESC);
 
--- 2b. Emergency Support Config (from 004_maintenance_enhancements.sql)
+-- 2a. HVAC Program Enrollments (renamed from hvac_filter_subscriptions)
+CREATE TABLE IF NOT EXISTS hvac_program_enrollments (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  account_id UUID NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+  unit_id UUID NOT NULL REFERENCES units(id) ON DELETE CASCADE,
+  filter_size TEXT NOT NULL,
+  filter_type TEXT DEFAULT 'standard' CHECK (filter_type IN ('standard', 'pleated', 'hepa', 'allergen')),
+  quantity INTEGER DEFAULT 1,
+  frequency TEXT DEFAULT 'quarterly' CHECK (frequency IN ('monthly', 'bimonthly', 'quarterly')),
+  next_delivery_date DATE,
+  status TEXT DEFAULT 'active' CHECK (status IN ('active', 'paused', 'cancelled')),
+  paused_at TIMESTAMPTZ,
+  cancelled_at TIMESTAMPTZ,
+  cancellation_reason TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_hvac_enrollments_account ON hvac_program_enrollments(account_id);
+CREATE INDEX IF NOT EXISTS idx_hvac_enrollments_unit ON hvac_program_enrollments(unit_id);
+CREATE INDEX IF NOT EXISTS idx_hvac_enrollments_status ON hvac_program_enrollments(status);
+
+-- 2b. HVAC Delivery Schedules (renamed from hvac_filter_deliveries)
+CREATE TABLE IF NOT EXISTS hvac_delivery_schedules (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  account_id UUID NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+  enrollment_id UUID NOT NULL REFERENCES hvac_program_enrollments(id) ON DELETE CASCADE,
+  scheduled_date DATE NOT NULL,
+  delivered_date DATE,
+  status TEXT DEFAULT 'scheduled' CHECK (status IN ('scheduled', 'in_transit', 'delivered', 'failed', 'cancelled')),
+  tracking_number TEXT,
+  carrier TEXT,
+  delivery_instructions TEXT,
+  delivery_photo_url TEXT,
+  notes TEXT,
+  batch_id UUID REFERENCES hvac_delivery_batches(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_hvac_delivery_schedules_account ON hvac_delivery_schedules(account_id);
+CREATE INDEX IF NOT EXISTS idx_hvac_delivery_schedules_enrollment ON hvac_delivery_schedules(enrollment_id);
+
+-- 2b. Optional migration from legacy HVAC tables (if they exist)
+DO $$
+BEGIN
+  IF to_regclass('public.hvac_filter_subscriptions') IS NOT NULL THEN
+    IF NOT EXISTS (SELECT 1 FROM hvac_program_enrollments) THEN
+      INSERT INTO hvac_program_enrollments (
+        account_id,
+        unit_id,
+        filter_size,
+        filter_type,
+        quantity,
+        frequency,
+        next_delivery_date,
+        status,
+        paused_at,
+        cancelled_at,
+        cancellation_reason,
+        created_at,
+        updated_at
+      )
+      SELECT
+        account_id,
+        unit_id,
+        filter_size,
+        filter_type,
+        quantity,
+        frequency,
+        next_delivery_date,
+        status,
+        paused_at,
+        cancelled_at,
+        cancellation_reason,
+        created_at,
+        updated_at
+      FROM hvac_filter_subscriptions;
+    END IF;
+  END IF;
+
+  IF to_regclass('public.hvac_filter_deliveries') IS NOT NULL THEN
+    IF NOT EXISTS (SELECT 1 FROM hvac_delivery_schedules) THEN
+      INSERT INTO hvac_delivery_schedules (
+        account_id,
+        enrollment_id,
+        scheduled_date,
+        delivered_date,
+        status,
+        tracking_number,
+        carrier,
+        delivery_instructions,
+        delivery_photo_url,
+        notes,
+        created_at,
+        updated_at
+      )
+      SELECT
+        d.account_id,
+        e.id,
+        d.scheduled_for,
+        d.delivered_at::date,
+        d.status,
+        d.tracking_number,
+        d.carrier,
+        d.delivery_instructions,
+        d.delivery_photo_url,
+        d.notes,
+        d.created_at,
+        d.updated_at
+      FROM hvac_filter_deliveries d
+      JOIN hvac_program_enrollments e
+        ON e.account_id = d.account_id
+       AND e.unit_id = (
+         SELECT unit_id
+         FROM hvac_filter_subscriptions s
+         WHERE s.id = d.subscription_id
+         LIMIT 1
+       );
+    END IF;
+  END IF;
+END$$;
+
+-- 2c. Emergency Support Config (from 004_maintenance_enhancements.sql)
 CREATE TABLE IF NOT EXISTS emergency_support_config (
   account_id UUID PRIMARY KEY REFERENCES accounts(id) ON DELETE CASCADE,
   is_enabled BOOLEAN DEFAULT false,
@@ -56,6 +179,30 @@ ALTER TABLE emergency_support_config ADD COLUMN IF NOT EXISTS notification_email
 ALTER TABLE emergency_support_config ADD COLUMN IF NOT EXISTS is_enabled BOOLEAN DEFAULT false;
 
 CREATE INDEX IF NOT EXISTS idx_emergency_support_config_account ON emergency_support_config(account_id);
+
+-- 2d. Maintenance Assignments (required for vendor routing)
+CREATE TABLE IF NOT EXISTS maintenance_assignments (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  account_id UUID NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+  request_id UUID NOT NULL REFERENCES maintenance_requests(id) ON DELETE CASCADE,
+  vendor_profile_id UUID REFERENCES vendor_profiles(id) ON DELETE SET NULL,
+  status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'accepted', 'declined', 'in_progress', 'completed', 'cancelled')),
+  assigned_at TIMESTAMPTZ DEFAULT NOW(),
+  accepted_at TIMESTAMPTZ,
+  declined_at TIMESTAMPTZ,
+  started_at TIMESTAMPTZ,
+  completed_at TIMESTAMPTZ,
+  vendor_notes TEXT,
+  completion_notes TEXT,
+  before_images JSONB DEFAULT '[]'::jsonb,
+  after_images JSONB DEFAULT '[]'::jsonb,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_maintenance_assignments_account ON maintenance_assignments(account_id);
+CREATE INDEX IF NOT EXISTS idx_maintenance_assignments_request ON maintenance_assignments(request_id);
+CREATE INDEX IF NOT EXISTS idx_maintenance_assignments_vendor ON maintenance_assignments(vendor_profile_id);
 
 -- 3. Message Templates (from 003_complete_schema.sql)
 CREATE TABLE IF NOT EXISTS message_templates (

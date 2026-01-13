@@ -194,6 +194,13 @@ router.post(
       res.status(201).json(batch);
     } catch (error) {
       console.error('Generate delivery batch error:', error);
+      if (error instanceof Error && error.message === 'No enrollments due for delivery') {
+        res.status(409).json({
+          error: 'No enrollments due for delivery',
+          details: 'Add active HVAC enrollments or adjust next delivery dates.',
+        });
+        return;
+      }
       res.status(500).json({
         error: 'Failed to generate batch',
         details: error instanceof Error ? error.message : 'Unknown error',

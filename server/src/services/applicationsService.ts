@@ -440,9 +440,51 @@ export async function approveApplication(
   if (existingProfile) {
     tenantUserId = existingProfile.user_id;
   } else {
-    // In production, this would create a new auth user and send invitation
-    // For now, we'll use the approver's user ID as a placeholder
-    tenantUserId = userId;
+    const fullName = `${application.firstName} ${application.lastName}`.trim();
+    let resolvedUserId: string | null = null;
+
+    const { data: createdUser, error: createUserError } = await supabase.auth.admin.createUser({
+      email: application.email,
+      email_confirm: true,
+      user_metadata: {
+        full_name: fullName,
+        role: 'tenant',
+      },
+    });
+
+    if (createUserError) {
+      const { data: existingUsers, error: listUsersError } = await supabase.auth.admin.listUsers();
+      if (listUsersError) {
+        throw createUserError;
+      }
+      const matchingUser = existingUsers?.users?.find(
+        (u) => u.email?.toLowerCase() === application.email.toLowerCase()
+      );
+      if (!matchingUser) {
+        throw createUserError;
+      }
+      resolvedUserId = matchingUser.id;
+    } else {
+      resolvedUserId = createdUser.user.id;
+    }
+
+    if (!resolvedUserId) {
+      throw new Error('Unable to create or locate tenant user');
+    }
+
+    tenantUserId = resolvedUserId;
+
+    await supabase
+      .from('account_members')
+      .upsert(
+        {
+          account_id: accountId,
+          user_id: tenantUserId,
+          role: 'tenant',
+          joined_at: new Date().toISOString(),
+        },
+        { onConflict: 'account_id,user_id' }
+      );
 
     // Create tenant profile
     const { error: profileError } = await supabase
@@ -450,7 +492,7 @@ export async function approveApplication(
       .insert({
         account_id: accountId,
         user_id: tenantUserId,
-        full_name: `${application.firstName} ${application.lastName}`,
+        full_name: fullName,
         phone: application.phone,
         email: application.email,
         employer: application.currentEmployer,

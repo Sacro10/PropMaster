@@ -22,7 +22,7 @@ async function parseErrorResponse(response: Response, fallbackMessage: string) {
   const contentType = response.headers.get('content-type') || '';
   if (contentType.includes('application/json')) {
     const error = await response.json();
-    return new Error(error.error || fallbackMessage);
+    return new Error(error.details || error.error || fallbackMessage);
   }
   const errorText = await response.text();
   return new Error(errorText || fallbackMessage);
