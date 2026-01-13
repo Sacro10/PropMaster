@@ -22,6 +22,7 @@ export function PropertyShowings() {
   const [selectedShowing, setSelectedShowing] = useState<any | null>(null);
   const [reminderConfirmShowing, setReminderConfirmShowing] = useState<any | null>(null);
   const [showAllShowings, setShowAllShowings] = useState(false);
+  const [showAllProperties, setShowAllProperties] = useState(false);
 
   // Feature checks for plan gating - Electronic showings require Premium
   const electronicShowings = useHasFeature('electronic_showings');
@@ -84,6 +85,8 @@ export function PropertyShowings() {
 
   const visibleShowings = showAllShowings ? showings : showings.slice(0, 5);
   const hasExtraShowings = showings.length > 5;
+  const visibleProperties = showAllProperties ? availableProperties : availableProperties.slice(0, 5);
+  const hasExtraProperties = availableProperties.length > 5;
 
   // Transform available properties for modal
   const modalUnits = availableProperties.map((prop) => ({
@@ -389,8 +392,9 @@ export function PropertyShowings() {
               </p>
             </div>
           ) : (
-            <div className="grid grid-cols-4 gap-4">
-              {availableProperties.map((property, index) => (
+            <>
+              <div className="grid grid-cols-4 gap-4">
+                {visibleProperties.map((property, index) => (
                 <div
                   key={index}
                   className={`p-4 ${isDark ? 'bg-white/5 hover:bg-white/10' : 'bg-gray-50 hover:bg-gray-100'} rounded-lg border ${border.default} hover:border-[#ff6b35]/50 transition-all group`}
@@ -431,8 +435,20 @@ export function PropertyShowings() {
                     Schedule Showing
                   </button>
                 </div>
-              ))}
-            </div>
+                ))}
+              </div>
+              {hasExtraProperties && (
+                <div className="pt-4">
+                  <button
+                    onClick={() => setShowAllProperties((prev) => !prev)}
+                    className={`px-4 py-2 ${isDark ? 'bg-white/5 hover:bg-white/10' : 'bg-gray-100 hover:bg-gray-200'} rounded-lg text-sm transition-colors`}
+                    style={{ fontFamily: 'Work Sans, sans-serif' }}
+                  >
+                    {showAllProperties ? 'Show less' : 'Show all properties'}
+                  </button>
+                </div>
+              )}
+            </>
           )}
         </div>
       </div>

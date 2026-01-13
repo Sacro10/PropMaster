@@ -20,6 +20,7 @@ export function RentCollection() {
   const { isDark, text, border } = useThemeStyles();
   const [processingDisbursement, setProcessingDisbursement] = useState<string | null>(null);
   const [showAllTransactions, setShowAllTransactions] = useState(false);
+  const [showAllPendingPayments, setShowAllPendingPayments] = useState(false);
 
   // Feature checks for plan gating
   const integratedAccounting = useHasFeature('integrated_accounting');
@@ -49,6 +50,8 @@ export function RentCollection() {
     { label: 'Avg. Collection Time', value: `${stats.avg_collection_time} days` },
   ] : [];
   const autoPayEnrolledPercent = stats ? Number(stats.auto_pay_enrolled) : 0;
+  const visiblePendingPayments = showAllPendingPayments ? pendingPayments : pendingPayments.slice(0, 5);
+  const hasExtraPendingPayments = pendingPayments.length > 5;
 
   // Handle send reminder
   const handleSendReminder = async (paymentId: string) => {
@@ -255,7 +258,7 @@ export function RentCollection() {
               </div>
             ) : (
               <div className="space-y-3">
-                {pendingPayments.map((payment) => (
+                {visiblePendingPayments.map((payment) => (
                   <div
                     key={payment.id}
                     className={`p-4 ${isDark ? 'bg-white/5' : 'bg-red-50'} rounded-lg border border-red-500/20 hover:border-red-500/40 transition-all`}
@@ -300,6 +303,17 @@ export function RentCollection() {
                     </div>
                   </div>
                 ))}
+                {hasExtraPendingPayments && (
+                  <button
+                    type="button"
+                    onClick={() => setShowAllPendingPayments((prev) => !prev)}
+                    className={`w-full mt-2 py-3 ${isDark ? 'bg-white/5 hover:bg-white/10' : 'bg-gray-100 hover:bg-gray-200'} rounded-lg text-sm font-medium transition-colors`}
+                    style={{ fontFamily: 'Work Sans, sans-serif' }}
+                    aria-expanded={showAllPendingPayments}
+                  >
+                    {showAllPendingPayments ? 'Show less' : 'Show all pending payments'}
+                  </button>
+                )}
               </div>
             )}
           </div>

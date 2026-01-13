@@ -383,6 +383,7 @@ export async function generateDeliveryBatch(
 
   // Create delivery schedules for each enrollment
   const schedules = enrollments.map((enrollment) => ({
+    account_id: accountId,
     enrollment_id: enrollment.id,
     scheduled_date: today.toISOString().split('T')[0],
     status: 'scheduled',
