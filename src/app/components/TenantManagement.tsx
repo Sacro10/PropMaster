@@ -58,6 +58,7 @@ export function TenantManagement() {
       await refetchTenants();
       await refetchApps();
       console.log('Application approved successfully');
+      alert('Application approved. Tenant is now in Active Tenants.');
     } else {
       console.error('Failed to approve application:', result.error);
       alert('Failed to approve application: ' + (result.error?.message || 'Unknown error'));

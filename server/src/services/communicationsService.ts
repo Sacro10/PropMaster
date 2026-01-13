@@ -1161,7 +1161,7 @@ export async function generateMessageSuggestion(
 
   try {
     const suggestion = await generateText(
-      'Draft a concise, professional reply based on the conversation. Keep it under 120 words.',
+      'Draft a reply based on the conversation. Match the tone and formality implied by the last few messages. Keep it concise (under 120 words) and avoid placeholders or boilerplate unless needed.',
       {
         intent: data.intent || 'general_reply',
         userId,

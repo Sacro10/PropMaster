@@ -548,14 +548,14 @@ export function PropertyShowings() {
               </button>
               <button
                 onClick={async () => {
+                  const showingId = reminderConfirmShowing.id;
+                  setReminderConfirmShowing(null);
                   try {
-                    await markShowingReminderSent(reminderConfirmShowing.id);
+                    await markShowingReminderSent(showingId);
                     await refetchShowings();
                   } catch (error) {
                     console.error('Error marking reminder sent:', error);
                     alert('Failed to mark reminder sent. Please try again.');
-                  } finally {
-                    setReminderConfirmShowing(null);
                   }
                 }}
                 className="px-4 py-2 bg-gradient-to-r from-[#ff6b35] to-[#f7931e] rounded-lg text-sm font-medium hover:scale-105 transition-transform"

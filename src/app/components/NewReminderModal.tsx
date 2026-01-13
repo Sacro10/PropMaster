@@ -44,6 +44,38 @@ export function NewReminderModal({
   const { create, loading } = useCreateReminder();
   const { update, loading: updating } = useUpdateReminder();
   const isEditing = Boolean(reminder?.id);
+  const templateOptions = templates.length > 0
+    ? templates
+    : [
+      {
+        id: 'fallback-rent-reminder',
+        name: 'Rent Reminder',
+        category: 'payment',
+        subject: 'Rent Payment Reminder',
+        body: 'This is a friendly reminder that your rent payment is due soon.',
+      },
+      {
+        id: 'fallback-lease-renewal',
+        name: 'Lease Renewal',
+        category: 'lease',
+        subject: 'Lease Renewal Notice',
+        body: 'Your lease is coming up for renewal. Please contact us to discuss options.',
+      },
+      {
+        id: 'fallback-maintenance-update',
+        name: 'Maintenance Update',
+        category: 'maintenance',
+        subject: 'Maintenance Request Update',
+        body: 'Your maintenance request has been updated. We will notify you with next steps.',
+      },
+      {
+        id: 'fallback-welcome',
+        name: 'Welcome Message',
+        category: 'onboarding',
+        subject: 'Welcome to Your New Home',
+        body: 'Welcome! We are excited to have you as a tenant.',
+      },
+    ];
 
   const buildFormData = (source?: AutomatedReminder | null): ReminderFormShape => {
     const recipientFilter = (source as any)?.recipientFilter || (source as any)?.recipient_filter || {};
@@ -105,15 +137,24 @@ export function NewReminderModal({
   const handleTemplateChange = (templateId: string) => {
     setFormData(prev => ({ ...prev, templateId }));
 
-    if (templateId) {
-      const template = templates.find(t => t.id === templateId);
-      if (template) {
-        setFormData(prev => ({
-          ...prev,
-          messageSubject: template.subject || '',
-          messageBody: template.body || '',
-        }));
-      }
+    if (!templateId) {
+      setFormData(prev => ({
+        ...prev,
+        messageSubject: '',
+        messageBody: '',
+      }));
+      return;
+    }
+
+    const template = templateOptions.find(t => t.id === templateId);
+    if (template) {
+      const subject = (template as any).subject ?? (template as any).message_subject ?? '';
+      const body = (template as any).body ?? (template as any).message_body ?? '';
+      setFormData(prev => ({
+        ...prev,
+        messageSubject: subject || '',
+        messageBody: body || '',
+      }));
     }
   };
 
@@ -331,6 +372,28 @@ export function NewReminderModal({
 
               {formData.recipientScope === 'selected' && (
                 <div className={`border ${border.default} rounded-lg p-3 space-y-3`}>
+                  <div className="flex items-center justify-between gap-2 text-xs">
+                    <span className={text.muted}>Selected {formData.recipientIds.length}</span>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const allIds = (tenants || []).map((tenant) => tenant.user_id);
+                          setFormData({ ...formData, recipientIds: allIds });
+                        }}
+                        className={`px-2 py-1 ${isDark ? 'bg-white/5 hover:bg-white/10' : 'bg-gray-100 hover:bg-gray-200'} rounded`}
+                      >
+                        Select all
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setFormData({ ...formData, recipientIds: [] })}
+                        className={`px-2 py-1 ${isDark ? 'bg-white/5 hover:bg-white/10' : 'bg-gray-100 hover:bg-gray-200'} rounded`}
+                      >
+                        Clear all
+                      </button>
+                    </div>
+                  </div>
                   <input
                     type="text"
                     value={tenantSearch}
@@ -352,6 +415,7 @@ export function NewReminderModal({
                       })
                       .map((tenant) => {
                         const isChecked = formData.recipientIds.includes(tenant.user_id);
+                        const emailMissing = !tenant.email;
                         return (
                           <label key={tenant.user_id} className="flex items-center gap-2 text-sm">
                             <input
@@ -367,6 +431,9 @@ export function NewReminderModal({
                             <span>
                               {tenant.full_name || 'Unnamed'} {tenant.email ? `(${tenant.email})` : ''}
                             </span>
+                            {emailMissing && (
+                              <span className="text-xs text-amber-500">No email</span>
+                            )}
                           </label>
                         );
                       })}
@@ -427,7 +494,7 @@ export function NewReminderModal({
               style={{ fontFamily: 'Work Sans, sans-serif' }}
             >
               <option value="">None - Create custom message</option>
-              {templates.map((template) => (
+              {templateOptions.map((template) => (
                 <option key={template.id} value={template.id}>
                   {template.name} ({template.category})
                 </option>

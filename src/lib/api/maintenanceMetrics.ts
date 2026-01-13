@@ -8,6 +8,26 @@ import { getCurrentAccountId, handleSupabaseError } from './client';
 
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3001';
 
+async function getAuthHeaders() {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) {
+    throw new Error('No active session');
+  }
+  return {
+    Authorization: `Bearer ${session.access_token}`,
+  };
+}
+
+async function parseErrorResponse(response: Response, fallbackMessage: string) {
+  const contentType = response.headers.get('content-type') || '';
+  if (contentType.includes('application/json')) {
+    const error = await response.json();
+    return new Error(error.error || fallbackMessage);
+  }
+  const errorText = await response.text();
+  return new Error(errorText || fallbackMessage);
+}
+
 export interface MaintenanceMetrics {
   active_requests: number;
   avg_response_time_hours: number;
@@ -279,18 +299,20 @@ export async function assignMaintenanceRequest(requestId: string, vendorProfileI
       throw new Error('No account ID found');
     }
 
+    const authHeaders = await getAuthHeaders();
+
     // Use backend endpoint for assignment logic
     const response = await fetch(`${API_BASE}/api/maintenance/${requestId}/assign`, {
       method: 'POST',
       headers: {
+        ...authHeaders,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({ vendorProfileId }),
     });
 
     if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.error || 'Failed to assign vendor');
+      throw await parseErrorResponse(response, 'Failed to assign vendor');
     }
   } catch (error) {
     console.error('[Maintenance Metrics API] Error assigning vendor:', error);
@@ -307,9 +329,15 @@ export async function getAvailableVendors(requestId: string): Promise<Array<{
   rating: number;
   jobsCompleted: number;
   hourlyRate: number;
+  email: string | null;
 }>> {
   try {
-    const response = await fetch(`${API_BASE}/api/maintenance/${requestId}/vendors`);
+    const authHeaders = await getAuthHeaders();
+    const response = await fetch(`${API_BASE}/api/maintenance/${requestId}/vendors`, {
+      headers: {
+        ...authHeaders,
+      },
+    });
 
     if (response.ok) {
       const vendors = await response.json();
@@ -361,17 +389,18 @@ export async function createEmergencyRequest(data: {
   notificationChannels?: string[];
 }): Promise<any> {
   try {
+    const authHeaders = await getAuthHeaders();
     const response = await fetch(`${API_BASE}/api/maintenance/emergency`, {
       method: 'POST',
       headers: {
+        ...authHeaders,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(data),
     });
 
     if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.error || 'Failed to create emergency request');
+      throw await parseErrorResponse(response, 'Failed to create emergency request');
     }
 
     return await response.json();
@@ -382,28 +411,33 @@ export async function createEmergencyRequest(data: {
 }
 
 export async function getEmergencySupportConfig(): Promise<EmergencySupportConfig> {
-  const response = await fetch(`${API_BASE}/api/maintenance/emergency-config`);
+  const authHeaders = await getAuthHeaders();
+  const response = await fetch(`${API_BASE}/api/maintenance/emergency-config`, {
+    headers: {
+      ...authHeaders,
+    },
+  });
 
   if (!response.ok) {
-    const error = await response.json();
-    throw new Error(error.error || 'Failed to fetch emergency config');
+    throw await parseErrorResponse(response, 'Failed to fetch emergency config');
   }
 
   return await response.json();
 }
 
 export async function updateEmergencySupportConfig(data: EmergencySupportConfig): Promise<EmergencySupportConfig> {
+  const authHeaders = await getAuthHeaders();
   const response = await fetch(`${API_BASE}/api/maintenance/emergency-config`, {
     method: 'PUT',
     headers: {
+      ...authHeaders,
       'Content-Type': 'application/json',
     },
     body: JSON.stringify(data),
   });
 
   if (!response.ok) {
-    const error = await response.json();
-    throw new Error(error.error || 'Failed to update emergency config');
+    throw await parseErrorResponse(response, 'Failed to update emergency config');
   }
 
   return await response.json();
@@ -417,17 +451,18 @@ export async function sendEmergencyTest(data: {
   propertyId?: string;
   notificationChannels?: string[];
 }): Promise<{ notifications: Array<{ channel: string; sent: boolean; status?: number; error?: string }> }> {
+  const authHeaders = await getAuthHeaders();
   const response = await fetch(`${API_BASE}/api/maintenance/emergency-test`, {
     method: 'POST',
     headers: {
+      ...authHeaders,
       'Content-Type': 'application/json',
     },
     body: JSON.stringify(data),
   });
 
   if (!response.ok) {
-    const error = await response.json();
-    throw new Error(error.error || 'Failed to send emergency test');
+    throw await parseErrorResponse(response, 'Failed to send emergency test');
   }
 
   return await response.json();
@@ -438,16 +473,17 @@ export async function sendEmergencyTest(data: {
  */
 export async function generateHVACBatch(): Promise<any> {
   try {
-    const response = await fetch('/api/hvac/batches/generate', {
+    const authHeaders = await getAuthHeaders();
+    const response = await fetch(`${API_BASE}/api/hvac/batches/generate`, {
       method: 'POST',
       headers: {
+        ...authHeaders,
         'Content-Type': 'application/json',
       },
     });
 
     if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.error || 'Failed to generate HVAC batch');
+      throw await parseErrorResponse(response, 'Failed to generate HVAC batch');
     }
 
     return await response.json();
@@ -462,17 +498,18 @@ export async function generateHVACBatch(): Promise<any> {
  */
 export async function markHVACDelivered(deliveryId: string, trackingNumber?: string): Promise<void> {
   try {
-    const response = await fetch(`/api/hvac/deliveries/${deliveryId}/delivered`, {
+    const authHeaders = await getAuthHeaders();
+    const response = await fetch(`${API_BASE}/api/hvac/deliveries/${deliveryId}/delivered`, {
       method: 'POST',
       headers: {
+        ...authHeaders,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({ trackingNumber }),
     });
 
     if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.error || 'Failed to mark delivery as delivered');
+      throw await parseErrorResponse(response, 'Failed to mark delivery as delivered');
     }
   } catch (error) {
     console.error('[Maintenance Metrics API] Error marking delivery delivered:', error);

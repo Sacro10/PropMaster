@@ -489,6 +489,7 @@ export async function getAvailableVendors(
   rating: number;
   jobsCompleted: number;
   hourlyRate: number;
+  email: string | null;
 }>> {
   const { data, error } = await supabase.rpc('find_available_vendors', {
     p_account_id: accountId,
@@ -498,13 +499,24 @@ export async function getAvailableVendors(
   });
 
   if (!error && data) {
+    const vendorIds = (data || []).map((v: any) => v.vendor_id).filter(Boolean);
+    const { data: vendorProfiles } = await supabase
+      .from('vendor_profiles')
+      .select('id, email, business_name')
+      .eq('account_id', accountId)
+      .in('id', vendorIds);
+    const vendorEmailMap = new Map(
+      (vendorProfiles || []).map((v: any) => [v.id, { email: v.email || null, businessName: v.business_name }])
+    );
+
     return (
       data?.map((v: any) => ({
         id: v.vendor_id,
-        businessName: v.business_name,
+        businessName: vendorEmailMap.get(v.vendor_id)?.businessName || v.business_name,
         rating: v.rating ?? 0,
         jobsCompleted: v.jobs_completed ?? 0,
         hourlyRate: v.hourly_rate ?? 85,
+        email: vendorEmailMap.get(v.vendor_id)?.email || null,
       })) || []
     );
   }
@@ -512,7 +524,7 @@ export async function getAvailableVendors(
   // Fallback: fetch vendors directly when RPC is unavailable or misconfigured.
   const { data: vendorProfiles, error: vendorError } = await supabase
     .from('vendor_profiles')
-    .select('id, business_name, avg_rating, total_jobs_completed, is_active')
+    .select('id, business_name, email, avg_rating, total_jobs_completed, is_active')
     .eq('account_id', accountId)
     .eq('is_active', true);
 
@@ -546,6 +558,7 @@ export async function getAvailableVendors(
       rating: v.avg_rating ?? 0,
       jobsCompleted: v.total_jobs_completed ?? 0,
       hourlyRate: 85,
+      email: v.email || null,
     }));
 }
 
@@ -624,7 +637,7 @@ export async function assignVendorToRequest(
   try {
     const { data: vendorProfile, error: vendorError } = await supabase
       .from('vendor_profiles')
-      .select('user_id, business_name')
+      .select('user_id, business_name, email')
       .eq('id', vendorProfileId)
       .eq('account_id', accountId)
       .single();
@@ -632,13 +645,14 @@ export async function assignVendorToRequest(
     if (!vendorError && vendorProfile?.user_id) {
       const { data: requestDetails } = await supabase
         .from('maintenance_requests')
-        .select('title, priority, category, property_id, unit_id, properties(name), units(unit_number)')
+        .select('title, description, priority, category, property_id, unit_id, requested_at, properties(name, address1, address2, city, state, zip), units(unit_number)')
         .eq('id', requestId)
         .eq('account_id', accountId)
         .single();
 
       const subject = `Maintenance assignment: ${requestDetails?.title || 'New request'}`;
       const propertyName = requestDetails?.properties?.[0]?.name || 'Property';
+      const propertyAddress = formatPropertyAddress(requestDetails?.properties?.[0]);
       const unitNumber = requestDetails?.units?.[0]?.unit_number
         ? ` #${requestDetails.units[0].unit_number}`
         : '';
@@ -646,8 +660,10 @@ export async function assignVendorToRequest(
         `You have been assigned a maintenance request.`,
         `Title: ${requestDetails?.title || 'N/A'}`,
         `Property: ${propertyName}${unitNumber}`,
+        `Address: ${propertyAddress || 'N/A'}`,
         `Priority: ${requestDetails?.priority || 'normal'}`,
         `Category: ${requestDetails?.category || 'general'}`,
+        `Description: ${requestDetails?.description || 'N/A'}`,
       ].join('\n');
 
       const { sendMessage } = await import('./communicationsService');
@@ -658,9 +674,86 @@ export async function assignVendorToRequest(
         propertyId: requestDetails?.property_id || undefined,
         unitId: requestDetails?.unit_id || undefined,
       });
+
+      const vendorEmail =
+        vendorProfile.email ||
+        (await supabase.auth.admin.getUserById(vendorProfile.user_id)).data?.user?.email ||
+        null;
+
+      if (vendorEmail) {
+        await sendVendorAssignmentEmail({
+          vendorEmail,
+          vendorName: vendorProfile.business_name || undefined,
+          requestTitle: requestDetails?.title || undefined,
+          requestDescription: requestDetails?.description || undefined,
+          propertyName,
+          propertyAddress: propertyAddress || undefined,
+          unitNumber: requestDetails?.units?.[0]?.unit_number || undefined,
+          priority: requestDetails?.priority || undefined,
+          category: requestDetails?.category || undefined,
+          requestedAt: requestDetails?.requested_at || undefined,
+          requestId,
+        });
+      }
     }
   } catch (error) {
     console.warn('[assignVendorToRequest] Failed to notify vendor:', error);
+  }
+}
+
+async function sendVendorAssignmentEmail(payload: {
+  vendorEmail: string;
+  vendorName?: string;
+  requestTitle?: string;
+  requestDescription?: string;
+  propertyName?: string;
+  propertyAddress?: string;
+  unitNumber?: string;
+  priority?: string;
+  category?: string;
+  requestedAt?: string;
+  requestId: string;
+}): Promise<void> {
+  const apiKey = process.env.RESEND_API_KEY;
+  const fromEmail = process.env.RESEND_FROM_EMAIL;
+
+  if (!apiKey || !fromEmail) {
+    throw new Error('RESEND_API_KEY/RESEND_FROM_EMAIL not configured');
+  }
+
+  const unitLabel = payload.unitNumber ? `#${payload.unitNumber}` : 'N/A';
+  const lines = [
+    `Hello${payload.vendorName ? ` ${payload.vendorName}` : ''},`,
+    '',
+    'You have been assigned a maintenance request.',
+    '',
+    `Request ID: ${payload.requestId}`,
+    `Title: ${payload.requestTitle || 'N/A'}`,
+    `Description: ${payload.requestDescription || 'N/A'}`,
+    `Property: ${payload.propertyName || 'N/A'}`,
+    `Unit: ${unitLabel}`,
+    `Address: ${payload.propertyAddress || 'N/A'}`,
+    `Priority: ${payload.priority || 'normal'}`,
+    `Category: ${payload.category || 'general'}`,
+    `Reported: ${payload.requestedAt || 'N/A'}`,
+  ];
+
+  const response = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      from: fromEmail,
+      to: [payload.vendorEmail],
+      subject: `Maintenance Assignment: ${payload.requestTitle || payload.requestId}`,
+      text: lines.join('\n'),
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Vendor email failed with status ${response.status}`);
   }
 }
 

@@ -5,6 +5,7 @@ import { useHasFeature } from '../hooks/usePlanGating';
 import { FeatureGate, LockedFeatureCard } from './UpgradeCTA';
 import { useMaintenanceRequests, useMaintenanceMetrics, useHVACProgram, useRoutingMetrics, useAssignVendor } from '../../lib/hooks/useMaintenance';
 import { getAvailableVendors, generateHVACBatch } from '../../lib/api/maintenanceMetrics';
+import { updateMaintenanceRequestStatus } from '../../lib/api/maintenance';
 import { LoadingPage } from './LoadingSpinner';
 import { ErrorState } from './ErrorBoundary';
 import { formatRelativeTime, formatDisplayDate } from '../../lib/utils/dateHelpers';
@@ -15,11 +16,17 @@ export function MaintenancePanel() {
   const { isDark, bg, text, border } = useThemeStyles();
   const [assigningRequestId, setAssigningRequestId] = useState<string | null>(null);
   const [availableVendors, setAvailableVendors] = useState<any[]>([]);
+  const [isLoadingVendors, setIsLoadingVendors] = useState(false);
+  const [assignError, setAssignError] = useState<string | null>(null);
   const [generatingBatch, setGeneratingBatch] = useState(false);
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [isEmergencyModalOpen, setIsEmergencyModalOpen] = useState(false);
   const [isVendorModalOpen, setIsVendorModalOpen] = useState(false);
   const [showAllRequests, setShowAllRequests] = useState(false);
+  const [selectedPriority, setSelectedPriority] = useState<'all' | 'emergency' | 'high' | 'normal' | 'low'>('all');
+  const [selectedStatus, setSelectedStatus] = useState<'all' | 'submitted' | 'reviewed' | 'assigned' | 'scheduled' | 'in_progress' | 'completed' | 'closed' | 'cancelled'>('all');
+  const [updatingStatusId, setUpdatingStatusId] = useState<string | null>(null);
+  const [statusUpdateError, setStatusUpdateError] = useState<{ id: string; message: string } | null>(null);
   const { assign, isAssigning } = useAssignVendor();
 
   // Feature checks for plan gating
@@ -46,18 +53,59 @@ export function MaintenancePanel() {
   // Handle vendor assignment
   const handleAssignClick = async (requestId: string) => {
     setAssigningRequestId(requestId);
-    const vendors = await getAvailableVendors(requestId);
-    setAvailableVendors(vendors);
+    setAssignError(null);
+    setIsLoadingVendors(true);
+    try {
+      const vendors = await getAvailableVendors(requestId);
+      setAvailableVendors(vendors);
+    } catch (error) {
+      console.error('Failed to load vendors:', error);
+      setAvailableVendors([]);
+      setAssignError('Failed to load vendors. Please try again.');
+    } finally {
+      setIsLoadingVendors(false);
+    }
   };
 
   const handleVendorSelect = async (vendorId: string) => {
     if (!assigningRequestId) return;
+
+    const vendor = availableVendors.find((v) => v.id === vendorId);
+    if (!vendor?.email) {
+      setAssignError('Vendor email is missing. Add an email to the vendor profile.');
+      return;
+    }
+
+    const request = requests.find((r) => r.id === assigningRequestId);
+    const propertyDisplay = request?.property && request?.unit
+      ? `${request.property.name} #${request.unit.unit_number}`
+      : request?.property?.name || 'Unknown Property';
+    const requestedAt = request?.requested_at
+      ? formatDisplayDate(request.requested_at, 'MMM d, yyyy h:mm a')
+      : 'N/A';
+    const subject = `Maintenance Request: ${request?.title || assigningRequestId}`;
+    const body = [
+      `You have been assigned a maintenance request.`,
+      '',
+      `Request ID: ${assigningRequestId}`,
+      `Title: ${request?.title || 'N/A'}`,
+      `Property: ${propertyDisplay}`,
+      `Priority: ${request?.priority || 'normal'}`,
+      `Category: ${request?.category || 'general'}`,
+      `Reported: ${requestedAt}`,
+      `Description: ${request?.description || 'N/A'}`,
+    ].join('\n');
+    const mailto = `mailto:${encodeURIComponent(vendor.email)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+    window.location.href = mailto;
 
     const result = await assign(assigningRequestId, vendorId);
     if (result.success) {
       setAssigningRequestId(null);
       setAvailableVendors([]);
       refetchRequests();
+      setAssignError(null);
+    } else {
+      setAssignError(result.error?.message || 'Failed to assign vendor. Please try again.');
     }
   };
 
@@ -79,6 +127,39 @@ export function MaintenancePanel() {
   const handleEmergencyClick = () => {
     setIsEmergencyModalOpen(true);
   };
+
+  const handleStatusChange = async (requestId: string, status: string) => {
+    setUpdatingStatusId(requestId);
+    setStatusUpdateError(null);
+    try {
+      await updateMaintenanceRequestStatus(requestId, status);
+      await refetchRequests();
+    } catch (error) {
+      console.error('Failed to update status:', error);
+      setStatusUpdateError({ id: requestId, message: 'Failed to update status. Please try again.' });
+    } finally {
+      setUpdatingStatusId(null);
+    }
+  };
+
+  const filteredRequests = selectedPriority === 'all'
+    ? requests
+    : requests.filter((request) => request.priority === selectedPriority);
+
+  const fullyFilteredRequests = selectedStatus === 'all'
+    ? filteredRequests
+    : filteredRequests.filter((request) => request.status === selectedStatus);
+
+  const maintenanceStatusOptions = [
+    { value: 'submitted', label: 'Submitted' },
+    { value: 'reviewed', label: 'Reviewed' },
+    { value: 'assigned', label: 'Assigned' },
+    { value: 'scheduled', label: 'Scheduled' },
+    { value: 'in_progress', label: 'In Progress' },
+    { value: 'completed', label: 'Completed' },
+    { value: 'closed', label: 'Closed' },
+    { value: 'cancelled', label: 'Cancelled' },
+  ];
 
   const maintenanceStats = metrics ? [
     { label: 'Active Requests', value: metrics.active_requests.toString(), change: '0%', icon: Wrench },
@@ -161,12 +242,34 @@ export function MaintenancePanel() {
               MAINTENANCE REQUESTS
             </h3>
             <div className="flex items-center gap-3">
-              <select className={`px-4 py-2 ${isDark ? 'bg-white/5' : 'bg-gray-50'} border ${border.default} rounded-lg text-sm focus:outline-none focus:border-[#ff6b35]/50`}>
-                <option>All Priorities</option>
-                <option>Emergency</option>
-                <option>High</option>
-                <option>Normal</option>
-                <option>Low</option>
+              <select
+                value={selectedPriority}
+                onChange={(event) => {
+                  setSelectedPriority(event.target.value as typeof selectedPriority);
+                  setShowAllRequests(false);
+                }}
+                className={`px-4 py-2 ${isDark ? 'bg-white/5' : 'bg-gray-50'} border ${border.default} rounded-lg text-sm focus:outline-none focus:border-[#ff6b35]/50`}
+              >
+                <option value="all">All Priorities</option>
+                <option value="emergency">Emergency</option>
+                <option value="high">High</option>
+                <option value="normal">Normal</option>
+                <option value="low">Low</option>
+              </select>
+              <select
+                value={selectedStatus}
+                onChange={(event) => {
+                  setSelectedStatus(event.target.value as typeof selectedStatus);
+                  setShowAllRequests(false);
+                }}
+                className={`px-4 py-2 ${isDark ? 'bg-white/5' : 'bg-gray-50'} border ${border.default} rounded-lg text-sm focus:outline-none focus:border-[#ff6b35]/50`}
+              >
+                <option value="all">All Statuses</option>
+                {maintenanceStatusOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
               </select>
               <button className={`p-2 ${isDark ? 'bg-white/5 hover:bg-white/10' : 'bg-gray-50 hover:bg-gray-100'} rounded-lg transition-colors`}>
                 <ListFilter className="w-4 h-4" />
@@ -175,7 +278,7 @@ export function MaintenancePanel() {
           </div>
 
           <div className="space-y-3">
-            {requests.length === 0 ? (
+            {fullyFilteredRequests.length === 0 ? (
               <div className="text-center py-12">
                 <Wrench className={`w-12 h-12 ${text.muted} mx-auto mb-4`} />
                 <p className={`${text.muted} mb-2`} style={{ fontFamily: 'Work Sans, sans-serif' }}>
@@ -186,7 +289,7 @@ export function MaintenancePanel() {
                 </p>
               </div>
             ) : (
-              requests.slice(0, showAllRequests ? requests.length : 5).map((request) => {
+              fullyFilteredRequests.slice(0, showAllRequests ? fullyFilteredRequests.length : 5).map((request) => {
                 const propertyDisplay = request.property && request.unit
                   ? `${request.property.name} #${request.unit.unit_number}`
                   : request.property?.name || 'Unknown';
@@ -231,7 +334,22 @@ export function MaintenancePanel() {
                           >
                             {request.status.replace('_', ' ').toUpperCase()}
                           </span>
+                          <select
+                            value={request.status}
+                            onChange={(event) => handleStatusChange(request.id, event.target.value)}
+                            disabled={updatingStatusId === request.id}
+                            className={`px-2 py-1 ${isDark ? 'bg-white/10' : 'bg-white'} border ${border.default} rounded-md text-xs focus:outline-none focus:border-[#ff6b35]/50`}
+                          >
+                            {maintenanceStatusOptions.map((option) => (
+                              <option key={option.value} value={option.value}>
+                                {option.label}
+                              </option>
+                            ))}
+                          </select>
                         </div>
+                        {statusUpdateError?.id === request.id && (
+                          <p className="text-xs text-red-400 mb-2">{statusUpdateError.message}</p>
+                        )}
                         <p className="font-medium mb-2" style={{ fontFamily: 'Work Sans, sans-serif' }}>
                           {request.title}
                         </p>
@@ -258,8 +376,10 @@ export function MaintenancePanel() {
                             {assigningRequestId === request.id ? (
                               <div className={`p-3 ${isDark ? 'bg-white/10' : 'bg-gray-100'} rounded-lg min-w-[200px]`}>
                                 <p className="text-xs mb-2">Select Vendor:</p>
-                                {availableVendors.length === 0 ? (
+                                {isLoadingVendors ? (
                                   <p className="text-xs text-gray-400">Loading vendors...</p>
+                                ) : availableVendors.length === 0 ? (
+                                  <p className="text-xs text-gray-400">No vendors available.</p>
                                 ) : (
                                   <div className="space-y-1 max-h-32 overflow-y-auto">
                                     {availableVendors.map((vendor) => (
@@ -274,6 +394,9 @@ export function MaintenancePanel() {
                                       </button>
                                     ))}
                                   </div>
+                                )}
+                                {assignError && (
+                                  <p className="mt-2 text-xs text-red-400">{assignError}</p>
                                 )}
                                 <button
                                   onClick={() => setAssigningRequestId(null)}
@@ -300,7 +423,7 @@ export function MaintenancePanel() {
             )}
           </div>
 
-          {requests.length > 5 && (
+          {fullyFilteredRequests.length > 5 && (
             <button 
               onClick={() => setShowAllRequests(!showAllRequests)}
               className={`w-full mt-4 py-3 ${isDark ? 'bg-white/5 hover:bg-white/10' : 'bg-gray-100 hover:bg-gray-200'} rounded-lg text-sm font-medium transition-colors`}
