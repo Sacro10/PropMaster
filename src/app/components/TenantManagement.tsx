@@ -28,7 +28,7 @@ export function TenantManagement() {
   // Fetch data
   const { data: tenants, loading: tenantsLoading, error: tenantsError, refetch: refetchTenants } = useTenants();
   const { data: applications, loading: appsLoading, error: appsError, refetch: refetchApps, approve, reject } = useRentalApplications();
-  const { data: metrics, loading: metricsLoading, error: metricsError } = useTenantMetrics();
+  const { data: metrics, loading: metricsLoading, error: metricsError, refetch: refetchMetrics } = useTenantMetrics();
 
   // Filter tenants based on search query with memoization for performance
   const filteredTenants = useMemo(() => {
@@ -122,13 +122,18 @@ export function TenantManagement() {
 
   // Calculate metrics from actual data with AI-powered insights
   const calculatedMetrics = useMemo(() => {
-    if (!metrics) return null;
+    const baseMetrics = metrics || {
+      ai_accuracy: 0,
+      avg_screening_time: 0,
+      eviction_rate: 0,
+      acceptance_rate: 0,
+    };
 
     // Start with API metrics
-    let aiAccuracy = metrics.ai_accuracy;
-    let avgScreeningTime = metrics.avg_screening_time;
-    let evictionRate = metrics.eviction_rate;
-    let acceptanceRate = metrics.acceptance_rate;
+    let aiAccuracy = baseMetrics.ai_accuracy;
+    let avgScreeningTime = baseMetrics.avg_screening_time;
+    let evictionRate = baseMetrics.eviction_rate;
+    let acceptanceRate = baseMetrics.acceptance_rate;
 
     // Calculate from tenant profiles if available
     if (tenants.length > 0) {
@@ -235,15 +240,16 @@ export function TenantManagement() {
   ] : [];
 
   // Show loading state
-  if (tenantsLoading || appsLoading) {
+  if (tenantsLoading || appsLoading || metricsLoading) {
     return <LoadingPage />;
   }
 
   // Show error state
-  if (tenantsError || appsError) {
-    return <ErrorState error={tenantsError || appsError} retry={() => {
+  if (tenantsError || appsError || metricsError) {
+    return <ErrorState error={tenantsError || appsError || metricsError} retry={() => {
       refetchTenants();
       refetchApps();
+      refetchMetrics();
     }} />;
   }
 
@@ -577,60 +583,62 @@ export function TenantManagement() {
       </div>
 
       {/* AI Screening Info - Gated by Premium plan (ai_risk_scoring) */}
-      {metrics && (
-        <FeatureGate
-          feature="ai_risk_scoring"
-          hasAccess={aiRiskScoring.hasAccess}
-          loading={aiRiskScoring.loading}
-          variant="inline"
-        >
-          <div className={`${isDark ? 'bg-gradient-to-br from-[#1a1f35] to-[#0f1523]' : 'bg-white shadow-md'} border ${border.default} rounded-xl p-6`}>
-            <div className="flex items-start gap-6">
-              <div className="p-4 bg-gradient-to-br from-[#ff6b35] to-[#f7931e] rounded-xl">
-                <TrendingUp className="w-8 h-8 text-white" />
-              </div>
-              <div className="flex-1">
-                <h3 className="text-2xl mb-2" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
-                  AI-POWERED TENANT SCREENING
-                </h3>
-                <p className={`${text.secondary} mb-4`} style={{ fontFamily: 'Work Sans, sans-serif' }}>
-                  Our advanced AI analyzes credit history, income verification, employment status, rental history, and behavioral patterns to provide comprehensive risk assessments in real-time. Less than 1% eviction rate across all screened tenants.
-                </p>
-                <div className="grid grid-cols-4 gap-4">
-                  <div className={`p-3 ${isDark ? 'bg-white/5' : 'bg-gray-50'} rounded-lg`}>
-                    <p className="text-2xl font-bold text-emerald-400 mb-1" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
-                      {metrics.ai_accuracy > 0 ? `${metrics.ai_accuracy}%` : 'N/A'}
-                    </p>
-                    <p className={`text-xs ${text.muted}`}>Accuracy Rate</p>
-                  </div>
-                  <div className={`p-3 ${isDark ? 'bg-white/5' : 'bg-gray-50'} rounded-lg`}>
-                    <p className="text-2xl font-bold text-emerald-400 mb-1" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
-                      {metrics.avg_screening_time > 0 ? `${metrics.avg_screening_time} hrs` : 'N/A'}
-                    </p>
-                    <p className={`text-xs ${text.muted}`}>Avg. Process Time</p>
-                  </div>
-                  <div className={`p-3 ${isDark ? 'bg-white/5' : 'bg-gray-50'} rounded-lg`}>
-                    <p className="text-2xl font-bold text-emerald-400 mb-1" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
-                      {Number.isFinite(metrics.eviction_rate)
-                        ? metrics.eviction_rate < 1
-                          ? '<1%'
-                          : `${metrics.eviction_rate}%`
-                        : '0%'}
-                    </p>
-                    <p className={`text-xs ${text.muted}`}>Eviction Rate</p>
-                  </div>
-                  <div className={`p-3 ${isDark ? 'bg-white/5' : 'bg-gray-50'} rounded-lg`}>
-                    <p className="text-2xl font-bold text-emerald-400 mb-1" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
-                      24/7
-                    </p>
-                    <p className={`text-xs ${text.muted}`}>Automated Processing</p>
-                  </div>
+      <FeatureGate
+        feature="ai_risk_scoring"
+        hasAccess={aiRiskScoring.hasAccess}
+        loading={aiRiskScoring.loading}
+        variant="inline"
+      >
+        <div className={`${isDark ? 'bg-gradient-to-br from-[#1a1f35] to-[#0f1523]' : 'bg-white shadow-md'} border ${border.default} rounded-xl p-6`}>
+          <div className="flex items-start gap-6">
+            <div className="p-4 bg-gradient-to-br from-[#ff6b35] to-[#f7931e] rounded-xl">
+              <TrendingUp className="w-8 h-8 text-white" />
+            </div>
+            <div className="flex-1">
+              <h3 className="text-2xl mb-2" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
+                AI-POWERED TENANT SCREENING
+              </h3>
+              <p className={`${text.secondary} mb-4`} style={{ fontFamily: 'Work Sans, sans-serif' }}>
+                Our advanced AI analyzes credit history, income verification, employment status, rental history, and behavioral patterns to provide comprehensive risk assessments in real-time. Less than 1% eviction rate across all screened tenants.
+              </p>
+              <div className="grid grid-cols-4 gap-4">
+                <div className={`p-3 ${isDark ? 'bg-white/5' : 'bg-gray-50'} rounded-lg`}>
+                  <p className="text-2xl font-bold text-emerald-400 mb-1" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
+                    {calculatedMetrics.aiAccuracy > 0 ? `${Math.round(calculatedMetrics.aiAccuracy)}%` : 'N/A'}
+                  </p>
+                  <p className={`text-xs ${text.muted}`}>Accuracy Rate</p>
+                </div>
+                <div className={`p-3 ${isDark ? 'bg-white/5' : 'bg-gray-50'} rounded-lg`}>
+                  <p className="text-2xl font-bold text-emerald-400 mb-1" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
+                    {calculatedMetrics.avgScreeningTime > 0
+                      ? calculatedMetrics.avgScreeningTime < 1
+                        ? `${Math.round(calculatedMetrics.avgScreeningTime * 60)}min`
+                        : `${Math.round(calculatedMetrics.avgScreeningTime * 10) / 10} hrs`
+                      : 'N/A'}
+                  </p>
+                  <p className={`text-xs ${text.muted}`}>Avg. Process Time</p>
+                </div>
+                <div className={`p-3 ${isDark ? 'bg-white/5' : 'bg-gray-50'} rounded-lg`}>
+                  <p className="text-2xl font-bold text-emerald-400 mb-1" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
+                    {Number.isFinite(calculatedMetrics.evictionRate)
+                      ? calculatedMetrics.evictionRate < 1
+                        ? '<1%'
+                        : `${Math.round(calculatedMetrics.evictionRate * 10) / 10}%`
+                      : '0%'}
+                  </p>
+                  <p className={`text-xs ${text.muted}`}>Eviction Rate</p>
+                </div>
+                <div className={`p-3 ${isDark ? 'bg-white/5' : 'bg-gray-50'} rounded-lg`}>
+                  <p className="text-2xl font-bold text-emerald-400 mb-1" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
+                    24/7
+                  </p>
+                  <p className={`text-xs ${text.muted}`}>Automated Processing</p>
                 </div>
               </div>
             </div>
           </div>
-        </FeatureGate>
-      )}
+        </div>
+      </FeatureGate>
 
       {/* Modals */}
       {selectedApplication && (

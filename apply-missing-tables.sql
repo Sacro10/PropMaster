@@ -219,6 +219,29 @@ CREATE TABLE IF NOT EXISTS message_templates (
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- 4. Screening Results (from 003_complete_schema.sql)
+CREATE TABLE IF NOT EXISTS screening_results (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  account_id UUID NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+  application_id UUID NOT NULL REFERENCES rental_applications(id) ON DELETE CASCADE,
+  provider TEXT,
+  credit_score INTEGER,
+  background_check_status TEXT,
+  eviction_history BOOLEAN DEFAULT false,
+  criminal_history BOOLEAN DEFAULT false,
+  income_verification_status TEXT,
+  risk_score INTEGER,
+  risk_factors TEXT[] DEFAULT '{}',
+  recommendations TEXT,
+  raw_data JSONB DEFAULT '{}'::jsonb,
+  screened_at TIMESTAMPTZ DEFAULT NOW(),
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_screening_results_account ON screening_results(account_id);
+CREATE INDEX IF NOT EXISTS idx_screening_results_application ON screening_results(application_id);
+
 CREATE INDEX IF NOT EXISTS idx_message_templates_account ON message_templates(account_id);
 CREATE INDEX IF NOT EXISTS idx_message_templates_category ON message_templates(category);
 
@@ -418,6 +441,8 @@ CREATE TABLE IF NOT EXISTS owner_entities (
 
 CREATE INDEX IF NOT EXISTS idx_owner_entities_account ON owner_entities(account_id);
 
+ALTER TABLE accounts ADD COLUMN IF NOT EXISTS stripe_connected_account_id TEXT;
+
 CREATE TABLE IF NOT EXISTS property_owners (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   account_id UUID NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
@@ -430,6 +455,7 @@ CREATE TABLE IF NOT EXISTS property_owners (
 
 ALTER TABLE owner_disbursements ADD COLUMN IF NOT EXISTS owner_id UUID REFERENCES owner_entities(id) ON DELETE SET NULL;
 ALTER TABLE owner_disbursements ADD COLUMN IF NOT EXISTS property_id UUID REFERENCES properties(id) ON DELETE SET NULL;
+ALTER TABLE owner_disbursements ADD COLUMN IF NOT EXISTS stripe_payout_id TEXT;
 
 -- 6h. User profiles table (needed for payments joins)
 CREATE TABLE IF NOT EXISTS user_profiles (

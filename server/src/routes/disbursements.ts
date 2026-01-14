@@ -163,6 +163,20 @@ router.post(
       res.json(disbursement);
     } catch (error) {
       console.error('Process disbursement error:', error);
+      if (error instanceof Error && error.message === 'STRIPE_CONNECT_NOT_CONFIGURED') {
+        res.status(400).json({
+          error: 'Stripe Connect not configured',
+          code: 'STRIPE_CONNECT_NOT_CONFIGURED',
+        });
+        return;
+      }
+      if (error instanceof Error && error.message === 'DISBURSEMENT_AMOUNT_INVALID') {
+        res.status(400).json({
+          error: 'Disbursement amount must be greater than zero',
+          code: 'DISBURSEMENT_AMOUNT_INVALID',
+        });
+        return;
+      }
       res.status(500).json({
         error: 'Failed to process disbursement',
         details: error instanceof Error ? error.message : 'Unknown error',

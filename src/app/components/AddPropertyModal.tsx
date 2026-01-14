@@ -10,6 +10,8 @@ interface AddPropertyModalProps {
   onSuccess: () => void;
 }
 
+type PropertyTypeValue = 'residential' | 'commercial' | 'mixed';
+
 interface PropertyFormData {
   name: string;
   address1: string;
@@ -18,7 +20,7 @@ interface PropertyFormData {
   state: string;
   zip: string;
   country: string;
-  propertyType: string;
+  propertyType: PropertyTypeValue;
 }
 
 const US_STATES = [
@@ -29,15 +31,10 @@ const US_STATES = [
   'SD', 'TN', 'TX', 'UT', 'VT', 'VA', 'WA', 'WV', 'WI', 'WY'
 ];
 
-const PROPERTY_TYPES = [
-  'Single Family',
-  'Multi Family',
-  'Apartment Complex',
-  'Condo',
-  'Townhouse',
-  'Commercial',
-  'Mixed Use',
-  'Other'
+const PROPERTY_TYPES: Array<{ label: string; value: PropertyTypeValue }> = [
+  { label: 'Residential', value: 'residential' },
+  { label: 'Commercial', value: 'commercial' },
+  { label: 'Mixed Use', value: 'mixed' },
 ];
 
 export function AddPropertyModal({ isOpen, onClose, onSuccess }: AddPropertyModalProps) {
@@ -51,7 +48,7 @@ export function AddPropertyModal({ isOpen, onClose, onSuccess }: AddPropertyModa
     state: '',
     zip: '',
     country: 'USA',
-    propertyType: 'Single Family',
+    propertyType: 'residential',
   });
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
@@ -94,7 +91,7 @@ export function AddPropertyModal({ isOpen, onClose, onSuccess }: AddPropertyModa
         state: '',
         zip: '',
         country: 'USA',
-        propertyType: 'Single Family',
+    propertyType: 'residential',
       });
 
       onSuccess();
@@ -177,8 +174,8 @@ export function AddPropertyModal({ isOpen, onClose, onSuccess }: AddPropertyModa
               } border rounded-lg focus:outline-none focus:border-[#ff6b35]/50`}
               style={{ fontFamily: 'Work Sans, sans-serif' }}
             >
-              {PROPERTY_TYPES.map(type => (
-                <option key={type} value={type}>{type}</option>
+              {PROPERTY_TYPES.map((type) => (
+                <option key={type.value} value={type.value}>{type.label}</option>
               ))}
             </select>
           </div>

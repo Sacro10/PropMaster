@@ -27,9 +27,9 @@ export function RentCollection() {
 
   // Fetch data
   const { data: recentPayments, loading: paymentsLoading, error: paymentsError, refetch: refetchPayments } = useRecentPayments();
-  const { data: pendingPayments, loading: pendingLoading } = usePendingPayments();
+  const { data: pendingPayments, loading: pendingLoading, refetch: refetchPending } = usePendingPayments();
   const { data: disbursements, loading: disbursementsLoading, refetch: refetchDisbursements } = useOwnerDisbursements();
-  const { data: stats, loading: statsLoading } = useCollectionStats();
+  const { data: stats, loading: statsLoading, refetch: refetchStats } = useCollectionStats();
 
   // Show loading state
   if (paymentsLoading || statsLoading) {
@@ -79,6 +79,15 @@ export function RentCollection() {
     window.location.href = buildReminderMailto(payment);
   };
 
+  const handleRefreshData = async () => {
+    await Promise.all([
+      refetchPayments(),
+      refetchPending(),
+      refetchDisbursements(),
+      refetchStats(),
+    ]);
+  };
+
   // Handle process disbursement
   const handleProcessDisbursement = async (disbursementId: string) => {
     try {
@@ -86,10 +95,11 @@ export function RentCollection() {
       const idempotencyKey = `process-${disbursementId}-${Date.now()}`;
       await processDisbursement(disbursementId, idempotencyKey);
       console.log('Disbursement processed successfully');
-      refetchDisbursements();
+      await Promise.all([refetchDisbursements(), refetchStats()]);
     } catch (error) {
       console.error('Failed to process disbursement:', error);
-      alert('Failed to process disbursement. Please try again.');
+      const message = error instanceof Error ? error.message : 'Failed to process disbursement.';
+      alert(message);
     } finally {
       setProcessingDisbursement(null);
     }
@@ -111,7 +121,7 @@ export function RentCollection() {
         </div>
         <div className="flex items-center gap-3">
           <button
-            onClick={refetchPayments}
+            onClick={handleRefreshData}
             className={`px-4 py-2 ${isDark ? 'bg-white/5 hover:bg-white/10' : 'bg-gray-100 hover:bg-gray-200'} rounded-lg transition-colors flex items-center gap-2`}
             title="Refresh data"
           >
@@ -126,6 +136,7 @@ export function RentCollection() {
             disabled={disbursements.length === 0 || processingDisbursement !== null}
             className="px-6 py-3 bg-gradient-to-r from-[#ff6b35] to-[#f7931e] rounded-lg font-medium hover:scale-105 transition-transform disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
             style={{ fontFamily: 'Work Sans, sans-serif' }}
+            title="Marks the next pending disbursement as completed and logs the activity"
           >
             {processingDisbursement ? 'Processing...' : 'Process Disbursement'}
           </button>
@@ -441,6 +452,7 @@ export function RentCollection() {
                   disabled={processingDisbursement === disbursement.id}
                   className="w-full py-2 bg-gradient-to-r from-[#ff6b35] to-[#f7931e] rounded-lg text-sm font-medium hover:scale-105 transition-transform disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
                   style={{ fontFamily: 'Work Sans, sans-serif' }}
+                  title="Marks this disbursement as completed and logs the activity"
                 >
                   {processingDisbursement === disbursement.id ? 'Processing...' : 'Process Now'}
                 </button>

@@ -498,6 +498,9 @@ export async function processDisbursement(
     body: JSON.stringify({ idempotencyKey }),
   });
 
-  if (!response.ok) throw new Error('Failed to process disbursement');
+  if (!response.ok) {
+    const errorBody = await response.json().catch(() => null);
+    throw new Error(errorBody?.error || 'Failed to process disbursement');
+  }
   return await response.json();
 }

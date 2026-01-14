@@ -4,6 +4,7 @@
  */
 
 import { supabaseAdmin as supabase } from '../supabase';
+import { stripe } from '../stripe';
 import { logActivityEvent } from './activityService';
 import { createLedgerEntry } from './ledgerService';
 
@@ -34,6 +35,8 @@ export interface Disbursement {
   status: 'pending' | 'processing' | 'completed' | 'failed' | 'cancelled';
   disbursedAt: string | null;
   paymentMethod: string;
+  stripeTransferId?: string | null;
+  stripePayoutId?: string | null;
   totalRentCollected: number;
   totalExpenses: number;
   managementFee: number;
@@ -109,6 +112,8 @@ export async function getPendingDisbursements(
     status: d.status,
     disbursedAt: d.disbursed_at,
     paymentMethod: d.payment_method,
+    stripeTransferId: d.stripe_transfer_id,
+    stripePayoutId: d.stripe_payout_id,
     totalRentCollected: Number(d.total_rent_collected),
     totalExpenses: Number(d.total_expenses),
     managementFee: Number(d.management_fee),
@@ -293,8 +298,149 @@ export async function processDisbursement(
   disbursementId: string,
   idempotencyKey?: string
 ): Promise<Disbursement> {
-  // Use database function for atomic processing with idempotency
-  const { data, error } = await supabase.rpc('process_disbursement', {
+  const { data: existing, error: existingError } = await supabase
+    .from('owner_disbursements')
+    .select('*')
+    .eq('account_id', accountId)
+    .eq('id', disbursementId)
+    .single();
+
+  if (existingError) throw existingError;
+
+  if (existing.status === 'completed') {
+    return {
+      id: existing.id,
+      accountId: existing.account_id,
+      ownerId: existing.owner_id,
+      propertyId: existing.property_id,
+      amount: Number(existing.amount),
+      periodStart: existing.period_start,
+      periodEnd: existing.period_end,
+      status: existing.status,
+      disbursedAt: existing.disbursed_at,
+      paymentMethod: existing.payment_method,
+      stripeTransferId: existing.stripe_transfer_id,
+      stripePayoutId: existing.stripe_payout_id,
+      totalRentCollected: Number(existing.total_rent_collected),
+      totalExpenses: Number(existing.total_expenses),
+      managementFee: Number(existing.management_fee),
+      netAmount: Number(existing.net_amount),
+      breakdown: existing.breakdown,
+      notes: existing.notes,
+      createdAt: existing.created_at,
+    };
+  }
+
+  const { data: account, error: accountError } = await supabase
+    .from('accounts')
+    .select('stripe_connected_account_id')
+    .eq('id', accountId)
+    .single();
+
+  if (accountError) throw accountError;
+
+  const stripeAccountId = account?.stripe_connected_account_id;
+  const wantsStripe = !['check', 'wire'].includes(existing.payment_method);
+
+  if (wantsStripe && !stripeAccountId) {
+    throw new Error('STRIPE_CONNECT_NOT_CONFIGURED');
+  }
+
+  if (wantsStripe && stripeAccountId) {
+
+    const amountCents = Math.round(Number(existing.net_amount) * 100);
+    if (amountCents <= 0) {
+      throw new Error('DISBURSEMENT_AMOUNT_INVALID');
+    }
+
+    const transfer = await stripe.transfers.create(
+      {
+        amount: amountCents,
+        currency: 'usd',
+        destination: stripeAccountId,
+        metadata: {
+          disbursement_id: disbursementId,
+          account_id: accountId,
+        },
+      },
+      idempotencyKey ? { idempotencyKey: `${idempotencyKey}-transfer` } : undefined
+    );
+
+    const payout = await stripe.payouts.create(
+      {
+        amount: amountCents,
+        currency: 'usd',
+        metadata: {
+          disbursement_id: disbursementId,
+          account_id: accountId,
+        },
+      },
+      {
+        stripeAccount: stripeAccountId,
+        ...(idempotencyKey ? { idempotencyKey: `${idempotencyKey}-payout` } : {}),
+      }
+    );
+
+    const { data: updated, error: updateError } = await supabase
+      .from('owner_disbursements')
+      .update({
+        status: 'completed',
+        disbursed_at: new Date().toISOString(),
+        stripe_transfer_id: transfer.id,
+        stripe_payout_id: payout.id,
+        payment_method: 'stripe',
+      })
+      .eq('account_id', accountId)
+      .eq('id', disbursementId)
+      .select()
+      .single();
+
+    if (updateError) throw updateError;
+
+    await logActivityEvent(
+      accountId,
+      userId,
+      'disbursement_processed',
+      `Disbursement processed: $${updated.net_amount}`,
+      {
+        entityType: 'disbursement',
+        entityId: updated.id,
+        metadata: {
+          amount: updated.net_amount,
+          period_start: updated.period_start,
+          period_end: updated.period_end,
+          payment_count: updated.breakdown?.payment_count,
+          stripe_transfer_id: transfer.id,
+          stripe_payout_id: payout.id,
+        },
+      }
+    );
+
+    return {
+      id: updated.id,
+      accountId: updated.account_id,
+      ownerId: updated.owner_id,
+      propertyId: updated.property_id,
+      amount: Number(updated.amount),
+      periodStart: updated.period_start,
+      periodEnd: updated.period_end,
+      status: updated.status,
+      disbursedAt: updated.disbursed_at,
+      paymentMethod: updated.payment_method,
+      stripeTransferId: updated.stripe_transfer_id,
+      stripePayoutId: updated.stripe_payout_id,
+      totalRentCollected: Number(updated.total_rent_collected),
+      totalExpenses: Number(updated.total_expenses),
+      managementFee: Number(updated.management_fee),
+      netAmount: Number(updated.net_amount),
+      breakdown: updated.breakdown,
+      notes: updated.notes,
+      createdAt: updated.created_at,
+    };
+  }
+
+  // Use database function for atomic processing with idempotency (non-stripe)
+  const { error } = await supabase.rpc('process_disbursement', {
     p_disbursement_id: disbursementId,
     p_idempotency_key: idempotencyKey || `${disbursementId}-${Date.now()}`,
     p_processed_by: userId,
@@ -346,6 +492,8 @@ export async function processDisbursement(
         status: updated.status,
         disbursedAt: updated.disbursed_at,
         paymentMethod: updated.payment_method,
+        stripeTransferId: updated.stripe_transfer_id,
+        stripePayoutId: updated.stripe_payout_id,
         totalRentCollected: Number(updated.total_rent_collected),
         totalExpenses: Number(updated.total_expenses),
         managementFee: Number(updated.management_fee),
@@ -357,39 +505,39 @@ export async function processDisbursement(
     }
 
     if (error.message.includes('Duplicate disbursement')) {
-      // Idempotency check failed - return existing disbursement
-      const { data: existing } = await supabase
+      const { data: fallback } = await supabase
         .from('owner_disbursements')
         .select('*')
         .eq('id', disbursementId)
         .single();
 
-      if (existing) {
+      if (fallback) {
         return {
-          id: existing.id,
-          accountId: existing.account_id,
-          ownerId: existing.owner_id,
-          propertyId: existing.property_id,
-          amount: Number(existing.amount),
-          periodStart: existing.period_start,
-          periodEnd: existing.period_end,
-          status: existing.status,
-          disbursedAt: existing.disbursed_at,
-          paymentMethod: existing.payment_method,
-          totalRentCollected: Number(existing.total_rent_collected),
-          totalExpenses: Number(existing.total_expenses),
-          managementFee: Number(existing.management_fee),
-          netAmount: Number(existing.net_amount),
-          breakdown: existing.breakdown,
-          notes: existing.notes,
-          createdAt: existing.created_at,
+          id: fallback.id,
+          accountId: fallback.account_id,
+          ownerId: fallback.owner_id,
+          propertyId: fallback.property_id,
+          amount: Number(fallback.amount),
+          periodStart: fallback.period_start,
+          periodEnd: fallback.period_end,
+          status: fallback.status,
+          disbursedAt: fallback.disbursed_at,
+          paymentMethod: fallback.payment_method,
+          stripeTransferId: fallback.stripe_transfer_id,
+          stripePayoutId: fallback.stripe_payout_id,
+          totalRentCollected: Number(fallback.total_rent_collected),
+          totalExpenses: Number(fallback.total_expenses),
+          managementFee: Number(fallback.management_fee),
+          netAmount: Number(fallback.net_amount),
+          breakdown: fallback.breakdown,
+          notes: fallback.notes,
+          createdAt: fallback.created_at,
         };
       }
     }
     throw error;
   }
 
-  // Fetch updated disbursement
   const { data: disbursement, error: fetchError } = await supabase
     .from('owner_disbursements')
     .select('*')
@@ -426,6 +574,8 @@ export async function processDisbursement(
     status: disbursement.status,
     disbursedAt: disbursement.disbursed_at,
     paymentMethod: disbursement.payment_method,
+    stripeTransferId: disbursement.stripe_transfer_id,
+    stripePayoutId: disbursement.stripe_payout_id,
     totalRentCollected: Number(disbursement.total_rent_collected),
     totalExpenses: Number(disbursement.total_expenses),
     managementFee: Number(disbursement.management_fee),

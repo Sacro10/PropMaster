@@ -5,9 +5,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
   getDashboardMetrics,
-  getRecentActivity,
-  getSystemMetrics,
-  getUpcomingTasks,
+  getDashboardSummary,
   type DashboardMetrics,
   type RecentActivity,
   type SystemMetrics,
@@ -41,18 +39,21 @@ export function useDashboardData(autoRefreshInterval: number = 60000): UseDashbo
       setLoading(true);
       setError(null);
 
-      // Fetch all dashboard data in parallel
-      const [metricsData, activityData, systemData, tasksData] = await Promise.all([
+      // Fetch metrics + summary once to avoid duplicate summary API calls
+      const [metricsData, summary] = await Promise.all([
         getDashboardMetrics(),
-        getRecentActivity(10),
-        getSystemMetrics(),
-        getUpcomingTasks(),
+        getDashboardSummary(),
       ]);
 
       setMetrics(metricsData);
-      setRecentActivity(activityData);
-      setSystemMetrics(systemData);
-      setUpcomingTasks(tasksData);
+      setRecentActivity(summary.recentActivity.slice(0, 10));
+      setSystemMetrics({
+        support_status: summary.systemStatus.supportAvailable ? '24/7' : 'Business Hours',
+        avg_lease_time_days: summary.systemStatus.avgLeaseTime,
+        eviction_rate: summary.systemStatus.evictionRate,
+        occupancy_trend: summary.systemStatus.occupancyTrend,
+      });
+      setUpcomingTasks(summary.upcomingTasks);
     } catch (err) {
       console.error('[useDashboardData] Error fetching dashboard data:', err);
       setError(err as Error);

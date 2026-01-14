@@ -4,9 +4,13 @@ import { useThemeContext } from '../context/ThemeContext';
 import {
   getEmergencySupportConfig,
   updateEmergencySupportConfig,
-  sendEmergencyTest,
   type EmergencySupportConfig,
 } from '../../lib/api/maintenanceMetrics';
+import {
+  getStripeConnectSettings,
+  updateStripeConnectSettings,
+  type StripeConnectSettings,
+} from '../../lib/api/accounts';
 
 type EmergencyChannel = 'pagerduty' | 'opsgenie' | 'twilio' | 'slack' | 'email' | 'webhook';
 
@@ -35,14 +39,17 @@ export function SettingsPage() {
   const [config, setConfig] = useState<EmergencySupportConfig>(DEFAULT_CONFIG);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [testing, setTesting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
-  const [testChannels, setTestChannels] = useState<EmergencyChannel[]>(DEFAULT_CHANNELS);
-  const [testTitle, setTestTitle] = useState('Emergency Notification Test');
-  const [testDescription, setTestDescription] = useState('This is a test of your emergency notification channels.');
-  const [testCategory, setTestCategory] = useState('general');
-  const [testResults, setTestResults] = useState<Array<{ channel: string; sent: boolean; status?: number; error?: string }>>([]);
+  const [stripeSettings, setStripeSettings] = useState<StripeConnectSettings>({
+    stripeConnectedAccountId: null,
+    chargesEnabled: null,
+    payoutsEnabled: null,
+  });
+  const [stripeAccountInput, setStripeAccountInput] = useState('');
+  const [stripeSaving, setStripeSaving] = useState(false);
+  const [stripeError, setStripeError] = useState<string | null>(null);
+  const [stripeSuccess, setStripeSuccess] = useState<string | null>(null);
 
   useEffect(() => {
     const loadConfig = async () => {
@@ -50,7 +57,6 @@ export function SettingsPage() {
         setLoading(true);
         const response = await getEmergencySupportConfig();
         setConfig(response);
-        setTestChannels(response.notificationChannels as EmergencyChannel[]);
       } catch (err: any) {
         setError(err.message || 'Failed to load emergency settings');
       } finally {
@@ -61,21 +67,30 @@ export function SettingsPage() {
     loadConfig();
   }, []);
 
-  const toggleChannel = (channel: EmergencyChannel, isDefault: boolean) => {
-    const currentChannels = isDefault ? (config.notificationChannels as EmergencyChannel[]) : testChannels;
+  useEffect(() => {
+    const loadStripeSettings = async () => {
+      try {
+        const response = await getStripeConnectSettings();
+        setStripeSettings(response);
+        setStripeAccountInput(response.stripeConnectedAccountId || '');
+      } catch (err: any) {
+        setStripeError(err.message || 'Failed to load Stripe settings');
+      }
+    };
 
+    loadStripeSettings();
+  }, []);
+
+  const toggleChannel = (channel: EmergencyChannel) => {
+    const currentChannels = config.notificationChannels as EmergencyChannel[];
     const nextChannels = currentChannels.includes(channel)
       ? currentChannels.filter((item) => item !== channel)
       : [...currentChannels, channel];
 
-    if (isDefault) {
-      setConfig({
-        ...config,
-        notificationChannels: nextChannels,
-      } as EmergencySupportConfig);
-    } else {
-      setTestChannels(nextChannels);
-    }
+    setConfig({
+      ...config,
+      notificationChannels: nextChannels,
+    } as EmergencySupportConfig);
   };
 
   const handleSave = async () => {
@@ -100,32 +115,28 @@ export function SettingsPage() {
     }
   };
 
-  const handleTest = async () => {
+  const handleStripeSave = async () => {
     try {
-      setTesting(true);
-      setError(null);
-      setSuccess(null);
-      setTestResults([]);
+      setStripeSaving(true);
+      setStripeError(null);
+      setStripeSuccess(null);
 
-      if (testChannels.length === 0) {
-        setError('Select at least one test notification channel.');
-        setTesting(false);
+      if (!stripeAccountInput.trim()) {
+        setStripeError('Enter a Stripe connected account ID (starts with acct_).');
+        setStripeSaving(false);
         return;
       }
 
-      const response = await sendEmergencyTest({
-        title: testTitle,
-        description: testDescription,
-        category: testCategory,
-        notificationChannels: testChannels,
+      const updated = await updateStripeConnectSettings(stripeAccountInput.trim());
+      setStripeSettings({
+        ...stripeSettings,
+        stripeConnectedAccountId: updated.stripeConnectedAccountId || stripeAccountInput.trim(),
       });
-
-      setTestResults(response.notifications || []);
-      setSuccess('Test notifications sent. Review results below.');
+      setStripeSuccess('Stripe Connect settings saved.');
     } catch (err: any) {
-      setError(err.message || 'Failed to send emergency test');
+      setStripeError(err.message || 'Failed to update Stripe settings');
     } finally {
-      setTesting(false);
+      setStripeSaving(false);
     }
   };
 
@@ -225,7 +236,7 @@ export function SettingsPage() {
                   <button
                     key={channel.value}
                     type="button"
-                    onClick={() => toggleChannel(channel.value, true)}
+                    onClick={() => toggleChannel(channel.value)}
                     className={`px-4 py-3 rounded-lg border transition-all text-left ${
                       config.notificationChannels.includes(channel.value)
                         ? 'bg-gradient-to-r from-[#ff6b35] to-[#f7931e] border-[#ff6b35] text-white font-semibold'
@@ -258,135 +269,78 @@ export function SettingsPage() {
         )}
       </div>
 
-      <div className={`p-6 rounded-xl border ${isDark ? 'bg-[#0f1523] border-white/10' : 'bg-white border-gray-200'}`}>
+      <div className={`p-6 rounded-xl border ${isDark ? 'bg-[#1a1f35] border-white/10' : 'bg-white border-gray-200'}`}>
         <div className="flex items-center gap-3 mb-6">
           <Settings className="w-6 h-6 text-[#ff6b35]" />
           <div>
             <h3 className="text-2xl" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
-              TEST EMERGENCY NOTIFICATIONS
+              STRIPE CONNECT PAYOUTS
             </h3>
             <p className={`text-sm ${isDark ? 'text-white/50' : 'text-gray-500'}`} style={{ fontFamily: 'Work Sans, sans-serif' }}>
-              Validate each provider from the dashboard.
+              Save your connected account ID to enable automatic disbursements.
             </p>
           </div>
         </div>
 
-        <div className="space-y-6">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {(stripeError || stripeSuccess) && (
+          <div className={`mb-4 p-4 rounded-lg border ${isDark ? 'bg-white/5 border-white/10' : 'bg-white border-gray-200'} flex items-start gap-3`}>
+            {stripeError ? (
+              <AlertCircle className="w-5 h-5 text-red-400 flex-shrink-0 mt-0.5" />
+            ) : (
+              <CheckCircle2 className="w-5 h-5 text-emerald-400 flex-shrink-0 mt-0.5" />
+            )}
             <div>
-              <label className={`block text-sm font-medium mb-2 ${isDark ? 'text-white/70' : 'text-gray-600'}`}>
-                Test title
-              </label>
-              <input
-                type="text"
-                value={testTitle}
-                onChange={(e) => setTestTitle(e.target.value)}
-                className={`w-full px-4 py-3 rounded-lg border ${
-                  isDark ? 'bg-white/5 border-white/10 text-white' : 'bg-gray-50 border-gray-300 text-gray-900'
-                } focus:outline-none focus:border-[#ff6b35]/70`}
-              />
-            </div>
-            <div>
-              <label className={`block text-sm font-medium mb-2 ${isDark ? 'text-white/70' : 'text-gray-600'}`}>
-                Category
-              </label>
-              <input
-                type="text"
-                value={testCategory}
-                onChange={(e) => setTestCategory(e.target.value)}
-                className={`w-full px-4 py-3 rounded-lg border ${
-                  isDark ? 'bg-white/5 border-white/10 text-white' : 'bg-gray-50 border-gray-300 text-gray-900'
-                } focus:outline-none focus:border-[#ff6b35]/70`}
-              />
+              <p className={`font-medium ${stripeError ? 'text-red-400' : 'text-emerald-400'}`}>
+                {stripeError ? 'Action failed' : 'Success'}
+              </p>
+              <p className={`text-sm ${isDark ? 'text-white/60' : 'text-gray-600'}`}>
+                {stripeError || stripeSuccess}
+              </p>
             </div>
           </div>
+        )}
 
+        <div className="space-y-4">
           <div>
             <label className={`block text-sm font-medium mb-2 ${isDark ? 'text-white/70' : 'text-gray-600'}`}>
-              Test description
+              Connected Account ID
             </label>
-            <textarea
-              value={testDescription}
-              onChange={(e) => setTestDescription(e.target.value)}
-              rows={3}
+            <input
+              type="text"
+              value={stripeAccountInput}
+              onChange={(e) => setStripeAccountInput(e.target.value)}
+              placeholder="acct_1234567890"
               className={`w-full px-4 py-3 rounded-lg border ${
                 isDark ? 'bg-white/5 border-white/10 text-white' : 'bg-gray-50 border-gray-300 text-gray-900'
               } focus:outline-none focus:border-[#ff6b35]/70`}
             />
+            <p className={`mt-2 text-xs ${isDark ? 'text-white/50' : 'text-gray-500'}`}>
+              Use the connected account ID from Stripe Connect onboarding.
+            </p>
           </div>
 
-          <div>
-            <label className={`block text-sm font-medium mb-2 ${isDark ? 'text-white/70' : 'text-gray-600'}`}>
-              Test channels
-            </label>
-            <div className="grid grid-cols-2 gap-3">
-              {EMERGENCY_CHANNELS.map((channel) => (
-                <button
-                  key={channel.value}
-                  type="button"
-                  onClick={() => toggleChannel(channel.value, false)}
-                  className={`px-4 py-3 rounded-lg border transition-all text-left ${
-                    testChannels.includes(channel.value)
-                      ? 'bg-gradient-to-r from-[#ff6b35] to-[#f7931e] border-[#ff6b35] text-white font-semibold'
-                      : isDark
-                      ? 'bg-white/5 border-white/10 hover:bg-white/10 text-white/70'
-                      : 'bg-gray-50 border-gray-300 hover:bg-gray-100 text-gray-700'
-                  }`}
-                  style={{ fontFamily: 'Work Sans, sans-serif' }}
-                >
-                  <div className="font-semibold mb-1">{channel.label}</div>
-                  <div className={`text-xs ${testChannels.includes(channel.value) ? 'text-white/80' : isDark ? 'text-white/50' : 'text-gray-500'}`}>
-                    {channel.helper}
-                  </div>
-                </button>
-              ))}
-            </div>
+          <div className="flex flex-wrap gap-3 text-sm">
+            <span className={`px-3 py-1 rounded-full ${stripeSettings.chargesEnabled ? 'bg-emerald-500/20 text-emerald-400' : 'bg-amber-500/20 text-amber-400'}`}>
+              Charges: {stripeSettings.chargesEnabled === null ? 'Unknown' : stripeSettings.chargesEnabled ? 'Enabled' : 'Disabled'}
+            </span>
+            <span className={`px-3 py-1 rounded-full ${stripeSettings.payoutsEnabled ? 'bg-emerald-500/20 text-emerald-400' : 'bg-amber-500/20 text-amber-400'}`}>
+              Payouts: {stripeSettings.payoutsEnabled === null ? 'Unknown' : stripeSettings.payoutsEnabled ? 'Enabled' : 'Disabled'}
+            </span>
           </div>
 
           <div className="flex items-center justify-end gap-3">
             <button
-              onClick={handleTest}
-              disabled={testing}
+              onClick={handleStripeSave}
+              disabled={stripeSaving}
               className="px-6 py-3 bg-gradient-to-r from-[#ff6b35] to-[#f7931e] rounded-lg font-medium hover:scale-105 transition-transform disabled:opacity-50 disabled:cursor-not-allowed"
               style={{ fontFamily: 'Work Sans, sans-serif' }}
             >
-              {testing ? 'Sending...' : 'Send Test'}
+              {stripeSaving ? 'Saving...' : 'Save Stripe Settings'}
             </button>
           </div>
-
-          {testResults.length > 0 && (
-            <div className={`mt-4 rounded-lg border ${isDark ? 'border-white/10 bg-white/5' : 'border-gray-200 bg-gray-50'} p-4`}>
-              <p className={`text-sm font-medium mb-2 ${isDark ? 'text-white/70' : 'text-gray-600'}`}>
-                Delivery results
-              </p>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
-                {testResults.map((result) => (
-                  <div
-                    key={result.channel}
-                    className={`p-3 rounded-lg border ${
-                      result.sent
-                        ? isDark
-                          ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300'
-                          : 'border-emerald-200 bg-emerald-50 text-emerald-700'
-                        : isDark
-                        ? 'border-red-500/30 bg-red-500/10 text-red-300'
-                        : 'border-red-200 bg-red-50 text-red-700'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between">
-                      <span className="font-semibold">{result.channel}</span>
-                      <span>{result.sent ? 'Sent' : 'Failed'}</span>
-                    </div>
-                    {!result.sent && result.error && (
-                      <p className="text-xs mt-1">{result.error}</p>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
         </div>
       </div>
+
     </div>
   );
 }

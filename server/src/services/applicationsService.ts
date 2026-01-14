@@ -172,6 +172,16 @@ export interface CreateApplicationData {
   criminalHistory?: boolean | null;
 }
 
+function isMissingScreeningRelationship(error: unknown): boolean {
+  const message =
+    typeof (error as { message?: string } | null)?.message === 'string'
+      ? (error as { message: string }).message
+      : '';
+  return message.includes(
+    "Could not find a relationship between 'rental_applications' and 'screening_results'"
+  );
+}
+
 function mapApplicationRow(app: any): RentalApplication {
   const applicationData = app.application_data || {};
   const { firstName, lastName } = getNameParts(app.full_name, applicationData);
@@ -240,29 +250,34 @@ export async function getApplications(
   }
 ): Promise<{ applications: RentalApplication[]; total: number }> {
   const { status, unitId, propertyId, limit = 50, offset = 0 } = filters || {};
-
-  let query = supabase
-    .from('rental_applications')
-    .select(
-      `
-      *,
-      unit:units!inner(unit_number, rent_amount),
-      property:properties!inner(name, address1, address2, city, state, zip),
-      screening_results(*)
-    `,
-      { count: 'exact' }
-    )
-    .eq('account_id', accountId);
-
+  const baseSelect = `
+    *,
+    unit:units!inner(unit_number, rent_amount),
+    property:properties!inner(name, address1, address2, city, state, zip)
+  `;
+  const selectWithScreening = `${baseSelect}, screening_results(*)`;
   const normalizedStatus = status === 'pending' ? 'submitted' : status;
-  if (normalizedStatus) query = query.eq('status', normalizedStatus);
-  if (unitId) query = query.eq('unit_id', unitId);
-  if (propertyId) query = query.eq('property_id', propertyId);
 
-  query = query.order('created_at', { ascending: false });
-  query = query.range(offset, offset + limit - 1);
+  const buildQuery = (selectClause: string) => {
+    let query = supabase
+      .from('rental_applications')
+      .select(selectClause, { count: 'exact' })
+      .eq('account_id', accountId);
 
-  const { data, error, count } = await query;
+    if (normalizedStatus) query = query.eq('status', normalizedStatus);
+    if (unitId) query = query.eq('unit_id', unitId);
+    if (propertyId) query = query.eq('property_id', propertyId);
+
+    query = query.order('created_at', { ascending: false });
+    query = query.range(offset, offset + limit - 1);
+    return query;
+  };
+
+  let { data, error, count } = await buildQuery(selectWithScreening);
+
+  if (error && isMissingScreeningRelationship(error)) {
+    ({ data, error, count } = await buildQuery(baseSelect));
+  }
 
   if (error) throw error;
 
@@ -278,19 +293,28 @@ export async function getApplicationById(
   accountId: string,
   applicationId: string
 ): Promise<RentalApplication | null> {
-  const { data, error } = await supabase
+  const baseSelect = `
+    *,
+    unit:units!inner(unit_number, rent_amount),
+    property:properties!inner(name, address1, address2, city, state, zip)
+  `;
+  const selectWithScreening = `${baseSelect}, screening_results(*)`;
+
+  let { data, error } = await supabase
     .from('rental_applications')
-    .select(
-      `
-      *,
-      unit:units!inner(unit_number, rent_amount),
-      property:properties!inner(name, address1, address2, city, state, zip),
-      screening_results(*)
-    `
-    )
+    .select(selectWithScreening)
     .eq('account_id', accountId)
     .eq('id', applicationId)
     .single();
+
+  if (error && isMissingScreeningRelationship(error)) {
+    ({ data, error } = await supabase
+      .from('rental_applications')
+      .select(baseSelect)
+      .eq('account_id', accountId)
+      .eq('id', applicationId)
+      .single());
+  }
 
   if (error) {
     if (error.code === 'PGRST116') return null;
