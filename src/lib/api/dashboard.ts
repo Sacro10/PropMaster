@@ -240,15 +240,30 @@ export async function getDashboardMetrics(): Promise<DashboardMetrics> {
       console.error('[Dashboard API] Error fetching units:', unitsError);
     }
 
-    const total_units = properties?.reduce((sum, p) => sum + (p.total_units || 0), 0) || 0;
+    const total_units = (units && units.length > 0)
+      ? units.length
+      : (properties?.reduce((sum, p) => sum + (p.total_units || 0), 0) || 0);
     const occupied_units = units?.filter((unit) => unit.status === 'occupied').length || 0;
-    const occupancy_rate = total_units > 0 ? Math.round((occupied_units / total_units) * 100) : 0;
 
-    // Get active tenants count
-    const { count: active_tenants } = await supabase
+    // Get tenant profiles for active tenant change calculations
+    const { data: tenantProfiles, error: tenantsError } = await supabase
       .from('tenant_profiles')
-      .select('*', { count: 'exact', head: true })
+      .select('created_at, move_out_date')
       .eq('account_id', accountId);
+
+    if (tenantsError) {
+      console.error('[Dashboard API] Error fetching tenant profiles:', tenantsError);
+    }
+
+    // Get leases for occupancy change calculations
+    const { data: leases, error: leasesError } = await supabase
+      .from('leases')
+      .select('lease_start, lease_end, status')
+      .eq('account_id', accountId);
+
+    if (leasesError) {
+      console.error('[Dashboard API] Error fetching leases:', leasesError);
+    }
 
     // Get monthly revenue
     const now = new Date();
@@ -277,13 +292,43 @@ export async function getDashboardMetrics(): Promise<DashboardMetrics> {
       ? Math.round(((monthly_revenue - previous_revenue) / previous_revenue) * 100) 
       : 0;
 
+    const isLeaseActiveOnDate = (lease: any, date: Date) => {
+      if (!lease?.lease_start) return false;
+      const start = new Date(lease.lease_start);
+      const end = lease.lease_end ? new Date(lease.lease_end) : null;
+      const status = String(lease.status || '').toLowerCase();
+      return start <= date && (!end || end >= date) && (status === 'active' || status === 'pending');
+    };
+
+    const isTenantActiveOnDate = (tenant: any, date: Date) => {
+      if (!tenant?.created_at) return false;
+      const created = new Date(tenant.created_at);
+      const movedOut = tenant.move_out_date ? new Date(tenant.move_out_date) : null;
+      return created <= date && (!movedOut || movedOut > date);
+    };
+
+    const activeTenantsNow = (tenantProfiles || []).filter((tenant) => isTenantActiveOnDate(tenant, now)).length;
+    const activeTenantsPrevious = (tenantProfiles || []).filter((tenant) => isTenantActiveOnDate(tenant, previousMonthEnd)).length;
+    const tenant_change = activeTenantsNow - activeTenantsPrevious;
+
+    const occupiedFromLeasesNow = (leases || []).filter((lease) => isLeaseActiveOnDate(lease, now)).length;
+    const occupiedFromLeasesPrevious = (leases || []).filter((lease) => isLeaseActiveOnDate(lease, previousMonthEnd)).length;
+    const effectiveOccupiedNow = occupied_units > 0 ? occupied_units : occupiedFromLeasesNow;
+    const occupancy_rate = total_units > 0 ? Math.round((effectiveOccupiedNow / total_units) * 100) : 0;
+    const previousOccupancyRate = total_units > 0
+      ? Math.round((occupiedFromLeasesPrevious / total_units) * 100)
+      : 0;
+    const occupancy_change = previousOccupancyRate > 0
+      ? Math.round(((occupancy_rate - previousOccupancyRate) / previousOccupancyRate) * 100)
+      : 0;
+
     return {
       total_units,
-      occupied_units,
+      occupied_units: effectiveOccupiedNow,
       occupancy_rate,
-      occupancy_change: 0,
-      active_tenants: active_tenants || 0,
-      tenant_change: 0,
+      occupancy_change,
+      active_tenants: activeTenantsNow,
+      tenant_change,
       monthly_revenue,
       revenue_change,
     };

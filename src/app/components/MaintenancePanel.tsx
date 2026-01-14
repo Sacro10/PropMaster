@@ -1,11 +1,11 @@
-import { Wrench, CircleCheck, Activity, Bell, ListFilter, RefreshCw, AlertTriangle, CheckCircle } from 'lucide-react';
+import { Wrench, CircleCheck, Activity, Bell, ListFilter, RefreshCw, AlertTriangle, CheckCircle, Trash2 } from 'lucide-react';
 import { useState } from 'react';
 import { useThemeStyles } from '../hooks/useThemeStyles';
 import { useHasFeature } from '../hooks/usePlanGating';
 import { FeatureGate, LockedFeatureCard } from './UpgradeCTA';
 import { useMaintenanceRequests, useMaintenanceMetrics, useHVACProgram, useRoutingMetrics, useAssignVendor } from '../../lib/hooks/useMaintenance';
 import { getAvailableVendors, generateHVACBatch } from '../../lib/api/maintenanceMetrics';
-import { updateMaintenanceRequestStatus } from '../../lib/api/maintenance';
+import { updateMaintenanceRequestStatus, deleteMaintenanceRequest } from '../../lib/api/maintenance';
 import { LoadingPage } from './LoadingSpinner';
 import { ErrorState } from './ErrorBoundary';
 import { formatRelativeTime, formatDisplayDate } from '../../lib/utils/dateHelpers';
@@ -27,6 +27,7 @@ export function MaintenancePanel() {
   const [selectedStatus, setSelectedStatus] = useState<'all' | 'submitted' | 'reviewed' | 'assigned' | 'scheduled' | 'in_progress' | 'completed' | 'closed' | 'cancelled'>('all');
   const [updatingStatusId, setUpdatingStatusId] = useState<string | null>(null);
   const [statusUpdateError, setStatusUpdateError] = useState<{ id: string; message: string } | null>(null);
+  const [deletingRequestId, setDeletingRequestId] = useState<string | null>(null);
   const { assign, isAssigning } = useAssignVendor();
 
   // Feature checks for plan gating
@@ -36,7 +37,7 @@ export function MaintenancePanel() {
 
   // Fetch data
   const { data: requests, loading: requestsLoading, error: requestsError, refetch: refetchRequests } = useMaintenanceRequests();
-  const { data: metrics, loading: metricsLoading, error: metricsError } = useMaintenanceMetrics();
+  const { data: metrics, loading: metricsLoading, error: metricsError, refetch: refetchMetrics } = useMaintenanceMetrics();
   const { data: hvacProgram, loading: hvacLoading } = useHVACProgram();
   const { data: routingMetrics } = useRoutingMetrics();
 
@@ -64,6 +65,24 @@ export function MaintenancePanel() {
       setAssignError('Failed to load vendors. Please try again.');
     } finally {
       setIsLoadingVendors(false);
+    }
+  };
+
+  const handleDeleteRequest = async (request: any) => {
+    const title = request?.title || 'this request';
+    const confirmed = confirm(`Delete ${title}? This action cannot be undone.`);
+    if (!confirmed) return;
+
+    try {
+      setDeletingRequestId(request.id);
+      await deleteMaintenanceRequest(request.id);
+      await refetchRequests();
+      await refetchMetrics();
+    } catch (error) {
+      console.error('Failed to delete maintenance request:', error);
+      alert('Failed to delete maintenance request. Please try again.');
+    } finally {
+      setDeletingRequestId(null);
     }
   };
 
@@ -357,6 +376,17 @@ export function MaintenancePanel() {
                               </option>
                             ))}
                           </select>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteRequest(request)}
+                            disabled={deletingRequestId === request.id}
+                            className={`p-2 rounded-lg transition-colors ${
+                              isDark ? 'bg-white/5 hover:bg-white/10' : 'bg-white hover:bg-gray-100'
+                            } ${deletingRequestId === request.id ? 'opacity-50 cursor-not-allowed' : ''}`}
+                            title="Delete maintenance request"
+                          >
+                            <Trash2 className="w-4 h-4 text-red-400" />
+                          </button>
                         </div>
                         {statusUpdateError?.id === request.id && (
                           <p className="text-xs text-red-400 mb-2">{statusUpdateError.message}</p>

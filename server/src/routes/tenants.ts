@@ -6,6 +6,7 @@ import {
   getTenantById,
   createTenant,
   updateTenant,
+  deleteTenantLease,
   CreateTenantData,
   UpdateTenantData,
 } from '../services/tenantsService';
@@ -155,6 +156,29 @@ router.patch('/:id', authenticate, Permissions.updateTenants, async (req: AuthRe
     const statusCode = error instanceof Error && error.message === 'Tenant not found' ? 404 : 500;
     res.status(statusCode).json({
       error: 'Failed to update tenant',
+      details: error instanceof Error ? error.message : 'Unknown error',
+    });
+  }
+});
+
+/**
+ * DELETE /api/tenants/:id
+ * Delete a tenant lease
+ */
+router.delete('/:id', authenticate, Permissions.deleteTenants, async (req: AuthRequest, res) => {
+  try {
+    if (!req.user?.accountId) {
+      res.status(400).json({ error: 'Account ID required' });
+      return;
+    }
+
+    await deleteTenantLease(req.user.accountId, req.params.id, req.body?.tenantUserId);
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Delete tenant error:', error);
+    const statusCode = error instanceof Error && error.message === 'Tenant lease not found' ? 404 : 500;
+    res.status(statusCode).json({
+      error: 'Failed to delete tenant',
       details: error instanceof Error ? error.message : 'Unknown error',
     });
   }

@@ -1,4 +1,4 @@
-import { Key, Clock, CircleCheck, Calendar, RefreshCw } from 'lucide-react';
+import { Key, Clock, CircleCheck, Calendar, RefreshCw, Trash2 } from 'lucide-react';
 import { useState } from 'react';
 import { useHasFeature } from '../hooks/usePlanGating';
 import { useThemeStyles } from '../hooks/useThemeStyles';
@@ -12,7 +12,7 @@ import {
 } from '../../lib/hooks/useShowings';
 import { formatRelativeTime } from '../../lib/utils/dateHelpers';
 import { ScheduleShowingModal } from './ScheduleShowingModal';
-import { markShowingReminderSent } from '../../lib/api/showings';
+import { markShowingReminderSent, deleteShowing } from '../../lib/api/showings';
 
 export function PropertyShowings() {
   const { isDark, text, border } = useThemeStyles();
@@ -21,6 +21,7 @@ export function PropertyShowings() {
   const [selectedUnitId, setSelectedUnitId] = useState<string | undefined>(undefined);
   const [selectedShowing, setSelectedShowing] = useState<any | null>(null);
   const [reminderConfirmShowing, setReminderConfirmShowing] = useState<any | null>(null);
+  const [deletingShowingId, setDeletingShowingId] = useState<string | null>(null);
   const [showAllShowings, setShowAllShowings] = useState(false);
   const [showAllProperties, setShowAllProperties] = useState(false);
 
@@ -30,7 +31,7 @@ export function PropertyShowings() {
   // Fetch data
   const { data: showings, loading: showingsLoading, error: showingsError, refetch: refetchShowings } = useUpcomingShowings();
   const { data: availableProperties, loading: propertiesLoading } = useAvailableProperties();
-  const { data: stats, loading: statsLoading } = useShowingStats();
+  const { data: stats, loading: statsLoading, refetch: refetchStats } = useShowingStats();
 
   // Handle sending reminder
   const handleSendReminder = async (showing: any) => {
@@ -81,6 +82,24 @@ export function PropertyShowings() {
 
   const handleCloseDetails = () => {
     setSelectedShowing(null);
+  };
+
+  const handleDeleteShowing = async (showing: any) => {
+    const name = showing?.visitor_name || showing?.visitorName || 'this showing';
+    const confirmed = confirm(`Delete ${name}? This action cannot be undone.`);
+    if (!confirmed) return;
+
+    try {
+      setDeletingShowingId(showing.id);
+      await deleteShowing(showing.id);
+      await refetchShowings();
+      await refetchStats();
+    } catch (error) {
+      console.error('Failed to delete showing:', error);
+      alert('Failed to delete showing. Please try again.');
+    } finally {
+      setDeletingShowingId(null);
+    }
   };
 
   const visibleShowings = showAllShowings ? showings : showings.slice(0, 5);
@@ -270,6 +289,14 @@ export function PropertyShowings() {
                               style={{ fontFamily: 'Work Sans, sans-serif' }}
                             >
                               Details
+                            </button>
+                            <button
+                              onClick={() => handleDeleteShowing(showing)}
+                              disabled={deletingShowingId === showing.id}
+                              className={`px-3 py-2 ${isDark ? 'bg-white/5 hover:bg-white/10' : 'bg-gray-200 hover:bg-gray-300'} rounded-lg text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed`}
+                              title="Delete showing"
+                            >
+                              <Trash2 className="w-4 h-4 text-red-400" />
                             </button>
                         </div>
                       </div>

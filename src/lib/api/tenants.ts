@@ -322,6 +322,34 @@ export async function getTenants(params: PaginationParams = {}) {
 }
 
 /**
+ * Delete a tenant lease (and tenant profile when no other leases remain)
+ */
+export async function deleteTenant(leaseId: string, tenantUserId?: string | null) {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) {
+    throw new Error('No active session');
+  }
+
+  const response = await fetch(`${API_BASE}/api/tenants/${leaseId}`, {
+    method: 'DELETE',
+    headers: {
+      'Authorization': `Bearer ${session.access_token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ tenantUserId }),
+  });
+
+  if (!response.ok) {
+    const contentType = response.headers.get('content-type');
+    if (contentType && contentType.includes('text/html')) {
+      throw new Error('Tenants API unavailable');
+    }
+    const error = await response.json().catch(() => null);
+    throw new Error(error?.error || 'Failed to delete tenant');
+  }
+}
+
+/**
  * Get pending rental applications
  */
 export async function getRentalApplications(params: PaginationParams = {}) {

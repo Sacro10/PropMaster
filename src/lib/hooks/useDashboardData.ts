@@ -46,7 +46,7 @@ export function useDashboardData(autoRefreshInterval: number = 60000): UseDashbo
       ]);
 
       setMetrics(metricsData);
-      setRecentActivity(summary.recentActivity.slice(0, 10));
+      setRecentActivity(summary.recentActivity);
       setSystemMetrics({
         support_status: summary.systemStatus.supportAvailable ? '24/7' : 'Business Hours',
         avg_lease_time_days: summary.systemStatus.avgLeaseTime,

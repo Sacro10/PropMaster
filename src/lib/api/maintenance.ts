@@ -7,6 +7,8 @@ import { supabase } from '../supabaseClient';
 import { getCurrentAccountId, handleSupabaseError, getPaginationRange, calculatePaginationMeta, type PaginationParams } from './client';
 import type { MaintenanceRequestWithDetails, HVACFilterSubscription, PaginatedResponse } from './types';
 
+const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+
 /**
  * Get maintenance requests with full details
  */
@@ -107,6 +109,33 @@ export async function getMaintenanceRequests(params: PaginationParams & { status
   } catch (error) {
     console.error('[Maintenance API] Error fetching requests:', error);
     throw error;
+  }
+}
+
+/**
+ * Delete a maintenance request
+ */
+export async function deleteMaintenanceRequest(requestId: string) {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) {
+    throw new Error('No active session');
+  }
+
+  const response = await fetch(`${API_BASE}/api/maintenance/${requestId}`, {
+    method: 'DELETE',
+    headers: {
+      'Authorization': `Bearer ${session.access_token}`,
+      'Content-Type': 'application/json',
+    },
+  });
+
+  if (!response.ok) {
+    const contentType = response.headers.get('content-type');
+    if (contentType && contentType.includes('text/html')) {
+      throw new Error('Maintenance API unavailable');
+    }
+    const error = await response.json().catch(() => null);
+    throw new Error(error?.error || 'Failed to delete maintenance request');
   }
 }
 

@@ -343,6 +343,48 @@ export async function updateMaintenanceRequest(
 }
 
 /**
+ * Delete a maintenance request
+ */
+export async function deleteMaintenanceRequest(
+  accountId: string,
+  userId: string | null,
+  requestId: string
+): Promise<void> {
+  const { data: request, error: fetchError } = await supabase
+    .from('maintenance_requests')
+    .select('id, title')
+    .eq('account_id', accountId)
+    .eq('id', requestId)
+    .single();
+
+  if (fetchError) {
+    if (fetchError.code === 'PGRST116') {
+      throw new Error('Maintenance request not found');
+    }
+    throw fetchError;
+  }
+
+  const { error: deleteError } = await supabase
+    .from('maintenance_requests')
+    .delete()
+    .eq('account_id', accountId)
+    .eq('id', requestId);
+
+  if (deleteError) throw deleteError;
+
+  await logActivityEvent(
+    accountId,
+    userId,
+    'maintenance_deleted',
+    `Maintenance request deleted: ${request.title}`,
+    {
+      entityType: 'maintenance_request',
+      entityId: requestId,
+    }
+  );
+}
+
+/**
  * Get SLA metrics for maintenance requests
  */
 export async function getSLAMetrics(accountId: string): Promise<SLAMetrics> {

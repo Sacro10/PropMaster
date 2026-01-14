@@ -288,8 +288,7 @@ export async function getDashboardSummary(
     .eq('status', 'active')
     .gte('lease_end', now.toISOString().split('T')[0])
     .lte('lease_end', ninetyDaysFromNow.toISOString().split('T')[0])
-    .order('lease_end', { ascending: true })
-    .limit(5);
+    .order('lease_end', { ascending: true });
 
   expiringLeases?.forEach((lease) => {
     const daysUntilExpiry = Math.floor(
@@ -313,8 +312,7 @@ export async function getDashboardSummary(
     .eq('account_id', accountId)
     .eq('priority', 'urgent')
     .in('status', ['open', 'assigned'])
-    .order('created_at', { ascending: true })
-    .limit(5);
+    .order('created_at', { ascending: true });
 
   urgentMaintenance?.forEach((req) => {
     upcomingTasks.push({
@@ -341,8 +339,7 @@ export async function getDashboardSummary(
     .eq('status', 'active')
     .gte('next_delivery_date', now.toISOString().split('T')[0])
     .lte('next_delivery_date', thirtyDaysFromNow.toISOString().split('T')[0])
-    .order('next_delivery_date', { ascending: true })
-    .limit(5);
+    .order('next_delivery_date', { ascending: true });
 
   if (hvacError && !isMissingTable(hvacError, 'hvac_filter_subscriptions')) {
     throw hvacError;
@@ -367,8 +364,7 @@ export async function getDashboardSummary(
     .eq('account_id', accountId)
     .eq('is_active', true)
     .gte('next_run_at', now.toISOString())
-    .order('next_run_at', { ascending: true })
-    .limit(3);
+    .order('next_run_at', { ascending: true });
 
   if (remindersError && !isMissingTable(remindersError, 'reminder_schedules')) {
     throw remindersError;

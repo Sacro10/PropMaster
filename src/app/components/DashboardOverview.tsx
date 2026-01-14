@@ -1,4 +1,4 @@
-import { TrendingUp, TrendingDown, Users, Wrench, DollarSign, CircleCheck, Activity, Bell, ListFilter, RefreshCw, FileText, Building2 } from 'lucide-react';
+import { TrendingUp, TrendingDown, Users, Wrench, DollarSign, CircleCheck, Activity, Bell, ListFilter, RefreshCw, FileText, Building2, Trash2 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useThemeStyles } from '../hooks/useThemeStyles';
 import { useDashboardData } from '../../lib/hooks/useDashboardData';
@@ -7,7 +7,7 @@ import { ErrorState } from './ErrorBoundary';
 import { formatCurrencyCompact, formatPercentageChange, formatNumber } from '../../lib/utils/currencyHelpers';
 import { formatRelativeTime } from '../../lib/utils/dateHelpers';
 import { AddPropertyModal } from './AddPropertyModal';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { supabase } from '../../lib/supabaseClient';
 import { getCurrentAccountId } from '../../lib/api/client';
 
@@ -18,6 +18,10 @@ export function DashboardOverview() {
   const [isPropertyModalOpen, setIsPropertyModalOpen] = useState(false);
   const [properties, setProperties] = useState<any[]>([]);
   const [loadingProperties, setLoadingProperties] = useState(true);
+  const [deletingPropertyId, setDeletingPropertyId] = useState<string | null>(null);
+  const [showAllActivity, setShowAllActivity] = useState(false);
+  const [activityFilter, setActivityFilter] = useState('all');
+  const [isActivityFilterOpen, setIsActivityFilterOpen] = useState(false);
 
   // Fetch properties
   const fetchProperties = async () => {
@@ -58,6 +62,52 @@ export function DashboardOverview() {
     refetch(); // Refresh dashboard metrics
   };
 
+  const handleDeleteProperty = async (property: any) => {
+    const name = property?.name || 'this property';
+    const confirmed = confirm(`Delete ${name}? This will remove associated units and records.`);
+    if (!confirmed) return;
+
+    try {
+      setDeletingPropertyId(property.id);
+      const accountId = await getCurrentAccountId();
+      if (!accountId) {
+        throw new Error('Account ID required');
+      }
+
+      const { error } = await (supabase as any)
+        .from('properties')
+        .delete()
+        .eq('id', property.id)
+        .eq('account_id', accountId);
+
+      if (error) throw error;
+      await fetchProperties();
+      refetch();
+    } catch (error) {
+      console.error('Error deleting property:', error);
+      alert('Failed to delete property. Please try again.');
+    } finally {
+      setDeletingPropertyId(null);
+    }
+  };
+
+  const activityTypeOptions = useMemo(() => {
+    const types = Array.from(new Set(recentActivity.map((activity) => activity.type))).sort();
+    return ['all', ...types];
+  }, [recentActivity]);
+
+  const filteredActivity = useMemo(() => {
+    if (activityFilter === 'all') return recentActivity;
+    return recentActivity.filter((activity) => activity.type === activityFilter);
+  }, [activityFilter, recentActivity]);
+
+  const visibleActivity = showAllActivity ? filteredActivity : filteredActivity.slice(0, 5);
+
+  const formatActivityTypeLabel = (value: string) => {
+    if (value === 'all') return 'All Activity';
+    return value.replace(/_/g, ' ').replace(/\b\w/g, (letter) => letter.toUpperCase());
+  };
+
   // Show loading state
   if (loading) {
     return <LoadingPage />;
@@ -75,6 +125,7 @@ export function DashboardOverview() {
       value: formatNumber(metrics.total_units),
       change: formatPercentageChange(metrics.occupancy_change), // Use occupancy change as proxy for units
       trend: metrics.occupancy_change >= 0 ? 'up' as const : 'down' as const,
+      tooltip: 'Change vs last month based on occupancy trend',
       icon: Activity,
     },
     {
@@ -82,6 +133,7 @@ export function DashboardOverview() {
       value: formatNumber(metrics.occupied_units),
       change: `${metrics.occupancy_rate}%`,
       trend: 'up' as const,
+      tooltip: 'Current occupancy rate',
       icon: CircleCheck,
     },
     {
@@ -89,6 +141,7 @@ export function DashboardOverview() {
       value: formatNumber(metrics.active_tenants),
       change: metrics.tenant_change > 0 ? `+${metrics.tenant_change}` : `${metrics.tenant_change}`,
       trend: metrics.tenant_change >= 0 ? 'up' as const : 'down' as const,
+      tooltip: 'Change vs last month',
       icon: Users,
     },
     {
@@ -96,6 +149,7 @@ export function DashboardOverview() {
       value: formatCurrencyCompact(metrics.monthly_revenue),
       change: formatPercentageChange(metrics.revenue_change),
       trend: metrics.revenue_change >= 0 ? 'up' as const : 'down' as const,
+      tooltip: 'Change vs last month',
       icon: DollarSign,
     },
   ];
@@ -147,7 +201,11 @@ export function DashboardOverview() {
                 <div className={`p-2 ${isDark ? 'bg-white/5 group-hover:bg-white/10' : 'bg-gray-100 group-hover:bg-gray-200'} rounded-lg transition-colors`}>
                   <Icon className="w-5 h-5 text-[#ff6b35]" />
                 </div>
-                <span className={`text-sm ${trendColor} flex items-center gap-1`} style={{ fontFamily: 'Work Sans, sans-serif' }}>
+                <span
+                  className={`text-sm ${trendColor} flex items-center gap-1`}
+                  style={{ fontFamily: 'Work Sans, sans-serif' }}
+                  title={stat.tooltip}
+                >
                   <TrendIcon className="w-3 h-3" />
                   {stat.change}
                 </span>
@@ -173,21 +231,49 @@ export function DashboardOverview() {
             <h3 className="text-2xl" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
               RECENT ACTIVITY
             </h3>
-            <button className={`text-sm ${text.muted} hover:${text.primary} flex items-center gap-2 transition-colors`} style={{ fontFamily: 'Work Sans, sans-serif' }}>
-              <ListFilter className="w-4 h-4" />
-              Filter
-            </button>
+            <div className="relative">
+              <button
+                onClick={() => setIsActivityFilterOpen((prev) => !prev)}
+                className={`text-sm ${text.muted} hover:${text.primary} flex items-center gap-2 transition-colors`}
+                style={{ fontFamily: 'Work Sans, sans-serif' }}
+              >
+                <ListFilter className="w-4 h-4" />
+                Filter
+              </button>
+              {isActivityFilterOpen && (
+                <div
+                  className={`absolute right-0 mt-2 w-52 ${isDark ? 'bg-[#0f1523]' : 'bg-white'} border ${border.default} rounded-lg shadow-lg z-10`}
+                >
+                  {activityTypeOptions.map((type) => (
+                    <button
+                      key={type}
+                      onClick={() => {
+                        setActivityFilter(type);
+                        setShowAllActivity(false);
+                        setIsActivityFilterOpen(false);
+                      }}
+                      className={`w-full text-left px-3 py-2 text-sm ${
+                        type === activityFilter ? 'text-[#ff6b35]' : text.muted
+                      } hover:${text.primary}`}
+                      style={{ fontFamily: 'Work Sans, sans-serif' }}
+                    >
+                      {formatActivityTypeLabel(type)}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
 
           <div className="space-y-3">
-            {recentActivity.length === 0 ? (
+            {filteredActivity.length === 0 ? (
               <div className="text-center py-8">
                 <p className={text.muted} style={{ fontFamily: 'Work Sans, sans-serif' }}>
                   No recent activity
                 </p>
               </div>
             ) : (
-              recentActivity.map((activity) => {
+              visibleActivity.map((activity) => {
                 // Determine status color based on event type
                 const statusColor =
                   activity.type.includes('payment') || activity.type.includes('completed') ? 'bg-emerald-400' :
@@ -218,6 +304,17 @@ export function DashboardOverview() {
               })
             )}
           </div>
+          {filteredActivity.length > 5 && (
+            <div className="pt-4">
+              <button
+                onClick={() => setShowAllActivity((prev) => !prev)}
+                className={`text-sm ${text.muted} hover:${text.primary} transition-colors`}
+                style={{ fontFamily: 'Work Sans, sans-serif' }}
+              >
+                {showAllActivity ? 'Show Less' : 'Show More'}
+              </button>
+            </div>
+          )}
         </div>
 
         {/* Quick Actions */}
@@ -320,9 +417,10 @@ export function DashboardOverview() {
           <div className="grid grid-cols-4 gap-4">
             {upcomingTasks.map((task) => {
               // Format due date
-              const dueDate = new Date(task.dueDate);
+              const dueDate = new Date(`${task.dueDate}T00:00:00`);
               const now = new Date();
-              const daysUntilDue = Math.ceil((dueDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+              const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+              const daysUntilDue = Math.ceil((dueDate.getTime() - todayStart.getTime()) / (1000 * 60 * 60 * 24));
 
               let dueDateDisplay = '';
               if (daysUntilDue < 0) {
@@ -401,7 +499,7 @@ export function DashboardOverview() {
                 key={property.id}
                 className={`p-5 ${isDark ? 'bg-white/5 hover:bg-white/10' : 'bg-gray-50 hover:bg-gray-100'} rounded-lg border ${border.default} hover:border-[#ff6b35]/50 transition-all group cursor-pointer`}
               >
-                <div className="flex items-start gap-3 mb-4">
+                <div className="flex items-start justify-between gap-3 mb-4">
                   <div className="p-2 bg-gradient-to-br from-[#ff6b35] to-[#f7931e] rounded-lg">
                     <Building2 className="w-5 h-5 text-white" />
                   </div>
@@ -416,6 +514,20 @@ export function DashboardOverview() {
                       {property.city}, {property.state}
                     </p>
                   </div>
+                  <button
+                    type="button"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      handleDeleteProperty(property);
+                    }}
+                    disabled={deletingPropertyId === property.id}
+                    className={`p-2 rounded-lg transition-colors ${
+                      isDark ? 'bg-white/5 hover:bg-white/10' : 'bg-white hover:bg-gray-100'
+                    } ${deletingPropertyId === property.id ? 'opacity-50 cursor-not-allowed' : ''}`}
+                    title="Delete property"
+                  >
+                    <Trash2 className="w-4 h-4 text-red-400" />
+                  </button>
                 </div>
 
                 <div className="flex items-center justify-between pt-3 border-t border-white/10">

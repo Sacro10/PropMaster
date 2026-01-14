@@ -21,6 +21,9 @@ interface PropertyFormData {
   zip: string;
   country: string;
   propertyType: PropertyTypeValue;
+  totalUnits: string;
+  defaultRent: string;
+  unitNumbers: string;
 }
 
 const US_STATES = [
@@ -49,6 +52,9 @@ export function AddPropertyModal({ isOpen, onClose, onSuccess }: AddPropertyModa
     zip: '',
     country: 'USA',
     propertyType: 'residential',
+    totalUnits: '1',
+    defaultRent: '',
+    unitNumbers: '',
   });
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
@@ -66,7 +72,13 @@ export function AddPropertyModal({ isOpen, onClose, onSuccess }: AddPropertyModa
         throw new Error('No account found');
       }
 
-      const { error } = await supabase
+      const totalUnits = Math.max(1, Number(formData.totalUnits) || 1);
+      const defaultRent = Number(formData.defaultRent) || 0;
+      const unitNumbers = formData.unitNumbers
+        .split(',')
+        .map((value) => value.trim())
+        .filter(Boolean);
+      const { data: property, error } = await supabase
         .from('properties')
         .insert({
           account_id: accountId,
@@ -78,9 +90,30 @@ export function AddPropertyModal({ isOpen, onClose, onSuccess }: AddPropertyModa
           zip: formData.zip,
           country: formData.country,
           property_type: formData.propertyType,
-        });
+          total_units: totalUnits,
+        })
+        .select('id')
+        .single();
 
       if (error) throw error;
+
+      if (property?.id) {
+        const unitsToCreate = Array.from({ length: totalUnits }, (_, index) => ({
+          account_id: accountId,
+          property_id: property.id,
+          unit_number: unitNumbers[index] || String(index + 1),
+          rent_amount: defaultRent,
+        }));
+
+        const { error: unitsError } = await supabase
+          .from('units')
+          .insert(unitsToCreate);
+
+        if (unitsError) {
+          console.error('Error creating units:', unitsError);
+          alert('Property created, but units failed to create. You can add units manually.');
+        }
+      }
 
       // Reset form
       setFormData({
@@ -91,7 +124,10 @@ export function AddPropertyModal({ isOpen, onClose, onSuccess }: AddPropertyModa
         state: '',
         zip: '',
         country: 'USA',
-    propertyType: 'residential',
+        propertyType: 'residential',
+        totalUnits: '1',
+        defaultRent: '',
+        unitNumbers: '',
       });
 
       onSuccess();
@@ -277,6 +313,68 @@ export function AddPropertyModal({ isOpen, onClose, onSuccess }: AddPropertyModa
                 style={{ fontFamily: 'Work Sans, sans-serif' }}
               />
             </div>
+          </div>
+
+          {/* Total Units */}
+          <div>
+            <label className={`block text-sm font-medium mb-2 ${text.primary}`}>
+              Total Units <span className="text-red-400">*</span>
+            </label>
+            <input
+              type="number"
+              name="totalUnits"
+              value={formData.totalUnits}
+              onChange={handleChange}
+              required
+              min={1}
+              step={1}
+              placeholder="1"
+              className={`w-full px-4 py-3 ${
+                isDark ? 'bg-white/5 border-white/10' : 'bg-gray-50 border-gray-300'
+              } border rounded-lg focus:outline-none focus:border-[#ff6b35]/50`}
+              style={{ fontFamily: 'Work Sans, sans-serif' }}
+            />
+          </div>
+
+          {/* Default Rent */}
+          <div>
+            <label className={`block text-sm font-medium mb-2 ${text.primary}`}>
+              Default Rent (per unit)
+            </label>
+            <input
+              type="number"
+              name="defaultRent"
+              value={formData.defaultRent}
+              onChange={handleChange}
+              min={0}
+              step="0.01"
+              placeholder="0.00"
+              className={`w-full px-4 py-3 ${
+                isDark ? 'bg-white/5 border-white/10' : 'bg-gray-50 border-gray-300'
+              } border rounded-lg focus:outline-none focus:border-[#ff6b35]/50`}
+              style={{ fontFamily: 'Work Sans, sans-serif' }}
+            />
+          </div>
+
+          {/* Unit Numbers */}
+          <div>
+            <label className={`block text-sm font-medium mb-2 ${text.primary}`}>
+              Unit Numbers <span className={`text-xs ${text.muted}`}>(Optional, comma-separated)</span>
+            </label>
+            <input
+              type="text"
+              name="unitNumbers"
+              value={formData.unitNumbers}
+              onChange={handleChange}
+              placeholder="101, 102, 201"
+              className={`w-full px-4 py-3 ${
+                isDark ? 'bg-white/5 border-white/10' : 'bg-gray-50 border-gray-300'
+              } border rounded-lg focus:outline-none focus:border-[#ff6b35]/50`}
+              style={{ fontFamily: 'Work Sans, sans-serif' }}
+            />
+            <p className={`mt-2 text-xs ${text.muted}`}>
+              If provided, we will use these in order; any missing units fall back to 1..N.
+            </p>
           </div>
 
           {/* Form Actions */}

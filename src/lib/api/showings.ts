@@ -334,6 +334,43 @@ export async function markShowingReminderSent(showingId: string) {
 }
 
 /**
+ * Delete a showing
+ */
+export async function deleteShowing(showingId: string) {
+  try {
+    const accountId = await getCurrentAccountId();
+    if (!accountId) {
+      throw new Error('No account ID found');
+    }
+
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) {
+      throw new Error('No active session');
+    }
+
+    const response = await fetch(`${API_BASE}/api/showings/${showingId}`, {
+      method: 'DELETE',
+      headers: {
+        'Authorization': `Bearer ${session.access_token}`,
+        'Content-Type': 'application/json',
+      },
+    });
+
+    if (!response.ok) {
+      const contentType = response.headers.get('content-type');
+      if (contentType && contentType.includes('text/html')) {
+        throw new Error('Showings API unavailable');
+      }
+      const error = await response.json().catch(() => null);
+      throw new Error(error?.error || 'Failed to delete showing');
+    }
+  } catch (error) {
+    console.error('[Showings API] Error deleting showing:', error);
+    throw error;
+  }
+}
+
+/**
  * Regenerate access code
  */
 export async function regenerateAccessCode(showingId: string) {

@@ -1,4 +1,4 @@
-import { Search, UserSearch, CircleCheck, TrendingUp, ListFilter, RefreshCw, Users, X } from 'lucide-react';
+import { Search, UserSearch, CircleCheck, TrendingUp, ListFilter, RefreshCw, Users, X, Trash2 } from 'lucide-react';
 import { useThemeStyles } from '../hooks/useThemeStyles';
 import { useHasFeature } from '../hooks/usePlanGating';
 import { FeatureGate, LockedFeatureCard } from './UpgradeCTA';
@@ -12,6 +12,7 @@ import { ApplicationDetailModal } from './ApplicationDetailModal';
 import { NewApplicationForm, type ApplicationFormData } from './NewApplicationForm';
 import { createApplication } from '../../lib/api/applications';
 import { runScreening } from '../../lib/api/applications';
+import { deleteTenant } from '../../lib/api/tenants';
 
 export function TenantManagement() {
   const { isDark, bg, text, border } = useThemeStyles();
@@ -20,6 +21,7 @@ export function TenantManagement() {
   const [showAllTenants, setShowAllTenants] = useState(false);
   const [selectedApplication, setSelectedApplication] = useState<any>(null);
   const [showNewApplicationForm, setShowNewApplicationForm] = useState(false);
+  const [deletingTenantId, setDeletingTenantId] = useState<string | null>(null);
 
   // Feature checks for plan gating
   const tenantScreening = useHasFeature('tenant_screening');
@@ -79,6 +81,29 @@ export function TenantManagement() {
     } else {
       console.error('Failed to reject application:', result.error);
       alert('Failed to reject application: ' + (result.error?.message || 'Unknown error'));
+    }
+  };
+
+  const handleDeleteTenant = async (tenant: any) => {
+    if (!tenant?.lease?.id) {
+      alert('Unable to delete tenant without an active lease.');
+      return;
+    }
+
+    const name = tenant.full_name || 'this tenant';
+    const confirmed = confirm(`Delete ${name}? This will remove their active lease.`);
+    if (!confirmed) return;
+
+    try {
+      setDeletingTenantId(tenant.lease.id);
+      await deleteTenant(tenant.lease.id, tenant.user_id);
+      await refetchTenants();
+      await refetchMetrics();
+    } catch (error) {
+      console.error('Failed to delete tenant:', error);
+      alert('Failed to delete tenant. Please try again.');
+    } finally {
+      setDeletingTenantId(null);
     }
   };
 
@@ -440,15 +465,28 @@ export function TenantManagement() {
                       </div>
 
                       <div>
-                        <span
-                          className={`px-3 py-1 rounded-full text-xs font-medium ${
-                            tenant.lease?.status === 'active'
-                              ? 'bg-emerald-500/20 text-emerald-400'
-                              : 'bg-amber-500/20 text-amber-400'
-                          }`}
-                        >
-                          {(tenant.lease?.status || 'unknown').toUpperCase()}
-                        </span>
+                        <div className="flex items-center gap-3">
+                          <span
+                            className={`px-3 py-1 rounded-full text-xs font-medium ${
+                              tenant.lease?.status === 'active'
+                                ? 'bg-emerald-500/20 text-emerald-400'
+                                : 'bg-amber-500/20 text-amber-400'
+                            }`}
+                          >
+                            {(tenant.lease?.status || 'unknown').toUpperCase()}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteTenant(tenant)}
+                            disabled={deletingTenantId === tenant.lease?.id}
+                            className={`p-2 rounded-lg transition-colors ${
+                              isDark ? 'bg-white/5 hover:bg-white/10' : 'bg-white hover:bg-gray-100'
+                            } ${deletingTenantId === tenant.lease?.id ? 'opacity-50 cursor-not-allowed' : ''}`}
+                            title="Delete tenant"
+                          >
+                            <Trash2 className="w-4 h-4 text-red-400" />
+                          </button>
+                        </div>
                       </div>
                     </div>
                   </div>

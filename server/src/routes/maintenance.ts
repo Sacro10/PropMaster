@@ -5,6 +5,7 @@ import {
   getMaintenanceRequests,
   createMaintenanceRequest,
   updateMaintenanceRequest,
+  deleteMaintenanceRequest,
   getSLAMetrics,
   getMaintenanceStats,
   getAvailableVendors,
@@ -141,6 +142,34 @@ router.patch(
       console.error('Update maintenance request error:', error);
       res.status(500).json({
         error: 'Failed to update maintenance request',
+        details: error instanceof Error ? error.message : 'Unknown error',
+      });
+    }
+  }
+);
+
+/**
+ * DELETE /api/maintenance/:id
+ * Delete a maintenance request
+ */
+router.delete(
+  '/:id',
+  authenticate,
+  Permissions.updateMaintenance,
+  async (req: AuthRequest, res) => {
+    try {
+      if (!req.user?.accountId) {
+        res.status(400).json({ error: 'Account ID required' });
+        return;
+      }
+
+      await deleteMaintenanceRequest(req.user.accountId, req.user.id ?? null, req.params.id);
+      res.json({ success: true });
+    } catch (error) {
+      console.error('Delete maintenance request error:', error);
+      const statusCode = error instanceof Error && error.message === 'Maintenance request not found' ? 404 : 500;
+      res.status(statusCode).json({
+        error: 'Failed to delete maintenance request',
         details: error instanceof Error ? error.message : 'Unknown error',
       });
     }

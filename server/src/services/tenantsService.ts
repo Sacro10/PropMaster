@@ -333,3 +333,56 @@ export async function updateTenant(
     : undefined,
   };
 }
+
+/**
+ * Delete a tenant lease and optionally the tenant profile if no other leases exist
+ */
+export async function deleteTenantLease(
+  accountId: string,
+  leaseId: string,
+  tenantUserId?: string | null
+): Promise<void> {
+  const { data: lease, error: leaseError } = await supabase
+    .from('leases')
+    .select('id, tenant_user_id')
+    .eq('account_id', accountId)
+    .eq('id', leaseId)
+    .single();
+
+  if (leaseError) {
+    if (leaseError.code === 'PGRST116') {
+      throw new Error('Tenant lease not found');
+    }
+    throw leaseError;
+  }
+
+  const userId = tenantUserId || lease?.tenant_user_id;
+
+  const { error: deleteError } = await supabase
+    .from('leases')
+    .delete()
+    .eq('account_id', accountId)
+    .eq('id', leaseId);
+
+  if (deleteError) throw deleteError;
+
+  if (!userId) return;
+
+  const { count: otherLeaseCount, error: otherLeaseError } = await supabase
+    .from('leases')
+    .select('id', { count: 'exact', head: true })
+    .eq('account_id', accountId)
+    .eq('tenant_user_id', userId);
+
+  if (otherLeaseError) throw otherLeaseError;
+
+  if ((otherLeaseCount || 0) === 0) {
+    const { error: profileDeleteError } = await supabase
+      .from('tenant_profiles')
+      .delete()
+      .eq('account_id', accountId)
+      .eq('user_id', userId);
+
+    if (profileDeleteError) throw profileDeleteError;
+  }
+}

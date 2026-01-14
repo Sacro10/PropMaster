@@ -734,6 +734,54 @@ export async function markShowingReminderSent(
 }
 
 /**
+ * Delete a showing
+ */
+export async function deleteShowing(
+  accountId: string,
+  userId: string | null,
+  showingId: string
+): Promise<void> {
+  const { data: showing, error: fetchError } = await supabase
+    .from('showings')
+    .select('id, visitor_name, applicant_name, prospect_name')
+    .eq('account_id', accountId)
+    .eq('id', showingId)
+    .single();
+
+  if (fetchError) {
+    if (fetchError.code === 'PGRST116') {
+      throw new Error('Showing not found');
+    }
+    throw fetchError;
+  }
+
+  const { error: deleteError } = await supabase
+    .from('showings')
+    .delete()
+    .eq('account_id', accountId)
+    .eq('id', showingId);
+
+  if (deleteError) throw deleteError;
+
+  const visitorName =
+    showing?.visitor_name ||
+    showing?.applicant_name ||
+    showing?.prospect_name ||
+    'showing';
+
+  await logActivityEvent(
+    accountId,
+    userId,
+    'showing_deleted',
+    `Showing deleted for ${visitorName}`,
+    {
+      entityType: 'showing',
+      entityId: showingId,
+    }
+  );
+}
+
+/**
  * Get available units for showings
  */
 export async function getAvailableUnits(accountId: string) {

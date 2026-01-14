@@ -7,6 +7,7 @@ import {
   updateShowingStatus,
   recordShowingOutcome,
   getShowingStatistics,
+  deleteShowing,
   regenerateAccessCode,
   sendShowingReminder,
   markShowingReminderSent,
@@ -173,6 +174,34 @@ router.post(
       console.error('Record showing outcome error:', error);
       res.status(500).json({
         error: 'Failed to record showing outcome',
+        details: error instanceof Error ? error.message : 'Unknown error',
+      });
+    }
+  }
+);
+
+/**
+ * DELETE /api/showings/:id
+ * Delete a showing
+ */
+router.delete(
+  '/:id',
+  authenticate,
+  Permissions.updateShowings,
+  async (req: AuthRequest, res) => {
+    try {
+      if (!req.user?.accountId) {
+        res.status(400).json({ error: 'Account ID required' });
+        return;
+      }
+
+      await deleteShowing(req.user.accountId, req.user.id ?? null, req.params.id);
+      res.json({ success: true });
+    } catch (error) {
+      console.error('Delete showing error:', error);
+      const statusCode = error instanceof Error && error.message === 'Showing not found' ? 404 : 500;
+      res.status(statusCode).json({
+        error: 'Failed to delete showing',
         details: error instanceof Error ? error.message : 'Unknown error',
       });
     }
