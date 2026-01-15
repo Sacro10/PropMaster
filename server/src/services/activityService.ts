@@ -156,13 +156,15 @@ export async function getActivityEvents(
       );
 
       const userMap = new Map(
-        users.filter(Boolean).map((user) => [
-          user.id,
-          {
-            email: user.email,
-            fullName: user.user_metadata?.full_name,
-          },
-        ])
+        users
+          .filter((user): user is NonNullable<typeof user> => Boolean(user))
+          .map((user) => [
+            user.id,
+            {
+              email: user.email,
+              fullName: user.user_metadata?.full_name,
+            },
+          ])
       );
 
       events.forEach((event) => {
