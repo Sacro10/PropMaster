@@ -462,6 +462,7 @@ export function MaintenancePanel() {
       setAssigningRequestId(null);
       setAvailableVendors([]);
       refetchRequests();
+      refetchMetrics();
       setAssignError(null);
     } else {
       setAssignError(result.error?.message || 'Failed to assign vendor. Please try again.');
@@ -780,6 +781,7 @@ export function MaintenancePanel() {
     try {
       await updateMaintenanceRequestStatus(requestId, status);
       await refetchRequests();
+      await refetchMetrics();
     } catch (error) {
       console.error('Failed to update status:', error);
       setStatusUpdateError({ id: requestId, message: 'Failed to update status. Please try again.' });
@@ -2038,6 +2040,7 @@ export function MaintenancePanel() {
         onClose={() => setIsCreateModalOpen(false)}
         onSuccess={() => {
           refetchRequests();
+          refetchMetrics();
         }}
       />
 
@@ -2047,6 +2050,7 @@ export function MaintenancePanel() {
         onClose={() => setIsEmergencyModalOpen(false)}
         onSuccess={() => {
           refetchRequests();
+          refetchMetrics();
         }}
         emergencyMode
       />

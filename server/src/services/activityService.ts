@@ -1,5 +1,13 @@
 import { supabaseAdmin as supabase } from '../supabase';
 
+function isMissingTable(error: any, tableName?: string) {
+  if (!error) return false;
+  const message = typeof error.message === 'string' ? error.message : '';
+  if (error.code === '42P01') return true;
+  if (!tableName) return message.includes('does not exist');
+  return message.includes(`"${tableName}"`) && message.includes('does not exist');
+}
+
 export interface ActivityEvent {
   id: string;
   eventType: string;
@@ -72,7 +80,12 @@ export async function getActivityEvents(
 
   const { data, error, count } = await query;
 
-  if (error) throw error;
+  if (error) {
+    if (isMissingTable(error, 'activity_events')) {
+      return { events: [], total: 0 };
+    }
+    throw error;
+  }
 
   // Transform the data to include user information
   const events: ActivityEvent[] =
@@ -127,7 +140,12 @@ export async function logActivityEvent(
     .select('id')
     .single();
 
-  if (error) throw error;
+  if (error) {
+    if (isMissingTable(error, 'activity_events')) {
+      return '';
+    }
+    throw error;
+  }
 
   return data.id;
 }
@@ -158,7 +176,16 @@ export async function getActivityStats(
 
   const { data, error } = await query;
 
-  if (error) throw error;
+  if (error) {
+    if (isMissingTable(error, 'activity_events')) {
+      return {
+        totalEvents: 0,
+        eventsByType: {},
+        eventsByDay: [],
+      };
+    }
+    throw error;
+  }
 
   const totalEvents = data?.length || 0;
 

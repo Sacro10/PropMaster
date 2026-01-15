@@ -264,6 +264,8 @@ export async function updateMaintenanceRequestStatus(requestId: string, status: 
     // Set timestamps based on status
     if (status === 'reviewed') {
       updates.reviewed_at = new Date().toISOString();
+    } else if (status === 'assigned') {
+      updates.assigned_at = new Date().toISOString();
     } else if (status === 'in_progress') {
       updates.started_at = new Date().toISOString();
     } else if (status === 'completed') {
