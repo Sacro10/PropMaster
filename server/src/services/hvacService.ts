@@ -60,6 +60,14 @@ export interface HVACStatusEntry {
   createdAt: string;
 }
 
+export interface HVACUnitStatusSummary {
+  unitId: string;
+  unitNumber: string | null;
+  condition: 'good' | 'monitor' | 'service' | 'replace' | null;
+  lastServicedDate: string | null;
+  lastUpdatedAt: string | null;
+}
+
 export interface HVACProgramSummary {
   totalEnrollments: number;
   activeEnrollments: number;
@@ -437,7 +445,7 @@ export async function getHVACVendorsForProperty(
   phone?: string | null;
   website?: string | null;
   address?: string | null;
-  source: 'local' | 'google_places';
+  source: 'local' | 'google_places' | 'nominatim';
 }>> {
   const { data: property, error } = await supabase
     .from('properties')
@@ -573,4 +581,54 @@ export async function getUnitHVACStatus(
     createdBy: status.created_by,
     createdAt: status.created_at,
   }));
+}
+
+export async function getPropertyHVACStatusSummary(
+  accountId: string,
+  propertyId: string
+): Promise<HVACUnitStatusSummary[]> {
+  const { data: units, error: unitsError } = await supabase
+    .from('units')
+    .select('id, unit_number')
+    .eq('account_id', accountId)
+    .eq('property_id', propertyId)
+    .order('unit_number', { ascending: true });
+
+  if (unitsError) {
+    throw unitsError;
+  }
+
+  if (!units || units.length === 0) {
+    return [];
+  }
+
+  const unitIds = units.map((unit: any) => unit.id);
+  const { data: statuses, error: statusError } = await supabase
+    .from('unit_hvac_status')
+    .select('unit_id, condition, last_serviced_date, created_at')
+    .eq('account_id', accountId)
+    .in('unit_id', unitIds)
+    .order('created_at', { ascending: false });
+
+  if (statusError) {
+    throw statusError;
+  }
+
+  const latestByUnit = new Map<string, any>();
+  (statuses || []).forEach((status: any) => {
+    if (!latestByUnit.has(status.unit_id)) {
+      latestByUnit.set(status.unit_id, status);
+    }
+  });
+
+  return units.map((unit: any) => {
+    const latest = latestByUnit.get(unit.id);
+    return {
+      unitId: unit.id,
+      unitNumber: unit.unit_number || null,
+      condition: latest?.condition ?? null,
+      lastServicedDate: latest?.last_serviced_date ?? null,
+      lastUpdatedAt: latest?.created_at ?? null,
+    };
+  });
 }

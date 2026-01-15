@@ -11,6 +11,7 @@ import {
   getHVACVendorsForProperty,
   createUnitHVACStatus,
   getUnitHVACStatus,
+  getPropertyHVACStatusSummary,
 } from '../services/hvacService';
 
 const router = Router();
@@ -182,6 +183,39 @@ router.get(
       console.error('Get HVAC status error:', error);
       res.status(500).json({
         error: 'Failed to fetch HVAC status',
+        details: error instanceof Error ? error.message : 'Unknown error',
+      });
+    }
+  }
+);
+
+/**
+ * GET /api/hvac/status/property
+ * Get latest HVAC status by unit for a property
+ */
+router.get(
+  '/status/property',
+  authenticate,
+  requirePermission('hvac', 'read'),
+  async (req: AuthRequest, res) => {
+    try {
+      if (!req.user?.accountId) {
+        res.status(400).json({ error: 'Account ID required' });
+        return;
+      }
+
+      const propertyId = req.query.propertyId as string | undefined;
+      if (!propertyId) {
+        res.status(400).json({ error: 'propertyId is required' });
+        return;
+      }
+
+      const statuses = await getPropertyHVACStatusSummary(req.user.accountId, propertyId);
+      res.json(statuses);
+    } catch (error) {
+      console.error('Get HVAC property status error:', error);
+      res.status(500).json({
+        error: 'Failed to fetch HVAC property status',
         details: error instanceof Error ? error.message : 'Unknown error',
       });
     }

@@ -10,8 +10,10 @@ import {
   logActivity,
   createUnitHVACStatus,
   getUnitHVACStatus,
+  getPropertyHVACStatusSummary,
   type HVACVendorOption,
   type HVACStatusEntry,
+  type HVACUnitStatusSummary,
 } from '../../lib/api/maintenanceMetrics';
 import { updateMaintenanceRequestStatus, deleteMaintenanceRequest } from '../../lib/api/maintenance';
 import { LoadingPage } from './LoadingSpinner';
@@ -52,7 +54,7 @@ export function MaintenancePanel() {
   const [isVendorModalOpen, setIsVendorModalOpen] = useState(false);
   const [showAllRequests, setShowAllRequests] = useState(false);
   const [selectedPriority, setSelectedPriority] = useState<'all' | 'emergency' | 'high' | 'normal' | 'low'>('all');
-  const [selectedStatus, setSelectedStatus] = useState<'all' | 'submitted' | 'reviewed' | 'assigned' | 'scheduled' | 'in_progress' | 'completed' | 'closed' | 'cancelled'>('all');
+  const [selectedStatus, setSelectedStatus] = useState<'all' | 'open' | 'submitted' | 'reviewed' | 'assigned' | 'scheduled' | 'in_progress' | 'completed' | 'closed' | 'cancelled'>('all');
   const [updatingStatusId, setUpdatingStatusId] = useState<string | null>(null);
   const [statusUpdateError, setStatusUpdateError] = useState<{ id: string; message: string } | null>(null);
   const [deletingRequestId, setDeletingRequestId] = useState<string | null>(null);
@@ -70,6 +72,9 @@ export function MaintenancePanel() {
   const [hvacStatusHistory, setHvacStatusHistory] = useState<HVACStatusEntry[]>([]);
   const [hvacStatusLoading, setHvacStatusLoading] = useState(false);
   const [hvacStatusError, setHvacStatusError] = useState<string | null>(null);
+  const [hvacPropertyStatus, setHvacPropertyStatus] = useState<HVACUnitStatusSummary[]>([]);
+  const [hvacPropertyStatusLoading, setHvacPropertyStatusLoading] = useState(false);
+  const [hvacPropertyStatusError, setHvacPropertyStatusError] = useState<string | null>(null);
   const [replacementForm, setReplacementForm] = useState({
     propertyId: '',
     unitId: '',
@@ -341,6 +346,41 @@ export function MaintenancePanel() {
     };
   }, [selectedHVACOption, statusForm.unitId]);
 
+  useEffect(() => {
+    if (selectedHVACOption !== 'status' || !statusForm.propertyId) {
+      setHvacPropertyStatus([]);
+      setHvacPropertyStatusError(null);
+      return;
+    }
+
+    let isActive = true;
+    const loadPropertyStatus = async () => {
+      setHvacPropertyStatusLoading(true);
+      setHvacPropertyStatusError(null);
+      try {
+        const summary = await getPropertyHVACStatusSummary(statusForm.propertyId);
+        if (isActive) {
+          setHvacPropertyStatus(summary);
+        }
+      } catch (error) {
+        console.error('[MaintenancePanel] Error fetching HVAC property status:', error);
+        if (isActive) {
+          setHvacPropertyStatus([]);
+          setHvacPropertyStatusError('Failed to load property HVAC status.');
+        }
+      } finally {
+        if (isActive) {
+          setHvacPropertyStatusLoading(false);
+        }
+      }
+    };
+
+    loadPropertyStatus();
+    return () => {
+      isActive = false;
+    };
+  }, [selectedHVACOption, statusForm.propertyId]);
+
   // Show loading state
   if (requestsLoading || metricsLoading) {
     return <LoadingPage />;
@@ -590,6 +630,10 @@ export function MaintenancePanel() {
       });
       const history = await getUnitHVACStatus(statusForm.unitId, 5);
       setHvacStatusHistory(history);
+      if (statusForm.propertyId) {
+        const summary = await getPropertyHVACStatusSummary(statusForm.propertyId);
+        setHvacPropertyStatus(summary);
+      }
     } catch (error) {
       console.error('[MaintenancePanel] Failed to log HVAC status:', error);
       alert('Failed to log HVAC status. Please try again.');
@@ -753,6 +797,7 @@ export function MaintenancePanel() {
     : filteredRequests.filter((request) => request.status === selectedStatus);
 
   const maintenanceStatusOptions = [
+    { value: 'open', label: 'Open' },
     { value: 'submitted', label: 'Submitted' },
     { value: 'reviewed', label: 'Reviewed' },
     { value: 'assigned', label: 'Assigned' },
@@ -1651,7 +1696,37 @@ export function MaintenancePanel() {
                               </div>
 
                               <div className={`p-3 rounded-lg border ${border.default} ${isDark ? 'bg-white/5' : 'bg-white'}`}>
-                                <p className={`text-xs font-semibold ${text.muted} mb-2`}>Recent HVAC Status</p>
+                                <p className={`text-xs font-semibold ${text.muted} mb-2`}>Property HVAC Status Overview</p>
+                                {hvacPropertyStatusLoading && (
+                                  <p className={`text-xs ${text.muted}`}>Loading property HVAC status...</p>
+                                )}
+                                {hvacPropertyStatusError && (
+                                  <p className="text-xs text-red-400">{hvacPropertyStatusError}</p>
+                                )}
+                                {!hvacPropertyStatusLoading && !hvacPropertyStatusError && hvacPropertyStatus.length === 0 && (
+                                  <p className={`text-xs ${text.muted}`}>No HVAC status recorded for this property yet.</p>
+                                )}
+                                {!hvacPropertyStatusLoading && !hvacPropertyStatusError && hvacPropertyStatus.length > 0 && (
+                                  <div className="space-y-2">
+                                    {hvacPropertyStatus.map((entry) => (
+                                      <div key={entry.unitId} className="text-xs flex items-center justify-between gap-2">
+                                        <span className="font-semibold">
+                                          {entry.unitNumber ? `Unit ${entry.unitNumber}` : entry.unitId.slice(0, 6)}
+                                        </span>
+                                        <span className={text.muted}>
+                                          {entry.condition ? entry.condition.toUpperCase() : 'NO STATUS'}
+                                        </span>
+                                        <span className={text.muted}>
+                                          {entry.lastUpdatedAt ? formatDisplayDate(entry.lastUpdatedAt, 'MMM d, yyyy') : 'N/A'}
+                                        </span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+
+                              <div className={`p-3 rounded-lg border ${border.default} ${isDark ? 'bg-white/5' : 'bg-white'}`}>
+                                <p className={`text-xs font-semibold ${text.muted} mb-2`}>Recent HVAC Status (Selected Unit)</p>
                                 {hvacStatusLoading && (
                                   <p className={`text-xs ${text.muted}`}>Loading status history...</p>
                                 )}

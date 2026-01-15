@@ -69,6 +69,14 @@ export interface HVACStatusEntry {
   createdAt: string;
 }
 
+export interface HVACUnitStatusSummary {
+  unitId: string;
+  unitNumber: string | null;
+  condition: 'good' | 'monitor' | 'service' | 'replace' | null;
+  lastServicedDate: string | null;
+  lastUpdatedAt: string | null;
+}
+
 export interface RoutingMetrics {
   assignment_rate: number;
   avg_acceptance_time_hours: number;
@@ -100,6 +108,7 @@ export async function getMaintenanceMetrics(): Promise<MaintenanceMetrics> {
       throw new Error('No account ID found');
     }
 
+    const activeStatuses = ['submitted', 'reviewed', 'assigned', 'scheduled', 'in_progress', 'open'];
     const now = new Date();
     const last24Hours = new Date(now.getTime() - 24 * 60 * 60 * 1000);
 
@@ -110,14 +119,14 @@ export async function getMaintenanceMetrics(): Promise<MaintenanceMetrics> {
         .from('maintenance_requests')
         .select('id', { count: 'exact' })
         .eq('account_id', accountId)
-        .in('status', ['submitted', 'reviewed', 'assigned', 'scheduled', 'in_progress']),
+        .in('status', activeStatuses),
 
       // Response time calculation
       supabase
         .from('maintenance_requests')
-        .select('requested_at, reviewed_at')
+        .select('requested_at, reviewed_at, assigned_at, created_at')
         .eq('account_id', accountId)
-        .not('reviewed_at', 'is', null),
+        .or('reviewed_at.not.is.null,assigned_at.not.is.null'),
 
       // Completion rate
       supabase
@@ -148,13 +157,24 @@ export async function getMaintenanceMetrics(): Promise<MaintenanceMetrics> {
     // Calculate average response time
     let avgResponseTime = 0;
     if (responseTimeData.data && responseTimeData.data.length > 0) {
-      const totalHours = responseTimeData.data.reduce((sum, req) => {
-        const requested = new Date(req.requested_at).getTime();
-        const reviewed = new Date(req.reviewed_at).getTime();
-        const hours = (reviewed - requested) / (1000 * 60 * 60);
-        return sum + hours;
-      }, 0);
-      avgResponseTime = totalHours / responseTimeData.data.length;
+      let totalHours = 0;
+      let count = 0;
+
+      responseTimeData.data.forEach((req) => {
+        const requestedAt = req.requested_at ?? req.created_at;
+        const responseAt = req.reviewed_at ?? req.assigned_at;
+        if (!requestedAt || !responseAt) return;
+        const requested = new Date(requestedAt).getTime();
+        const responded = new Date(responseAt).getTime();
+        if (Number.isNaN(requested) || Number.isNaN(responded)) return;
+        const hours = (responded - requested) / (1000 * 60 * 60);
+        totalHours += hours;
+        count += 1;
+      });
+
+      if (count > 0) {
+        avgResponseTime = totalHours / count;
+      }
     }
 
     // Calculate completion rate
@@ -310,6 +330,29 @@ export async function getUnitHVACStatus(unitId: string, limit: number = 5): Prom
     return await response.json();
   } catch (error) {
     console.error('[Maintenance Metrics API] Error fetching HVAC status:', error);
+    throw error;
+  }
+}
+
+export async function getPropertyHVACStatusSummary(propertyId: string): Promise<HVACUnitStatusSummary[]> {
+  try {
+    const authHeaders = await getAuthHeaders();
+    const params = new URLSearchParams({ propertyId });
+    const response = await fetch(`${API_BASE}/api/hvac/status/property?${params.toString()}`, {
+      method: 'GET',
+      headers: {
+        ...authHeaders,
+        'Content-Type': 'application/json',
+      },
+    });
+
+    if (!response.ok) {
+      throw await parseErrorResponse(response, 'Failed to fetch HVAC property status');
+    }
+
+    return await response.json();
+  } catch (error) {
+    console.error('[Maintenance Metrics API] Error fetching HVAC property status:', error);
     throw error;
   }
 }
