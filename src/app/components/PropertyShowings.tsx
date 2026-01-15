@@ -112,16 +112,6 @@ export function PropertyShowings() {
     baths: prop.baths,
   }));
 
-  // Show loading state
-  if (showingsLoading) {
-    return <LoadingPage />;
-  }
-
-  // Show error state
-  if (showingsError) {
-    return <ErrorState error={showingsError} retry={refetchShowings} />;
-  }
-
   const { scheduledToday, totalThisWeek, nextSevenDays, thisMonth } = useMemo(() => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -153,6 +143,16 @@ export function PropertyShowings() {
       }).length,
     };
   }, [showings]);
+
+  // Show loading state
+  if (showingsLoading) {
+    return <LoadingPage />;
+  }
+
+  // Show error state
+  if (showingsError) {
+    return <ErrorState error={showingsError} retry={refetchShowings} />;
+  }
 
   // Prepare stats display
   const showingStatsDisplay = [
