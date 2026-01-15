@@ -11,7 +11,6 @@ import {
   useMessageTemplates,
   useAutomatedReminders,
   usePortalActivity,
-  useCommunicationStats,
   useMessageSuggestion,
   useSendMessage,
   useCreateMessageTemplate,
@@ -31,7 +30,6 @@ export function CommunicationHub() {
   const { data: templates, loading: templatesLoading, refetch: refetchTemplates } = useMessageTemplates();
   const { data: reminders, loading: remindersLoading, refetch: refetchReminders } = useAutomatedReminders();
   const { data: portalActivity, loading: activityLoading } = usePortalActivity();
-  const { data: stats, loading: statsLoading } = useCommunicationStats();
   const { data: tenants, loading: tenantsLoading } = useTenants();
   const {
     suggestion,
@@ -69,7 +67,7 @@ export function CommunicationHub() {
   const aiPanelRef = useRef<HTMLDivElement | null>(null);
 
   // Show loading state
-  if (messagesLoading || statsLoading) {
+  if (messagesLoading || activityLoading) {
     return <LoadingPage />;
   }
 
@@ -77,21 +75,6 @@ export function CommunicationHub() {
   if (messagesError) {
     return <ErrorState error={messagesError} retry={refetchMessages} />;
   }
-
-  // Prepare stats display
-  const normalizedStats = stats ? {
-    activeConversations: Number((stats as any).active_conversations ?? (stats as any).activeConversations ?? 0),
-    avgResponseTimeMinutes: Number((stats as any).avg_response_time_minutes ?? (stats as any).avgResponseTimeMinutes ?? 0),
-    automationRate: Number((stats as any).automation_rate ?? (stats as any).automationRate ?? 0),
-    tenantSatisfaction: Number((stats as any).tenant_satisfaction ?? (stats as any).tenantSatisfaction ?? 0),
-  } : null;
-
-  const communicationStatsDisplay = normalizedStats ? [
-    { label: 'Active Conversations', value: normalizedStats.activeConversations.toString(), change: '0%' },
-    { label: 'Avg. Response Time', value: `${normalizedStats.avgResponseTimeMinutes} min`, change: '0%' },
-    { label: 'Automation Rate', value: `${normalizedStats.automationRate}%`, change: '0%' },
-    { label: 'Tenant Satisfaction', value: `${normalizedStats.tenantSatisfaction}%`, change: '0%' },
-  ] : [];
 
   // Transform messages into conversation format
   const conversations = messages.map((msg) => {
@@ -122,6 +105,18 @@ export function CommunicationHub() {
       status,
     };
   });
+
+  const normalizedPortalActivity = portalActivity ? {
+    messagesToday: Number((portalActivity as any).messages_today ?? (portalActivity as any).messagesToday ?? 0),
+    unreadMessages: Number((portalActivity as any).unread_messages ?? (portalActivity as any).unreadMessages ?? 0),
+    avgResponseTimeMinutes: Number((portalActivity as any).avg_response_time_minutes ?? (portalActivity as any).avgResponseTimeMinutes ?? 0),
+    resolvedToday: Number((portalActivity as any).resolved_today ?? (portalActivity as any).resolvedToday ?? 0),
+  } : {
+    messagesToday: 0,
+    unreadMessages: 0,
+    avgResponseTimeMinutes: 0,
+    resolvedToday: 0,
+  };
 
   const primaryConversationId = conversations[0]?.id;
   const activeConversationId = selectedConversationId || primaryConversationId;
@@ -272,6 +267,13 @@ export function CommunicationHub() {
       frequency,
     };
   });
+
+  const communicationStatsDisplay = [
+    { label: 'Active Conversations', value: conversations.length.toString(), change: '0%' },
+    { label: 'Avg. Response Time', value: `${normalizedPortalActivity.avgResponseTimeMinutes} min`, change: '0%' },
+    { label: 'Messages Today', value: normalizedPortalActivity.messagesToday.toString(), change: '0%' },
+    { label: 'Resolved Today', value: normalizedPortalActivity.resolvedToday.toString(), change: '0%' },
+  ];
 
   const handleDeleteReminder = async (reminder: any) => {
     const name = reminder?.reminderType || reminder?.name || 'this reminder';

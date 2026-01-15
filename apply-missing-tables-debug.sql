@@ -315,6 +315,108 @@ CREATE INDEX IF NOT EXISTS idx_conversations_participants ON conversations USING
 ALTER TABLE messages ADD COLUMN IF NOT EXISTS conversation_id UUID REFERENCES conversations(id) ON DELETE SET NULL;
 CREATE INDEX IF NOT EXISTS idx_messages_conversation ON messages(conversation_id, created_at DESC);
 
+-- Step 6e: Outbound messages
+DO $$
+BEGIN
+  CREATE TABLE IF NOT EXISTS outbound_messages (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    account_id UUID NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    message_id UUID REFERENCES messages(id) ON DELETE SET NULL,
+    conversation_id UUID REFERENCES conversations(id) ON DELETE SET NULL,
+    reminder_id UUID REFERENCES automated_reminders(id) ON DELETE SET NULL,
+    recipient_user_id UUID REFERENCES auth.users(id) ON DELETE SET NULL,
+    recipient_id UUID REFERENCES auth.users(id) ON DELETE SET NULL,
+    recipient_email TEXT,
+    recipient_phone TEXT,
+    message_type TEXT,
+    subject TEXT,
+    body TEXT NOT NULL,
+    channel TEXT CHECK (channel IN ('email', 'sms', 'push', 'in_app')),
+    status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'sent', 'delivered', 'failed', 'cancelled')),
+    provider TEXT,
+    provider_message_id TEXT,
+    sent_at TIMESTAMPTZ,
+    delivered_at TIMESTAMPTZ,
+    failed_at TIMESTAMPTZ,
+    error_message TEXT,
+    retry_count INTEGER DEFAULT 0,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_outbound_messages_account ON outbound_messages(account_id, created_at DESC);
+  CREATE INDEX IF NOT EXISTS idx_outbound_messages_reminder ON outbound_messages(reminder_id);
+  CREATE INDEX IF NOT EXISTS idx_outbound_messages_conversation ON outbound_messages(conversation_id);
+  CREATE INDEX IF NOT EXISTS idx_outbound_messages_message ON outbound_messages(message_id);
+
+  RAISE NOTICE '✓ Created outbound_messages table';
+EXCEPTION
+  WHEN OTHERS THEN
+    RAISE NOTICE '✗ Failed to create outbound_messages: %', SQLERRM;
+END $$;
+
+-- Step 6e: Conversation satisfaction ratings
+DO $$
+BEGIN
+  CREATE TABLE IF NOT EXISTS conversation_satisfaction (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    account_id UUID NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    conversation_id UUID NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+    user_id UUID REFERENCES auth.users(id) ON DELETE SET NULL,
+    rating INTEGER NOT NULL CHECK (rating IN (-1, 1)),
+    feedback TEXT,
+    rated_at TIMESTAMPTZ DEFAULT NOW(),
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE(conversation_id, user_id)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_conversation_satisfaction_account ON conversation_satisfaction(account_id, rated_at DESC);
+  CREATE INDEX IF NOT EXISTS idx_conversation_satisfaction_conversation ON conversation_satisfaction(conversation_id);
+
+  RAISE NOTICE '✓ Created conversation_satisfaction table';
+EXCEPTION
+  WHEN OTHERS THEN
+    RAISE NOTICE '✗ Failed to create conversation_satisfaction: %', SQLERRM;
+END $$;
+
+-- Step 6e: Average response time function
+DO $$
+BEGIN
+  CREATE OR REPLACE FUNCTION calculate_avg_response_time(
+    p_account_id UUID,
+    p_days INTEGER DEFAULT 30
+  )
+  RETURNS NUMERIC
+  LANGUAGE sql
+  AS $function$
+    WITH ordered AS (
+      SELECT
+        conversation_id,
+        from_user_id,
+        created_at,
+        LAG(from_user_id) OVER (PARTITION BY conversation_id ORDER BY created_at) AS prev_sender,
+        LAG(created_at) OVER (PARTITION BY conversation_id ORDER BY created_at) AS prev_created_at
+      FROM messages
+      WHERE account_id = p_account_id
+        AND conversation_id IS NOT NULL
+        AND created_at >= (NOW() - (p_days || ' days')::interval)
+    )
+    SELECT COALESCE(
+      AVG(EXTRACT(EPOCH FROM (created_at - prev_created_at)) / 60.0),
+      0
+    )
+    FROM ordered
+    WHERE prev_created_at IS NOT NULL
+      AND prev_sender IS DISTINCT FROM from_user_id;
+  $function$;
+
+  RAISE NOTICE '✓ Created calculate_avg_response_time function';
+EXCEPTION
+  WHEN OTHERS THEN
+    RAISE NOTICE '✗ Failed to create calculate_avg_response_time: %', SQLERRM;
+END $$;
+
 -- Step 6f: Property stats columns
 ALTER TABLE properties ADD COLUMN IF NOT EXISTS occupied_units INTEGER DEFAULT 0;
 

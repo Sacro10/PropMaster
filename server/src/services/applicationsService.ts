@@ -574,6 +574,7 @@ export async function approveApplication(
       status: 'approved',
       reviewed_at: new Date().toISOString(),
       reviewed_by: userId,
+      applicant_user_id: tenantUserId,
     })
     .eq('id', applicationId)
     .eq('account_id', accountId)

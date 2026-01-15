@@ -53,6 +53,7 @@ export function MaintenancePanel() {
   const [isEmergencyModalOpen, setIsEmergencyModalOpen] = useState(false);
   const [isVendorModalOpen, setIsVendorModalOpen] = useState(false);
   const [showAllRequests, setShowAllRequests] = useState(false);
+  const [showAllHVACProperties, setShowAllHVACProperties] = useState(false);
   const [selectedPriority, setSelectedPriority] = useState<'all' | 'emergency' | 'high' | 'normal' | 'low'>('all');
   const [selectedStatus, setSelectedStatus] = useState<'all' | 'open' | 'submitted' | 'reviewed' | 'assigned' | 'scheduled' | 'in_progress' | 'completed' | 'closed' | 'cancelled'>('all');
   const [updatingStatusId, setUpdatingStatusId] = useState<string | null>(null);
@@ -660,10 +661,11 @@ export function MaintenancePanel() {
     const property = getPropertyById(filterDeliveryForm.propertyId);
     const vendor = hvacVendors.find((v) => v.id === filterDeliveryForm.vendorId);
     const vendorEmail = vendor?.email || filterDeliveryForm.vendorEmailOverride;
-    const eligibleUnits = (property?.units || []).filter((unit) => unit.hvac_filter_size);
+    const eligibleUnits = property?.units || [];
+    const missingFilterSizes = eligibleUnits.filter((unit) => !unit.hvac_filter_size);
 
     if (!property || eligibleUnits.length === 0) {
-      alert('No HVAC-equipped units found for this property.');
+      alert('No units found for this property.');
       return;
     }
 
@@ -709,7 +711,7 @@ export function MaintenancePanel() {
       }
 
       const unitLines = eligibleUnits
-        .map((unit) => `- ${unit.unit_number ? `Unit ${unit.unit_number}` : unit.id.slice(0, 6)} | Filter size: ${unit.hvac_filter_size}`)
+        .map((unit) => `- ${unit.unit_number ? `Unit ${unit.unit_number}` : unit.id.slice(0, 6)} | Filter size: ${unit.hvac_filter_size || 'standard'}`)
         .join('\n');
       const subject = `HVAC Filter Delivery Setup - ${property.name}`;
       const body = [
@@ -724,6 +726,10 @@ export function MaintenancePanel() {
         '',
         'Units included:',
         unitLines,
+        '',
+        missingFilterSizes.length > 0
+          ? `Units missing filter size (${missingFilterSizes.length}) will use "standard". Please confirm sizes.`
+          : '',
         '',
         `Notes: ${filterDeliveryForm.notes || 'N/A'}`,
         '',
@@ -824,6 +830,7 @@ export function MaintenancePanel() {
   const selectedReplacementVendor = hvacVendors.find((vendor) => vendor.id === replacementForm.vendorId) || null;
   const selectedDeliveryVendor = hvacVendors.find((vendor) => vendor.id === deliveryForm.vendorId) || null;
   const selectedFilterVendor = hvacVendors.find((vendor) => vendor.id === filterDeliveryForm.vendorId) || null;
+  const visibleHVACProgram = showAllHVACProperties ? hvacProgram : hvacProgram.slice(0, 2);
 
   return (
     <div className="space-y-6">
@@ -1169,7 +1176,7 @@ export function MaintenancePanel() {
                 ) : (
                   <>
                     <div className="space-y-4">
-                      {hvacProgram.map((property) => (
+                      {visibleHVACProgram.map((property) => (
                         <div
                           key={property.property_id}
                           className={`p-4 ${isDark ? 'bg-white/5 backdrop-blur-sm' : 'bg-gray-50'} rounded-2xl border ${border.default}`}
@@ -1192,6 +1199,15 @@ export function MaintenancePanel() {
                         </div>
                       ))}
                     </div>
+
+                    {hvacProgram.length > 2 && (
+                      <button
+                        onClick={() => setShowAllHVACProperties(!showAllHVACProperties)}
+                        className={`w-full mt-4 py-3 ${isDark ? 'bg-white/5 hover:bg-white/10' : 'bg-gray-100 hover:bg-gray-200'} rounded-lg text-sm font-medium transition-colors`}
+                      >
+                        {showAllHVACProperties ? 'Show Less' : 'Show More'}
+                      </button>
+                    )}
 
                     <div className={`mt-5 p-4 ${isDark ? 'bg-emerald-500/10' : 'bg-emerald-50'} border border-emerald-500/30 rounded-2xl`}>
                       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -1771,7 +1787,7 @@ export function MaintenancePanel() {
                             <form onSubmit={handleHVACFilterDeliverySubmit} className="space-y-3">
                               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                                 <div>
-                                  <label className={`text-xs ${text.muted}`}>Property (HVAC installed)</label>
+                                  <label className={`text-xs ${text.muted}`}>Property</label>
                                   <select
                                     value={filterDeliveryForm.propertyId}
                                     onChange={(event) => {
@@ -1785,13 +1801,11 @@ export function MaintenancePanel() {
                                     className={formInputClass}
                                   >
                                     <option value="">Select property</option>
-                                    {hvacProperties
-                                      .filter((property) => (property.units || []).some((unit) => unit.hvac_filter_size))
-                                      .map((property) => (
-                                        <option key={property.id} value={property.id}>
-                                          {property.name}
-                                        </option>
-                                      ))}
+                                    {hvacProperties.map((property) => (
+                                      <option key={property.id} value={property.id}>
+                                        {property.name}
+                                      </option>
+                                    ))}
                                   </select>
                                 </div>
                                 <div>
@@ -1892,6 +1906,10 @@ export function MaintenancePanel() {
                                   placeholder="Any special delivery or billing notes"
                                 />
                               </div>
+
+                              <p className={`text-xs ${text.muted}`}>
+                                All units in the selected property will be enrolled in the monthly filter delivery.
+                              </p>
 
                               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                                 <div>

@@ -360,8 +360,11 @@ export async function deleteTenantLease(
 
   const tenantId = tenantUserId || lease?.tenant_user_id;
   const leaseEnd = lease?.lease_end ? new Date(lease.lease_end) : null;
+  const leaseEndOfDay = leaseEnd
+    ? new Date(new Date(leaseEnd).setHours(23, 59, 59, 999))
+    : null;
   const deletedAt = new Date();
-  const deletedBeforeEnd = leaseEnd ? deletedAt < leaseEnd : false;
+  const deletedBeforeEnd = leaseEndOfDay ? deletedAt <= leaseEndOfDay : false;
 
   const { error: deleteError } = await supabase
     .from('leases')
@@ -372,6 +375,51 @@ export async function deleteTenantLease(
   if (deleteError) throw deleteError;
 
   if (!tenantId) return;
+
+  const { data: tenantProfile, error: tenantProfileError } = await supabase
+    .from('tenant_profiles')
+    .select('email')
+    .eq('account_id', accountId)
+    .eq('user_id', tenantId)
+    .maybeSingle();
+
+  if (tenantProfileError) throw tenantProfileError;
+
+  let applicationQuery = supabase
+    .from('rental_applications')
+    .select('id, application_data')
+    .eq('account_id', accountId)
+    .order('created_at', { ascending: false })
+    .limit(1);
+
+  if (tenantProfile?.email) {
+    applicationQuery = applicationQuery.or(
+      `applicant_user_id.eq.${tenantId},email.eq.${tenantProfile.email}`
+    );
+  } else {
+    applicationQuery = applicationQuery.eq('applicant_user_id', tenantId);
+  }
+
+  const { data: latestApplication, error: applicationError } = await applicationQuery.maybeSingle();
+
+  if (applicationError) throw applicationError;
+
+  if (latestApplication?.id) {
+    const applicationData = latestApplication.application_data || {};
+    const updatedApplicationData = {
+      ...applicationData,
+      eviction_history: true,
+      evictionHistory: true,
+    };
+
+    const { error: applicationUpdateError } = await supabase
+      .from('rental_applications')
+      .update({ application_data: updatedApplicationData })
+      .eq('account_id', accountId)
+      .eq('id', latestApplication.id);
+
+    if (applicationUpdateError) throw applicationUpdateError;
+  }
 
   const { count: otherLeaseCount, error: otherLeaseError } = await supabase
     .from('leases')
@@ -391,12 +439,14 @@ export async function deleteTenantLease(
     if (profileDeleteError) throw profileDeleteError;
   }
 
-  if (deletedBeforeEnd) {
+  try {
     await logActivityEvent(
       accountId,
       actorUserId || null,
       'lease_terminated',
-      'Tenant evicted (profile deleted before lease end)',
+      deletedBeforeEnd
+        ? 'Tenant evicted (profile deleted before lease end)'
+        : 'Tenant removed (profile deleted after lease end)',
       {
         entityType: 'lease',
         entityId: leaseId,
@@ -407,5 +457,7 @@ export async function deleteTenantLease(
         },
       }
     );
+  } catch (error) {
+    console.warn('[Tenants Service] Failed to log lease termination activity:', error);
   }
 }

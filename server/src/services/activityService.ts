@@ -52,7 +52,7 @@ export async function getActivityEvents(
   // Build the query
   let query = supabase
     .from('activity_events')
-    .select('*, user:user_id(email, raw_user_meta_data)', { count: 'exact' })
+    .select('*', { count: 'exact' })
     .eq('account_id', accountId);
 
   // Apply filters
@@ -78,13 +78,50 @@ export async function getActivityEvents(
   // Apply pagination
   query = query.range(offset, offset + limit - 1);
 
-  const { data, error, count } = await query;
+  let { data, error, count } = await query;
 
   if (error) {
     if (isMissingTable(error, 'activity_events')) {
       return { events: [], total: 0 };
     }
-    throw error;
+    const message = typeof error.message === 'string' ? error.message : '';
+    const isRelationshipError =
+      message.includes('relationship') ||
+      message.includes('schema cache') ||
+      message.includes('Could not find a relationship');
+    if (isRelationshipError) {
+      let fallbackQuery = supabase
+        .from('activity_events')
+        .select('*', { count: 'exact' })
+        .eq('account_id', accountId);
+
+      if (eventType) {
+        fallbackQuery = fallbackQuery.eq('event_type', eventType);
+      }
+      if (entityType) {
+        fallbackQuery = fallbackQuery.eq('entity_type', entityType);
+      }
+      if (userId) {
+        fallbackQuery = fallbackQuery.eq('user_id', userId);
+      }
+      if (startDate) {
+        fallbackQuery = fallbackQuery.gte('created_at', startDate);
+      }
+      if (endDate) {
+        fallbackQuery = fallbackQuery.lte('created_at', endDate);
+      }
+
+      fallbackQuery = fallbackQuery.order('created_at', { ascending: false });
+      fallbackQuery = fallbackQuery.range(offset, offset + limit - 1);
+
+      const fallback = await fallbackQuery;
+      data = fallback.data as any;
+      count = fallback.count as number | null;
+      error = fallback.error;
+      if (error) throw error;
+    } else {
+      throw error;
+    }
   }
 
   // Transform the data to include user information
@@ -101,6 +138,44 @@ export async function getActivityEvents(
       userName: event.user?.raw_user_meta_data?.full_name,
       timestamp: event.created_at,
     })) || [];
+
+  const userIds = Array.from(
+    new Set(events.map((event) => event.userId).filter(Boolean))
+  ) as string[];
+
+  if (userIds.length) {
+    try {
+      const users = await Promise.all(
+        userIds.map(async (userId) => {
+          const { data: userData, error: userError } = await supabase.auth.admin.getUserById(
+            userId
+          );
+          if (userError || !userData?.user) return null;
+          return userData.user;
+        })
+      );
+
+      const userMap = new Map(
+        users.filter(Boolean).map((user) => [
+          user.id,
+          {
+            email: user.email,
+            fullName: user.user_metadata?.full_name,
+          },
+        ])
+      );
+
+      events.forEach((event) => {
+        if (!event.userId) return;
+        const userInfo = userMap.get(event.userId);
+        if (!userInfo) return;
+        event.userEmail = userInfo.email || event.userEmail;
+        event.userName = userInfo.fullName || event.userName;
+      });
+    } catch {
+      // If auth lookup fails, return events without user enrichment.
+    }
+  }
 
   return {
     events,

@@ -5,6 +5,7 @@
 
 import { supabaseAdmin as supabase } from '../supabase';
 import { logActivityEvent } from './activityService';
+import { sendGmailMessage } from './gmailService';
 import { AiDisabledError, generateText, getAiStatus } from './aiClient';
 
 // =========================================
@@ -441,6 +442,78 @@ export async function sendMessage(
 
   if (conversationUpdateError) {
     console.warn('[Communications] Failed to update conversation timestamp:', conversationUpdateError);
+  }
+
+  const logOutboundMessage = async (payload: Record<string, any>) => {
+    try {
+      await supabase.from('outbound_messages').insert(payload);
+    } catch (error) {
+      console.warn('[Communications] Failed to log outbound message:', error);
+    }
+  };
+
+  const resolveRecipientEmail = async () => {
+    const { data: profile } = await supabase
+      .from('tenant_profiles')
+      .select('email')
+      .eq('account_id', accountId)
+      .eq('user_id', data.recipientId)
+      .maybeSingle();
+
+    if (profile?.email) {
+      return profile.email;
+    }
+
+    const { data: user } = await supabase.auth.admin.getUserById(data.recipientId);
+    return user?.user?.email || null;
+  };
+
+  try {
+    const recipientEmail = await resolveRecipientEmail();
+    if (recipientEmail) {
+      await sendGmailMessage({
+        accountId,
+        userId: senderId,
+        to: recipientEmail,
+        subject: data.subject || 'New message',
+        body: data.body,
+      });
+
+      await logOutboundMessage({
+        account_id: accountId,
+        message_id: message.id,
+        conversation_id: conversationId,
+        recipient_user_id: data.recipientId,
+        recipient_id: data.recipientId,
+        recipient_email: recipientEmail,
+        subject: data.subject || 'New message',
+        body: data.body,
+        channel: 'email',
+        status: 'sent',
+        provider: 'gmail',
+        sent_at: new Date().toISOString(),
+        retry_count: 0,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      });
+    }
+  } catch (error) {
+    await logOutboundMessage({
+      account_id: accountId,
+      message_id: message.id,
+      conversation_id: conversationId,
+      recipient_user_id: data.recipientId,
+      recipient_id: data.recipientId,
+      subject: data.subject || 'New message',
+      body: data.body,
+      channel: 'email',
+      status: 'failed',
+      provider: 'gmail',
+      error_message: error instanceof Error ? error.message : 'Unknown error',
+      retry_count: 0,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    });
   }
 
   // Create activity event
