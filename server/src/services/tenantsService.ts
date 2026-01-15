@@ -1,4 +1,5 @@
 import { supabaseAdmin as supabase } from '../supabase';
+import { logActivityEvent } from './activityService';
 
 function formatPropertyAddress(property: any) {
   if (!property) return '';
@@ -340,11 +341,12 @@ export async function updateTenant(
 export async function deleteTenantLease(
   accountId: string,
   leaseId: string,
-  tenantUserId?: string | null
+  tenantUserId?: string | null,
+  actorUserId?: string | null
 ): Promise<void> {
   const { data: lease, error: leaseError } = await supabase
     .from('leases')
-    .select('id, tenant_user_id')
+    .select('id, tenant_user_id, lease_end')
     .eq('account_id', accountId)
     .eq('id', leaseId)
     .single();
@@ -356,7 +358,10 @@ export async function deleteTenantLease(
     throw leaseError;
   }
 
-  const userId = tenantUserId || lease?.tenant_user_id;
+  const tenantId = tenantUserId || lease?.tenant_user_id;
+  const leaseEnd = lease?.lease_end ? new Date(lease.lease_end) : null;
+  const deletedAt = new Date();
+  const deletedBeforeEnd = leaseEnd ? deletedAt < leaseEnd : false;
 
   const { error: deleteError } = await supabase
     .from('leases')
@@ -366,13 +371,13 @@ export async function deleteTenantLease(
 
   if (deleteError) throw deleteError;
 
-  if (!userId) return;
+  if (!tenantId) return;
 
   const { count: otherLeaseCount, error: otherLeaseError } = await supabase
     .from('leases')
     .select('id', { count: 'exact', head: true })
     .eq('account_id', accountId)
-    .eq('tenant_user_id', userId);
+    .eq('tenant_user_id', tenantId);
 
   if (otherLeaseError) throw otherLeaseError;
 
@@ -381,8 +386,26 @@ export async function deleteTenantLease(
       .from('tenant_profiles')
       .delete()
       .eq('account_id', accountId)
-      .eq('user_id', userId);
+      .eq('user_id', tenantId);
 
     if (profileDeleteError) throw profileDeleteError;
+  }
+
+  if (deletedBeforeEnd) {
+    await logActivityEvent(
+      accountId,
+      actorUserId || null,
+      'lease_terminated',
+      'Tenant evicted (profile deleted before lease end)',
+      {
+        entityType: 'lease',
+        entityId: leaseId,
+        metadata: {
+          deletedBeforeEnd,
+          deletedAt: deletedAt.toISOString(),
+          leaseEnd: lease?.lease_end || null,
+        },
+      }
+    );
   }
 }

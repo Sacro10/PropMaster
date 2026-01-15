@@ -172,7 +172,7 @@ router.delete('/:id', authenticate, Permissions.deleteTenants, async (req: AuthR
       return;
     }
 
-    await deleteTenantLease(req.user.accountId, req.params.id, req.body?.tenantUserId);
+    await deleteTenantLease(req.user.accountId, req.params.id, req.body?.tenantUserId, req.user.id);
     res.json({ success: true });
   } catch (error) {
     console.error('Delete tenant error:', error);

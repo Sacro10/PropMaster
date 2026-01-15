@@ -73,7 +73,8 @@ router.get('/stats', authenticate, Permissions.readPayments, async (req: AuthReq
       return;
     }
 
-    const stats = await getCollectionStatistics(req.user.accountId);
+    const forceLive = String(req.query.live || '').toLowerCase() === 'true';
+    const stats = await getCollectionStatistics(req.user.accountId, { forceLive });
     res.json(stats);
   } catch (error) {
     console.error('Get collection stats error:', error);

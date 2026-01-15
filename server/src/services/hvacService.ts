@@ -1,4 +1,7 @@
 import { supabaseAdmin as supabase } from '../supabase';
+import { getAvailableVendors } from './maintenanceService';
+import { logActivityEvent } from './activityService';
+import { searchHVACVendorsFromNominatim } from './nominatimService';
 
 function formatPropertyAddress(property: any) {
   if (!property) return '';
@@ -44,6 +47,16 @@ export interface HVACDeliveryBatch {
   status: string;
   carrier: string | null;
   trackingNumbers: string[];
+  createdAt: string;
+}
+
+export interface HVACStatusEntry {
+  id: string;
+  unitId: string;
+  condition: 'good' | 'monitor' | 'service' | 'replace';
+  lastServicedDate: string | null;
+  notes: string | null;
+  createdBy: string | null;
   createdAt: string;
 }
 
@@ -407,4 +420,157 @@ export async function generateDeliveryBatch(
     trackingNumbers: batch.tracking_numbers || [],
     createdAt: batch.created_at,
   };
+}
+
+export async function getHVACVendorsForProperty(
+  accountId: string,
+  propertyId: string,
+  radiusMiles?: number,
+  includeExternal?: boolean
+): Promise<Array<{
+  id: string;
+  businessName: string;
+  rating: number;
+  jobsCompleted: number;
+  hourlyRate: number;
+  email: string | null;
+  phone?: string | null;
+  website?: string | null;
+  address?: string | null;
+  source: 'local' | 'google_places';
+}>> {
+  const { data: property, error } = await supabase
+    .from('properties')
+    .select('id, name, address1, address2, city, state, zip')
+    .eq('account_id', accountId)
+    .eq('id', propertyId)
+    .single();
+
+  if (error || !property) {
+    throw new Error('Property not found');
+  }
+
+  if (!property.zip) {
+    throw new Error('Property zip code is missing');
+  }
+
+  const localVendors = await getAvailableVendors(accountId, 'hvac', property.zip, radiusMiles);
+  const formattedAddress = formatPropertyAddress(property);
+  const externalVendors = includeExternal
+    ? await searchHVACVendorsFromNominatim({
+        address: formattedAddress || property.zip,
+      })
+    : [];
+
+  const mappedLocal = localVendors.map((vendor) => ({
+    ...vendor,
+    source: 'local' as const,
+  }));
+
+  const mappedExternal = externalVendors.map((vendor) => ({
+    id: `osm_${vendor.placeId || vendor.name.replace(/\s+/g, '_')}`,
+    businessName: vendor.name,
+    rating: 0,
+    jobsCompleted: 0,
+    hourlyRate: 0,
+    email: null,
+    phone: null,
+    website: null,
+    address: vendor.address,
+    source: 'nominatim' as const,
+  }));
+
+  return [...mappedLocal, ...mappedExternal];
+}
+
+export async function createUnitHVACStatus(
+  accountId: string,
+  userId: string | null,
+  payload: {
+    unitId: string;
+    condition: 'good' | 'monitor' | 'service' | 'replace';
+    lastServicedDate?: string | null;
+    notes?: string | null;
+  }
+): Promise<HVACStatusEntry> {
+  const { data: unit, error: unitError } = await supabase
+    .from('units')
+    .select('id')
+    .eq('account_id', accountId)
+    .eq('id', payload.unitId)
+    .single();
+
+  if (unitError || !unit) {
+    throw new Error('Unit not found');
+  }
+
+  const { data, error } = await supabase
+    .from('unit_hvac_status')
+    .insert({
+      account_id: accountId,
+      unit_id: payload.unitId,
+      condition: payload.condition,
+      last_serviced_date: payload.lastServicedDate || null,
+      notes: payload.notes || null,
+      created_by: userId,
+    })
+    .select()
+    .single();
+
+  if (error || !data) {
+    throw error || new Error('Failed to create HVAC status');
+  }
+
+  await logActivityEvent(
+    accountId,
+    userId,
+    'hvac_status_logged',
+    `HVAC status logged for unit ${payload.unitId}`,
+    {
+      entityType: 'unit',
+      entityId: payload.unitId,
+      metadata: {
+        condition: payload.condition,
+        lastServicedDate: payload.lastServicedDate || null,
+      },
+    }
+  );
+
+  return {
+    id: data.id,
+    unitId: data.unit_id,
+    condition: data.condition,
+    lastServicedDate: data.last_serviced_date,
+    notes: data.notes,
+    createdBy: data.created_by,
+    createdAt: data.created_at,
+  };
+}
+
+export async function getUnitHVACStatus(
+  accountId: string,
+  unitId: string,
+  limit: number
+): Promise<HVACStatusEntry[]> {
+  const { data: statuses, error } = await supabase
+    .from('unit_hvac_status')
+    .select('*')
+    .eq('account_id', accountId)
+    .eq('unit_id', unitId)
+    .order('created_at', { ascending: false })
+    .limit(limit);
+
+  if (error) {
+    throw error;
+  }
+
+  return (statuses || []).map((status: any) => ({
+    id: status.id,
+    unitId: status.unit_id,
+    condition: status.condition,
+    lastServicedDate: status.last_serviced_date,
+    notes: status.notes,
+    createdBy: status.created_by,
+    createdAt: status.created_at,
+  }));
 }

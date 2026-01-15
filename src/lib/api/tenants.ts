@@ -143,6 +143,7 @@ export async function getTenants(params: PaginationParams = {}) {
         lease_end,
         rent,
         deposit,
+        auto_pay_enabled,
         status,
         renewal_status,
         tenant_user_id,
@@ -289,6 +290,7 @@ export async function getTenants(params: PaginationParams = {}) {
           lease_end: lease.lease_end,
           rent: lease.rent,
           deposit: lease.deposit,
+          auto_pay_enabled: Boolean(lease.auto_pay_enabled),
           status: lease.status,
           renewal_status: lease.renewal_status,
         },
@@ -358,6 +360,29 @@ export async function deleteTenant(leaseId: string, tenantUserId?: string | null
   }
 }
 
+export async function setLeaseAutoPay(leaseId: string, enabled: boolean) {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) {
+    throw new Error('No active session');
+  }
+
+  const response = await fetch(`${API_BASE}/api/leases/${leaseId}/auto-pay`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${session.access_token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ enabled }),
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => null);
+    throw new Error(error?.error || 'Failed to update auto-pay');
+  }
+
+  return await response.json();
+}
+
 /**
  * Get pending rental applications
  */
@@ -402,14 +427,57 @@ export async function getRentalApplications(params: PaginationParams = {}) {
       throw handleSupabaseError(error, 'fetch rental applications');
     }
 
+    // Fetch screening results to backfill scores/status if available
+    const applicationIds = (data || []).map((app: any) => app.id).filter(Boolean);
+    const screeningByApplicationId = new Map<string, any>();
+    if (applicationIds.length > 0) {
+      const { data: screeningResults, error: screeningError } = await supabase
+        .from('screening_results')
+        .select('application_id, risk_score, credit_score, background_check_status, screened_at')
+        .in('application_id', applicationIds);
+
+      if (screeningError) {
+        console.warn('[Tenants API] Screening results unavailable:', screeningError.message);
+      } else {
+        (screeningResults || []).forEach((result: any) => {
+          if (result.application_id) {
+            screeningByApplicationId.set(result.application_id, result);
+          }
+        });
+      }
+    }
+
     // Transform the data
     const applications: RentalApplication[] = (data || []).map((app: any) => {
       const unit = app.units || {};
       const property = unit.properties || {};
       const { firstName, lastName } = getApplicationNameParts(app);
+      const applicationData = app.application_data || app.applicationData || {};
+      const dataRiskScore =
+        applicationData.riskScore ??
+        applicationData.risk_score ??
+        applicationData.aiRiskScore ??
+        applicationData.ai_risk_score ??
+        null;
+      const dataCreditScore =
+        applicationData.creditScore ??
+        applicationData.credit_score ??
+        null;
+      const dataBackgroundStatus =
+        applicationData.backgroundCheckStatus ??
+        applicationData.background_check_status ??
+        null;
+      const screening = screeningByApplicationId.get(app.id);
+      const screeningRiskScore = screening?.risk_score ?? null;
+      const screeningCreditScore = screening?.credit_score ?? null;
+      const screeningBackgroundStatus = screening?.background_check_status ?? null;
 
       return {
         ...app,
+        ai_risk_score: app.ai_risk_score ?? screeningRiskScore ?? dataRiskScore,
+        credit_score: app.credit_score ?? screeningCreditScore ?? dataCreditScore,
+        background_check_status: app.background_check_status ?? screeningBackgroundStatus ?? dataBackgroundStatus,
+        reviewed_at: app.reviewed_at ?? screening?.screened_at ?? null,
         firstName,
         lastName,
         moveInDate: app.desired_move_in_date || app.move_in_date || null,

@@ -8,6 +8,9 @@ import {
   getDeliveryBatches,
   markDeliveryDelivered,
   generateDeliveryBatch,
+  getHVACVendorsForProperty,
+  createUnitHVACStatus,
+  getUnitHVACStatus,
 } from '../services/hvacService';
 
 const router = Router();
@@ -108,6 +111,116 @@ router.post(
       console.error('Create HVAC enrollment error:', error);
       res.status(500).json({
         error: 'Failed to create enrollment',
+        details: error instanceof Error ? error.message : 'Unknown error',
+      });
+    }
+  }
+);
+
+/**
+ * GET /api/hvac/vendors
+ * List HVAC vendors near a property
+ */
+router.get(
+  '/vendors',
+  authenticate,
+  requirePermission('hvac', 'read'),
+  async (req: AuthRequest, res) => {
+    try {
+      if (!req.user?.accountId) {
+        res.status(400).json({ error: 'Account ID required' });
+        return;
+      }
+
+      const propertyId = req.query.propertyId as string | undefined;
+      const radiusMilesRaw = req.query.radiusMiles as string | undefined;
+      const radiusMilesValue = radiusMilesRaw ? Number(radiusMilesRaw) : undefined;
+      const radiusMiles = Number.isFinite(radiusMilesValue) ? radiusMilesValue : undefined;
+      const includeExternal = req.query.includeExternal !== 'false';
+      if (!propertyId) {
+        res.status(400).json({ error: 'propertyId is required' });
+        return;
+      }
+
+      const vendors = await getHVACVendorsForProperty(req.user.accountId, propertyId, radiusMiles, includeExternal);
+      res.json(vendors);
+    } catch (error) {
+      console.error('Get HVAC vendors error:', error);
+      res.status(500).json({
+        error: 'Failed to fetch HVAC vendors',
+        details: error instanceof Error ? error.message : 'Unknown error',
+      });
+    }
+  }
+);
+
+/**
+ * GET /api/hvac/status
+ * Get HVAC status history for a unit
+ */
+router.get(
+  '/status',
+  authenticate,
+  requirePermission('hvac', 'read'),
+  async (req: AuthRequest, res) => {
+    try {
+      if (!req.user?.accountId) {
+        res.status(400).json({ error: 'Account ID required' });
+        return;
+      }
+
+      const unitId = req.query.unitId as string | undefined;
+      const limit = req.query.limit ? Math.min(parseInt(req.query.limit as string, 10), 25) : 5;
+      if (!unitId) {
+        res.status(400).json({ error: 'unitId is required' });
+        return;
+      }
+
+      const statuses = await getUnitHVACStatus(req.user.accountId, unitId, limit);
+      res.json(statuses);
+    } catch (error) {
+      console.error('Get HVAC status error:', error);
+      res.status(500).json({
+        error: 'Failed to fetch HVAC status',
+        details: error instanceof Error ? error.message : 'Unknown error',
+      });
+    }
+  }
+);
+
+/**
+ * POST /api/hvac/status
+ * Log HVAC status for a unit
+ */
+router.post(
+  '/status',
+  authenticate,
+  requirePermission('hvac', 'create'),
+  async (req: AuthRequest, res) => {
+    try {
+      if (!req.user?.accountId) {
+        res.status(400).json({ error: 'Account ID required' });
+        return;
+      }
+
+      const { unitId, condition, lastServicedDate, notes } = req.body || {};
+      if (!unitId || !condition) {
+        res.status(400).json({ error: 'unitId and condition are required' });
+        return;
+      }
+
+      const status = await createUnitHVACStatus(req.user.accountId, req.user.id || null, {
+        unitId,
+        condition,
+        lastServicedDate,
+        notes,
+      });
+
+      res.status(201).json(status);
+    } catch (error) {
+      console.error('Create HVAC status error:', error);
+      res.status(500).json({
+        error: 'Failed to create HVAC status',
         details: error instanceof Error ? error.message : 'Unknown error',
       });
     }

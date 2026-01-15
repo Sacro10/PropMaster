@@ -51,6 +51,7 @@ export interface LeaseInfo {
   lease_end: string;
   rent: number;
   deposit: number;
+  auto_pay_enabled: boolean;
   status: 'draft' | 'pending' | 'active' | 'expired' | 'terminated' | 'renewed';
   renewal_status: 'pending' | 'offered' | 'accepted' | 'declined';
 }

@@ -213,6 +213,7 @@ CREATE TABLE leases (
   lease_start DATE NOT NULL,
   lease_end DATE NOT NULL,
   rent NUMERIC(10, 2) NOT NULL,
+  auto_pay_enabled BOOLEAN DEFAULT false,
   deposit NUMERIC(10, 2) DEFAULT 0,
   pet_deposit NUMERIC(10, 2) DEFAULT 0,
   parking_fee NUMERIC(10, 2) DEFAULT 0,
@@ -503,6 +504,8 @@ CREATE TABLE hvac_filter_subscriptions (
   quantity INTEGER DEFAULT 1,
   frequency TEXT DEFAULT 'quarterly' CHECK (frequency IN ('monthly', 'bimonthly', 'quarterly')),
   next_delivery_date DATE,
+  annual_expires_on DATE,
+  annual_renewal_reminder_sent_at TIMESTAMPTZ,
   status TEXT DEFAULT 'active' CHECK (status IN ('active', 'paused', 'cancelled')),
   paused_at TIMESTAMPTZ,
   cancelled_at TIMESTAMPTZ,
@@ -523,6 +526,18 @@ CREATE TABLE hvac_filter_deliveries (
   delivery_instructions TEXT,
   delivery_photo_url TEXT,
   notes TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE unit_hvac_status (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  account_id UUID NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+  unit_id UUID NOT NULL REFERENCES units(id) ON DELETE CASCADE,
+  condition TEXT NOT NULL CHECK (condition IN ('good', 'monitor', 'service', 'replace')),
+  last_serviced_date DATE,
+  notes TEXT,
+  created_by UUID REFERENCES auth.users(id) ON DELETE SET NULL,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -651,6 +666,8 @@ CREATE INDEX idx_rental_applications_status ON rental_applications(status);
 CREATE INDEX idx_hvac_filter_subs_account_id ON hvac_filter_subscriptions(account_id);
 CREATE INDEX idx_hvac_filter_subs_unit_id ON hvac_filter_subscriptions(unit_id);
 CREATE INDEX idx_hvac_filter_subs_status ON hvac_filter_subscriptions(status);
+CREATE INDEX idx_unit_hvac_status_account ON unit_hvac_status(account_id, created_at DESC);
+CREATE INDEX idx_unit_hvac_status_unit ON unit_hvac_status(unit_id, created_at DESC);
 
 -- Analytics & audit
 CREATE INDEX idx_analytics_events_account_id ON analytics_events(account_id);
@@ -748,6 +765,65 @@ BEGIN
 END;
 $$;
 
+CREATE OR REPLACE FUNCTION find_available_vendors(
+  p_account_id UUID,
+  p_category TEXT,
+  p_property_zip TEXT,
+  p_limit INTEGER DEFAULT 10,
+  p_radius_miles INTEGER DEFAULT NULL
+)
+RETURNS TABLE (
+  vendor_id UUID,
+  business_name TEXT,
+  rating NUMERIC,
+  jobs_completed INTEGER,
+  hourly_rate NUMERIC
+)
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  RETURN QUERY
+  SELECT
+    vp.id,
+    vp.business_name,
+    vp.avg_rating,
+    vp.total_jobs_completed,
+    COALESCE(vs.base_rate, 85)::NUMERIC
+  FROM vendor_profiles vp
+  LEFT JOIN vendor_services vs
+    ON vs.vendor_profile_id = vp.id
+   AND vs.account_id = vp.account_id
+   AND (p_category IS NULL OR vs.service_type = p_category)
+  WHERE vp.account_id = p_account_id
+    AND vp.is_active = true
+    AND (
+      p_category IS NULL OR EXISTS (
+        SELECT 1
+        FROM vendor_services vs2
+        WHERE vs2.vendor_profile_id = vp.id
+          AND vs2.account_id = vp.account_id
+          AND vs2.service_type = p_category
+      )
+    )
+    AND (
+      p_radius_miles IS NULL
+      OR vs.service_radius_miles IS NULL
+      OR vs.service_radius_miles >= p_radius_miles
+    )
+  ORDER BY
+    CASE
+      WHEN p_property_zip IS NULL OR vp.zip IS NULL THEN 999
+      WHEN vp.zip = p_property_zip THEN 0
+      ELSE 25
+    END,
+    vp.avg_rating DESC,
+    vp.total_jobs_completed DESC
+  LIMIT COALESCE(p_limit, 10);
+END;
+$$;
+
 -- ============================================================================
 -- ROW LEVEL SECURITY POLICIES
 -- ============================================================================
@@ -778,6 +854,7 @@ ALTER TABLE showings ENABLE ROW LEVEL SECURITY;
 ALTER TABLE rental_applications ENABLE ROW LEVEL SECURITY;
 ALTER TABLE hvac_filter_subscriptions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE hvac_filter_deliveries ENABLE ROW LEVEL SECURITY;
+ALTER TABLE unit_hvac_status ENABLE ROW LEVEL SECURITY;
 ALTER TABLE analytics_events ENABLE ROW LEVEL SECURITY;
 ALTER TABLE audit_log ENABLE ROW LEVEL SECURITY;
 
@@ -967,6 +1044,11 @@ CREATE POLICY hvac_filter_deliveries_select ON hvac_filter_deliveries FOR SELECT
 CREATE POLICY hvac_filter_deliveries_insert ON hvac_filter_deliveries FOR INSERT WITH CHECK (is_account_member(account_id));
 CREATE POLICY hvac_filter_deliveries_update ON hvac_filter_deliveries FOR UPDATE USING (is_account_member(account_id));
 
+-- HVAC status: Account members
+CREATE POLICY unit_hvac_status_select ON unit_hvac_status FOR SELECT USING (is_account_member(account_id));
+CREATE POLICY unit_hvac_status_insert ON unit_hvac_status FOR INSERT WITH CHECK (is_account_member(account_id));
+CREATE POLICY unit_hvac_status_update ON unit_hvac_status FOR UPDATE USING (is_account_member(account_id));
+
 -- Analytics events: Account members can see their account's events
 CREATE POLICY analytics_events_select ON analytics_events FOR SELECT USING (is_account_member(account_id));
 CREATE POLICY analytics_events_insert ON analytics_events FOR INSERT WITH CHECK (true);
@@ -1010,6 +1092,7 @@ CREATE TRIGGER update_showings_updated_at BEFORE UPDATE ON showings FOR EACH ROW
 CREATE TRIGGER update_rental_applications_updated_at BEFORE UPDATE ON rental_applications FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 CREATE TRIGGER update_hvac_filter_subs_updated_at BEFORE UPDATE ON hvac_filter_subscriptions FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 CREATE TRIGGER update_hvac_filter_deliveries_updated_at BEFORE UPDATE ON hvac_filter_deliveries FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+CREATE TRIGGER update_unit_hvac_status_updated_at BEFORE UPDATE ON unit_hvac_status FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 -- ============================================================================
 -- 12. USER PROFILES (Required by Frontend)
@@ -1019,6 +1102,8 @@ CREATE TRIGGER update_hvac_filter_deliveries_updated_at BEFORE UPDATE ON hvac_fi
 CREATE TABLE user_profiles (
   id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
   email TEXT NOT NULL,
+  full_name TEXT,
+  phone TEXT,
   subscription_tier TEXT DEFAULT 'basic' CHECK (subscription_tier IN ('basic', 'pro', 'premium')),
   stripe_customer_id TEXT UNIQUE,
   stripe_subscription_id TEXT,

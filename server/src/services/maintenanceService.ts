@@ -524,7 +524,8 @@ export async function getMaintenanceStats(accountId: string): Promise<{
 export async function getAvailableVendors(
   accountId: string,
   category: string,
-  propertyZip: string
+  propertyZip: string,
+  radiusMiles?: number
 ): Promise<Array<{
   id: string;
   businessName: string;
@@ -533,12 +534,35 @@ export async function getAvailableVendors(
   hourlyRate: number;
   email: string | null;
 }>> {
-  const { data, error } = await supabase.rpc('find_available_vendors', {
-    p_account_id: accountId,
-    p_category: category,
-    p_property_zip: propertyZip,
-    p_limit: 10,
-  });
+  let data: any = null;
+  let error: any = null;
+
+  if (typeof radiusMiles === 'number') {
+    ({ data, error } = await supabase.rpc('find_available_vendors', {
+      p_account_id: accountId,
+      p_category: category,
+      p_property_zip: propertyZip,
+      p_limit: 10,
+      p_radius_miles: radiusMiles,
+    }));
+  } else {
+    ({ data, error } = await supabase.rpc('find_available_vendors', {
+      p_account_id: accountId,
+      p_category: category,
+      p_property_zip: propertyZip,
+      p_limit: 10,
+    }));
+  }
+
+  if (error && typeof radiusMiles === 'number') {
+    // Retry without radius if the RPC signature doesn't support it.
+    ({ data, error } = await supabase.rpc('find_available_vendors', {
+      p_account_id: accountId,
+      p_category: category,
+      p_property_zip: propertyZip,
+      p_limit: 10,
+    }));
+  }
 
   if (!error && data) {
     const vendorIds = (data || []).map((v: any) => v.vendor_id).filter(Boolean);

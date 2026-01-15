@@ -81,6 +81,22 @@ CREATE TABLE IF NOT EXISTS hvac_delivery_schedules (
 CREATE INDEX IF NOT EXISTS idx_hvac_delivery_schedules_account ON hvac_delivery_schedules(account_id);
 CREATE INDEX IF NOT EXISTS idx_hvac_delivery_schedules_enrollment ON hvac_delivery_schedules(enrollment_id);
 
+-- 2bb. Unit HVAC Status
+CREATE TABLE IF NOT EXISTS unit_hvac_status (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  account_id UUID NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+  unit_id UUID NOT NULL REFERENCES units(id) ON DELETE CASCADE,
+  condition TEXT NOT NULL CHECK (condition IN ('good', 'monitor', 'service', 'replace')),
+  last_serviced_date DATE,
+  notes TEXT,
+  created_by UUID REFERENCES auth.users(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_unit_hvac_status_account ON unit_hvac_status(account_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_unit_hvac_status_unit ON unit_hvac_status(unit_id, created_at DESC);
+
 -- 2b. Optional migration from legacy HVAC tables (if they exist)
 DO $$
 BEGIN
@@ -161,6 +177,15 @@ BEGIN
   END IF;
 END$$;
 
+-- 2c. HVAC annual renewal fields (legacy + program enrollments)
+ALTER TABLE IF EXISTS hvac_filter_subscriptions
+  ADD COLUMN IF NOT EXISTS annual_expires_on DATE,
+  ADD COLUMN IF NOT EXISTS annual_renewal_reminder_sent_at TIMESTAMPTZ;
+
+ALTER TABLE IF EXISTS hvac_program_enrollments
+  ADD COLUMN IF NOT EXISTS annual_expires_on DATE,
+  ADD COLUMN IF NOT EXISTS annual_renewal_reminder_sent_at TIMESTAMPTZ;
+
 -- 2c. Emergency Support Config (from 004_maintenance_enhancements.sql)
 CREATE TABLE IF NOT EXISTS emergency_support_config (
   account_id UUID PRIMARY KEY REFERENCES accounts(id) ON DELETE CASCADE,
@@ -199,6 +224,71 @@ CREATE TABLE IF NOT EXISTS maintenance_assignments (
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- 2e. User profile contact fields
+ALTER TABLE IF EXISTS user_profiles
+  ADD COLUMN IF NOT EXISTS full_name TEXT,
+  ADD COLUMN IF NOT EXISTS phone TEXT;
+
+-- 2f. Vendor lookup RPC with configurable radius
+CREATE OR REPLACE FUNCTION find_available_vendors(
+  p_account_id UUID,
+  p_category TEXT,
+  p_property_zip TEXT,
+  p_limit INTEGER DEFAULT 10,
+  p_radius_miles INTEGER DEFAULT NULL
+)
+RETURNS TABLE (
+  vendor_id UUID,
+  business_name TEXT,
+  rating NUMERIC,
+  jobs_completed INTEGER,
+  hourly_rate NUMERIC
+)
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  RETURN QUERY
+  SELECT
+    vp.id,
+    vp.business_name,
+    vp.avg_rating,
+    vp.total_jobs_completed,
+    COALESCE(vs.base_rate, 85)::NUMERIC
+  FROM vendor_profiles vp
+  LEFT JOIN vendor_services vs
+    ON vs.vendor_profile_id = vp.id
+   AND vs.account_id = vp.account_id
+   AND (p_category IS NULL OR vs.service_type = p_category)
+  WHERE vp.account_id = p_account_id
+    AND vp.is_active = true
+    AND (
+      p_category IS NULL OR EXISTS (
+        SELECT 1
+        FROM vendor_services vs2
+        WHERE vs2.vendor_profile_id = vp.id
+          AND vs2.account_id = vp.account_id
+          AND vs2.service_type = p_category
+      )
+    )
+    AND (
+      p_radius_miles IS NULL
+      OR vs.service_radius_miles IS NULL
+      OR vs.service_radius_miles >= p_radius_miles
+    )
+  ORDER BY
+    CASE
+      WHEN p_property_zip IS NULL OR vp.zip IS NULL THEN 999
+      WHEN vp.zip = p_property_zip THEN 0
+      ELSE 25
+    END,
+    vp.avg_rating DESC,
+    vp.total_jobs_completed DESC
+  LIMIT COALESCE(p_limit, 10);
+END;
+$$;
 
 CREATE INDEX IF NOT EXISTS idx_maintenance_assignments_account ON maintenance_assignments(account_id);
 CREATE INDEX IF NOT EXISTS idx_maintenance_assignments_request ON maintenance_assignments(request_id);
@@ -538,6 +628,10 @@ $$;
 
 GRANT EXECUTE ON FUNCTION get_overdue_payments(UUID) TO authenticated;
 GRANT EXECUTE ON FUNCTION get_overdue_payments(UUID) TO service_role;
+
+-- 9. Leases: add auto-pay flag for collection stats
+ALTER TABLE leases
+  ADD COLUMN IF NOT EXISTS auto_pay_enabled BOOLEAN DEFAULT false;
 
 -- 9. Tenant screening metrics RPC (optional, avoids 404)
 CREATE OR REPLACE FUNCTION get_tenant_screening_metrics(p_account_id UUID)

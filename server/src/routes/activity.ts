@@ -4,6 +4,7 @@ import { Permissions } from '../middleware/rbac';
 import {
   getActivityEvents,
   getActivityStats,
+  logActivityEvent,
   ActivityFilters,
 } from '../services/activityService';
 
@@ -72,6 +73,47 @@ router.get('/stats', authenticate, Permissions.readAnalytics, async (req: AuthRe
     console.error('Activity stats error:', error);
     res.status(500).json({
       error: 'Failed to fetch activity statistics',
+      details: error instanceof Error ? error.message : 'Unknown error',
+    });
+  }
+});
+
+/**
+ * POST /api/activity/log
+ * Log a new activity event
+ */
+router.post('/log', authenticate, Permissions.createMaintenance, async (req: AuthRequest, res) => {
+  try {
+    if (!req.user?.accountId) {
+      res.status(400).json({ error: 'Account ID required' });
+      return;
+    }
+
+    const { eventType, summary, entityType, entityId, metadata } = req.body || {};
+    if (!eventType || !summary) {
+      res.status(400).json({ error: 'eventType and summary are required' });
+      return;
+    }
+
+    const id = await logActivityEvent(
+      req.user.accountId,
+      req.user.id || null,
+      eventType,
+      summary,
+      {
+        entityType,
+        entityId,
+        metadata,
+        ipAddress: req.ip,
+        userAgent: req.get('user-agent') || undefined,
+      }
+    );
+
+    res.status(201).json({ id });
+  } catch (error) {
+    console.error('Activity log error:', error);
+    res.status(500).json({
+      error: 'Failed to log activity event',
       details: error instanceof Error ? error.message : 'Unknown error',
     });
   }

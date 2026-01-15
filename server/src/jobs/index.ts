@@ -315,6 +315,8 @@ async function updatePropertyStats(): Promise<void> {
 
 import { accessCodeExpirationJob } from './accessCodeExpirationJob';
 import { processReminders as processAutomatedReminders } from './remindersJob';
+import { processHVACFilterRenewals } from './hvacFilterRenewalJob';
+import { processAutoPayPayments } from './autoPayJob';
 
 // Process automated reminders every 5 minutes
 registerJob({
@@ -353,6 +355,22 @@ registerJob({
   name: 'update-property-stats',
   interval: 15 * 60 * 1000, // 15 minutes
   handler: updatePropertyStats,
+  enabled: true,
+});
+
+// Process auto-pay rent payments every day
+registerJob({
+  name: 'process-auto-payments',
+  interval: 24 * 60 * 60 * 1000, // 24 hours
+  handler: processAutoPayPayments,
+  enabled: true,
+});
+
+// Process HVAC filter renewal reminders daily
+registerJob({
+  name: 'process-hvac-filter-renewals',
+  interval: 24 * 60 * 60 * 1000, // 24 hours
+  handler: processHVACFilterRenewals,
   enabled: true,
 });
 

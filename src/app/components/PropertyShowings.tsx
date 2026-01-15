@@ -1,5 +1,5 @@
 import { Key, Clock, CircleCheck, Calendar, RefreshCw, Trash2 } from 'lucide-react';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useHasFeature } from '../hooks/usePlanGating';
 import { useThemeStyles } from '../hooks/useThemeStyles';
 import { FeatureGate } from './UpgradeCTA';
@@ -8,9 +8,7 @@ import { ErrorState } from './ErrorBoundary';
 import {
   useUpcomingShowings,
   useAvailableProperties,
-  useShowingStats,
 } from '../../lib/hooks/useShowings';
-import { formatRelativeTime } from '../../lib/utils/dateHelpers';
 import { ScheduleShowingModal } from './ScheduleShowingModal';
 import { markShowingReminderSent, deleteShowing } from '../../lib/api/showings';
 
@@ -31,7 +29,6 @@ export function PropertyShowings() {
   // Fetch data
   const { data: showings, loading: showingsLoading, error: showingsError, refetch: refetchShowings } = useUpcomingShowings();
   const { data: availableProperties, loading: propertiesLoading } = useAvailableProperties();
-  const { data: stats, loading: statsLoading, refetch: refetchStats } = useShowingStats();
 
   // Handle sending reminder
   const handleSendReminder = async (showing: any) => {
@@ -93,7 +90,6 @@ export function PropertyShowings() {
       setDeletingShowingId(showing.id);
       await deleteShowing(showing.id);
       await refetchShowings();
-      await refetchStats();
     } catch (error) {
       console.error('Failed to delete showing:', error);
       alert('Failed to delete showing. Please try again.');
@@ -117,7 +113,7 @@ export function PropertyShowings() {
   }));
 
   // Show loading state
-  if (showingsLoading || statsLoading) {
+  if (showingsLoading) {
     return <LoadingPage />;
   }
 
@@ -126,13 +122,45 @@ export function PropertyShowings() {
     return <ErrorState error={showingsError} retry={refetchShowings} />;
   }
 
+  const { scheduledToday, totalThisWeek, nextSevenDays, thisMonth } = useMemo(() => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const tomorrow = new Date(today);
+    tomorrow.setDate(today.getDate() + 1);
+    const startOfWeek = new Date(today);
+    startOfWeek.setDate(today.getDate() - today.getDay());
+    const sevenDaysOut = new Date(today);
+    sevenDaysOut.setDate(today.getDate() + 7);
+    const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+    const startOfNextMonth = new Date(today.getFullYear(), today.getMonth() + 1, 1);
+
+    return {
+      scheduledToday: showings.filter((showing) => {
+        const showingDate = new Date(showing.showing_date);
+        return showingDate >= today && showingDate < tomorrow;
+      }).length,
+      totalThisWeek: showings.filter((showing) => {
+        const showingDate = new Date(showing.showing_date);
+        return showingDate >= startOfWeek;
+      }).length,
+      nextSevenDays: showings.filter((showing) => {
+        const showingDate = new Date(showing.showing_date);
+        return showingDate >= today && showingDate < sevenDaysOut;
+      }).length,
+      thisMonth: showings.filter((showing) => {
+        const showingDate = new Date(showing.showing_date);
+        return showingDate >= startOfMonth && showingDate < startOfNextMonth;
+      }).length,
+    };
+  }, [showings]);
+
   // Prepare stats display
-  const showingStatsDisplay = stats ? [
-    { label: 'Scheduled Today', value: stats.scheduled_today.toString() },
-    { label: 'Total This Week', value: stats.total_this_week.toString() },
-    { label: 'Avg. Response Time', value: `${stats.avg_response_time} hrs` },
-    { label: 'Conversion Rate', value: `${stats.conversion_rate}%` },
-  ] : [];
+  const showingStatsDisplay = [
+    { label: 'Scheduled Today', value: scheduledToday.toString() },
+    { label: 'Total This Week', value: totalThisWeek.toString() },
+    { label: 'Next 7 Days', value: nextSevenDays.toString() },
+    { label: 'This Month', value: thisMonth.toString() },
+  ];
 
   return (
     <FeatureGate
@@ -368,30 +396,30 @@ export function PropertyShowings() {
               <h3 className="text-xl mb-4" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
                 SHOWING METRICS
               </h3>
-              {stats && (
+              {showings.length > 0 && (
                 <div className="space-y-4">
                   <div className="flex justify-between items-center">
                     <span className={`text-sm ${text.secondary}`}>Today's Showings</span>
                     <span className="text-lg font-bold" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
-                      {stats.scheduled_today}
+                      {scheduledToday}
                     </span>
                   </div>
                   <div className="flex justify-between items-center">
                     <span className={`text-sm ${text.secondary}`}>This Week</span>
                     <span className="text-lg font-bold" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
-                      {stats.total_this_week}
+                      {totalThisWeek}
                     </span>
                   </div>
                   <div className="flex justify-between items-center">
-                    <span className={`text-sm ${text.secondary}`}>Conversion Rate</span>
+                    <span className={`text-sm ${text.secondary}`}>Next 7 Days</span>
                     <span className="text-lg font-bold text-emerald-400" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
-                      {stats.conversion_rate}%
+                      {nextSevenDays}
                     </span>
                   </div>
                   <div className="flex justify-between items-center">
-                    <span className={`text-sm ${text.secondary}`}>Avg. Response</span>
+                    <span className={`text-sm ${text.secondary}`}>This Month</span>
                     <span className="text-lg font-bold" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
-                      {stats.avg_response_time}h
+                      {thisMonth}
                     </span>
                   </div>
                 </div>

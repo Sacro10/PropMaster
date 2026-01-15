@@ -40,9 +40,33 @@ export interface HVACProgramByProperty {
   property_id: string;
   property_name: string;
   unit_count: number;
+  total_units: number | null;
   next_delivery: string | null;
   total_filters: number;
   status: string;
+}
+
+export interface HVACVendorOption {
+  id: string;
+  businessName: string;
+  rating: number;
+  jobsCompleted: number;
+  hourlyRate: number;
+  email: string | null;
+  phone?: string | null;
+  website?: string | null;
+  address?: string | null;
+  source: 'local' | 'nominatim';
+}
+
+export interface HVACStatusEntry {
+  id: string;
+  unitId: string;
+  condition: 'good' | 'monitor' | 'service' | 'replace';
+  lastServicedDate: string | null;
+  notes: string | null;
+  createdBy: string | null;
+  createdAt: string;
 }
 
 export interface RoutingMetrics {
@@ -56,6 +80,14 @@ export interface EmergencySupportConfig {
   notificationPhone: string | null;
   notificationEmail: string | null;
   notificationChannels: string[];
+}
+
+export interface ActivityLogPayload {
+  eventType: string;
+  summary: string;
+  entityType?: string;
+  entityId?: string;
+  metadata?: Record<string, unknown>;
 }
 
 /**
@@ -178,7 +210,8 @@ export async function getHVACProgramByProperty(): Promise<HVACProgramByProperty[
           property_id,
           properties (
             id,
-            name
+            name,
+            total_units
           )
         )
       `)
@@ -202,6 +235,7 @@ export async function getHVACProgramByProperty(): Promise<HVACProgramByProperty[
           property_id: propertyId,
           property_name: property.name,
           unit_count: 0,
+          total_units: property.total_units ?? null,
           next_delivery: null,
           total_filters: 0,
           status: 'scheduled',
@@ -224,6 +258,110 @@ export async function getHVACProgramByProperty(): Promise<HVACProgramByProperty[
   } catch (error) {
     console.error('[Maintenance Metrics API] Error fetching HVAC program:', error);
     return [];
+  }
+}
+
+export async function getHVACVendors(
+  propertyId: string,
+  radiusMiles?: number,
+  includeExternal: boolean = true
+): Promise<HVACVendorOption[]> {
+  try {
+    const authHeaders = await getAuthHeaders();
+    const query = new URLSearchParams({ propertyId, includeExternal: includeExternal ? 'true' : 'false' });
+    if (typeof radiusMiles === 'number') {
+      query.set('radiusMiles', radiusMiles.toString());
+    }
+    const response = await fetch(`${API_BASE}/api/hvac/vendors?${query.toString()}`, {
+      method: 'GET',
+      headers: {
+        ...authHeaders,
+        'Content-Type': 'application/json',
+      },
+    });
+
+    if (!response.ok) {
+      throw await parseErrorResponse(response, 'Failed to fetch HVAC vendors');
+    }
+
+    return await response.json();
+  } catch (error) {
+    console.error('[Maintenance Metrics API] Error fetching HVAC vendors:', error);
+    throw error;
+  }
+}
+
+export async function getUnitHVACStatus(unitId: string, limit: number = 5): Promise<HVACStatusEntry[]> {
+  try {
+    const authHeaders = await getAuthHeaders();
+    const params = new URLSearchParams({ unitId, limit: limit.toString() });
+    const response = await fetch(`${API_BASE}/api/hvac/status?${params.toString()}`, {
+      method: 'GET',
+      headers: {
+        ...authHeaders,
+        'Content-Type': 'application/json',
+      },
+    });
+
+    if (!response.ok) {
+      throw await parseErrorResponse(response, 'Failed to fetch HVAC status');
+    }
+
+    return await response.json();
+  } catch (error) {
+    console.error('[Maintenance Metrics API] Error fetching HVAC status:', error);
+    throw error;
+  }
+}
+
+export async function createUnitHVACStatus(payload: {
+  unitId: string;
+  condition: 'good' | 'monitor' | 'service' | 'replace';
+  lastServicedDate?: string | null;
+  notes?: string | null;
+}): Promise<HVACStatusEntry> {
+  try {
+    const authHeaders = await getAuthHeaders();
+    const response = await fetch(`${API_BASE}/api/hvac/status`, {
+      method: 'POST',
+      headers: {
+        ...authHeaders,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    });
+
+    if (!response.ok) {
+      throw await parseErrorResponse(response, 'Failed to create HVAC status');
+    }
+
+    return await response.json();
+  } catch (error) {
+    console.error('[Maintenance Metrics API] Error creating HVAC status:', error);
+    throw error;
+  }
+}
+
+export async function logActivity(payload: ActivityLogPayload): Promise<{ id: string }> {
+  try {
+    const authHeaders = await getAuthHeaders();
+    const response = await fetch(`${API_BASE}/api/activity/log`, {
+      method: 'POST',
+      headers: {
+        ...authHeaders,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    });
+
+    if (!response.ok) {
+      throw await parseErrorResponse(response, 'Failed to log activity');
+    }
+
+    return await response.json();
+  } catch (error) {
+    console.error('[Maintenance Metrics API] Error logging activity:', error);
+    throw error;
   }
 }
 

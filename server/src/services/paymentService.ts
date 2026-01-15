@@ -173,22 +173,27 @@ export async function getOverduePayments(accountId: string): Promise<OverduePaym
 /**
  * Get collection statistics
  */
-export async function getCollectionStatistics(accountId: string): Promise<CollectionStats> {
-  // Try view first
-  const { data: viewData, error: viewError } = await supabase
-    .from('collection_stats_by_account')
-    .select('*')
-    .eq('account_id', accountId)
-    .maybeSingle();
+export async function getCollectionStatistics(
+  accountId: string,
+  options?: { forceLive?: boolean }
+): Promise<CollectionStats> {
+  if (!options?.forceLive) {
+    // Try view first for performance unless we need live values.
+    const { data: viewData, error: viewError } = await supabase
+      .from('collection_stats_by_account')
+      .select('*')
+      .eq('account_id', accountId)
+      .maybeSingle();
 
-  if (!viewError && viewData) {
-    return {
-      collectedThisMonth: Number(viewData.collected_this_month || 0),
-      collectionRate: Number(viewData.collection_rate || 0),
-      autoPayEnrolled: Number(viewData.auto_pay_enrollment_rate || 0),
-      avgCollectionTime: Number(viewData.avg_collection_days || 0),
-      overdueCount: Number(viewData.overdue_count || 0),
-    };
+    if (!viewError && viewData) {
+      return {
+        collectedThisMonth: Number(viewData.collected_this_month || 0),
+        collectionRate: Number(viewData.collection_rate || 0),
+        autoPayEnrolled: Number(viewData.auto_pay_enrollment_rate || 0),
+        avgCollectionTime: Number(viewData.avg_collection_days || 0),
+        overdueCount: Number(viewData.overdue_count || 0),
+      };
+    }
   }
 
   // Fallback to manual calculation

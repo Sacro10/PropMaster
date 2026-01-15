@@ -3,6 +3,7 @@ import { useThemeStyles } from '../hooks/useThemeStyles';
 import { useHasFeature } from '../hooks/usePlanGating';
 import { FeatureGate, LockedFeatureCard } from './UpgradeCTA';
 import { useTenants, useRentalApplications, useTenantMetrics } from '../../lib/hooks/useTenants';
+import { useActivityEvents } from '../../lib/hooks/useActivity';
 import { LoadingPage } from './LoadingSpinner';
 import { ErrorState } from './ErrorBoundary';
 import { formatCurrency } from '../../lib/utils/currencyHelpers';
@@ -12,7 +13,8 @@ import { ApplicationDetailModal } from './ApplicationDetailModal';
 import { NewApplicationForm, type ApplicationFormData } from './NewApplicationForm';
 import { createApplication } from '../../lib/api/applications';
 import { runScreening } from '../../lib/api/applications';
-import { deleteTenant } from '../../lib/api/tenants';
+import { deleteTenant, setLeaseAutoPay } from '../../lib/api/tenants';
+import { Switch } from './ui/switch';
 
 export function TenantManagement() {
   const { isDark, bg, text, border } = useThemeStyles();
@@ -22,6 +24,7 @@ export function TenantManagement() {
   const [selectedApplication, setSelectedApplication] = useState<any>(null);
   const [showNewApplicationForm, setShowNewApplicationForm] = useState(false);
   const [deletingTenantId, setDeletingTenantId] = useState<string | null>(null);
+  const [autoPayUpdating, setAutoPayUpdating] = useState<Record<string, boolean>>({});
 
   // Feature checks for plan gating
   const tenantScreening = useHasFeature('tenant_screening');
@@ -30,6 +33,7 @@ export function TenantManagement() {
   // Fetch data
   const { data: tenants, loading: tenantsLoading, error: tenantsError, refetch: refetchTenants } = useTenants();
   const { data: applications, loading: appsLoading, error: appsError, refetch: refetchApps, approve, reject } = useRentalApplications();
+  const { data: leaseTerminations } = useActivityEvents({ eventType: 'lease_terminated', limit: 200 });
   const pendingApplications = useMemo(
     () => applications.filter(app => ['submitted', 'under_review'].includes(app.status)),
     [applications]
@@ -111,6 +115,29 @@ export function TenantManagement() {
     }
   };
 
+  const handleAutoPayToggle = async (tenant: any, enabled: boolean) => {
+    const leaseId = tenant?.lease?.id;
+    if (!leaseId) {
+      alert('Unable to update auto-pay without an active lease.');
+      return;
+    }
+
+    setAutoPayUpdating((prev) => ({ ...prev, [leaseId]: true }));
+    try {
+      await setLeaseAutoPay(leaseId, enabled);
+      await refetchTenants();
+    } catch (error) {
+      console.error('Failed to update auto-pay:', error);
+      alert('Failed to update auto-pay. Please try again.');
+    } finally {
+      setAutoPayUpdating((prev) => {
+        const next = { ...prev };
+        delete next[leaseId];
+        return next;
+      });
+    }
+  };
+
   // Handle new application submission
   const handleNewApplication = async (data: ApplicationFormData) => {
     try {
@@ -151,22 +178,14 @@ export function TenantManagement() {
 
   // Calculate metrics from actual data with AI-powered insights
   const calculatedMetrics = useMemo(() => {
-    const baseMetrics = metrics || {
-      ai_accuracy: 0,
-      avg_screening_time: 0,
-      eviction_rate: 0,
-      acceptance_rate: 0,
-    };
-
-    // Start with API metrics
-    let aiAccuracy = baseMetrics.ai_accuracy;
-    let avgScreeningTime = baseMetrics.avg_screening_time;
-    let evictionRate = baseMetrics.eviction_rate;
-    let acceptanceRate = baseMetrics.acceptance_rate;
-    let aiAccuracySamples = aiAccuracy > 0 ? 1 : 0;
-    let avgScreeningSamples = avgScreeningTime > 0 ? 1 : 0;
-    let evictionSamples = evictionRate > 0 ? 1 : 0;
-    let acceptanceSamples = acceptanceRate > 0 ? 1 : 0;
+    let aiAccuracy = 0;
+    let avgScreeningTime = 0;
+    let evictionRate = 0;
+    let acceptanceRate = 0;
+    let aiAccuracySamples = 0;
+    let avgScreeningSamples = 0;
+    let evictionSamples = 0;
+    let acceptanceSamples = 0;
 
     const normalizeBackgroundStatus = (value: unknown) => {
       if (!value) return null;
@@ -177,44 +196,31 @@ export function TenantManagement() {
       return status;
     };
 
-    // Calculate from tenant profiles if available
-    if (tenants.length > 0) {
-      const tenantsWithAI = tenants
-        .map(t => ({ ...t, normalized_status: normalizeBackgroundStatus(t.background_check_status) }))
-        .filter(t => t.ai_risk_score && t.normalized_status);
-      if (tenantsWithAI.length > 0 && aiAccuracy === 0) {
-        // AI accuracy: how well the AI score predicted actual background check results
-        const accurate = tenantsWithAI.filter(t =>
-          (t.ai_risk_score! >= 70 && t.normalized_status === 'approved') ||
-          (t.ai_risk_score! < 70 && (t.normalized_status === 'rejected' || t.normalized_status === 'pending'))
-        ).length;
-        aiAccuracy = Math.round((accurate / tenantsWithAI.length) * 100);
-        aiAccuracySamples = tenantsWithAI.length;
-      }
-
-      // Eviction rate from actual tenant data
-      const movedOutTenants = tenants.filter(t => t.move_out_date);
-      if (movedOutTenants.length > 0 && evictionRate === 0) {
-        const evictions = movedOutTenants.filter(t =>
-          t.screening_notes?.toLowerCase().includes('eviction') ||
-          t.ai_risk_score && t.ai_risk_score < 50
-        ).length;
-        evictionRate = (evictions / movedOutTenants.length) * 100;
-        evictionSamples = movedOutTenants.length;
-      }
-    }
+    const getApplicationData = (application: any) =>
+      application.application_data || application.applicationData || {};
 
     const deriveApplicationRiskScore = (application: any) => {
       const parts: Array<{ score: number; weight: number }> = [];
+      const applicationData = getApplicationData(application);
+      const creditScore =
+        application.credit_score ??
+        applicationData.creditScore ??
+        applicationData.credit_score ??
+        null;
+      const income =
+        application.monthly_income ??
+        applicationData.monthlyIncome ??
+        applicationData.monthly_income ??
+        null;
 
-      if (application.credit_score !== null && application.credit_score !== undefined) {
-        const normalized = Math.min(100, Math.max(0, ((Number(application.credit_score) - 300) / 550) * 100));
+      if (creditScore !== null && creditScore !== undefined) {
+        const normalized = Math.min(100, Math.max(0, ((Number(creditScore) - 300) / 550) * 100));
         parts.push({ score: Math.round(normalized), weight: 0.6 });
       }
 
       const rentAmount = application.unit?.rent_amount || application.unit?.rentAmount || 0;
-      if (application.monthly_income !== null && application.monthly_income !== undefined && rentAmount > 0) {
-        const ratio = Number(application.monthly_income) / Number(rentAmount);
+      if (income !== null && income !== undefined && rentAmount > 0) {
+        const ratio = Number(income) / Number(rentAmount);
         const ratioScore =
           ratio >= 3 ? 100 :
           ratio >= 2.5 ? 90 :
@@ -232,13 +238,11 @@ export function TenantManagement() {
       return Math.min(100, Math.max(0, Math.round(weightedScore)));
     };
 
-    // Calculate from applications data
     if (applications.length > 0) {
-      // Average screening time in hours
       const reviewed = applications.filter(a =>
         a.created_at && (a.reviewed_at || (a.updated_at && (a.status === 'approved' || a.status === 'rejected')))
       );
-      if (reviewed.length > 0 && avgScreeningTime === 0) {
+      if (reviewed.length > 0) {
         const totalHours = reviewed.reduce((sum, a) => {
           const created = new Date(a.created_at).getTime();
           const reviewedTime = new Date(a.reviewed_at || a.updated_at!).getTime();
@@ -248,27 +252,47 @@ export function TenantManagement() {
         avgScreeningSamples = reviewed.length;
       }
 
-      // Acceptance rate
       const decidedApps = applications.filter(a => a.status === 'approved' || a.status === 'rejected');
-      if (decidedApps.length > 0 && acceptanceRate === 0) {
+      if (decidedApps.length > 0) {
         const approved = decidedApps.filter(a => a.status === 'approved').length;
         acceptanceRate = (approved / decidedApps.length) * 100;
         acceptanceSamples = decidedApps.length;
       }
 
-      // AI-enhanced accuracy: also check application AI scores
-      if (aiAccuracy === 0) {
-        const appsWithScores = applications
-          .map(a => ({ application: a, riskScore: a.ai_risk_score ?? deriveApplicationRiskScore(a) }))
-          .filter(entry => entry.riskScore !== null && entry.application.status && !['submitted', 'under_review'].includes(entry.application.status));
-        if (appsWithScores.length > 0) {
-          const accurate = appsWithScores.filter(entry =>
-            (entry.riskScore! >= 75 && entry.application.status === 'approved') ||
-            (entry.riskScore! < 75 && entry.application.status === 'rejected')
-          ).length;
-          aiAccuracy = Math.round((accurate / appsWithScores.length) * 100);
-          aiAccuracySamples = appsWithScores.length;
-        }
+      const appsWithScores = applications
+        .map(a => ({ application: a, riskScore: deriveApplicationRiskScore(a) }))
+        .filter(entry => entry.riskScore !== null && entry.application.status && !['submitted', 'under_review'].includes(entry.application.status));
+      if (appsWithScores.length > 0) {
+        const accurate = appsWithScores.filter(entry =>
+          (entry.riskScore! >= 75 && entry.application.status === 'approved') ||
+          (entry.riskScore! < 75 && entry.application.status === 'rejected')
+        ).length;
+        aiAccuracy = Math.round((accurate / appsWithScores.length) * 100);
+        aiAccuracySamples = appsWithScores.length;
+      }
+
+      const evictionSignals = applications.filter((application) => {
+        const applicationData = getApplicationData(application);
+        const evictionHistory =
+          applicationData.evictionHistory ??
+          applicationData.eviction_history ??
+          null;
+        const backgroundStatus = normalizeBackgroundStatus(
+          application.background_check_status ??
+          applicationData.backgroundCheckStatus ??
+          applicationData.background_check_status ??
+          null
+        );
+        return evictionHistory === true || backgroundStatus === 'rejected';
+      });
+      const earlyTerminationCount = (leaseTerminations || []).filter(
+        (event) => event.metadata?.deletedBeforeEnd === true
+      ).length;
+      const evictionCount = evictionSignals.length + earlyTerminationCount;
+      const totalPopulation = applications.length;
+      if (totalPopulation > 0) {
+        evictionRate = Math.min(100, (evictionCount / totalPopulation) * 100);
+        evictionSamples = totalPopulation;
       }
     }
 
@@ -282,7 +306,7 @@ export function TenantManagement() {
       evictionSamples,
       acceptanceSamples,
     };
-  }, [metrics, applications, tenants]);
+  }, [applications, leaseTerminations]);
 
   const screeningMetrics = calculatedMetrics ? [
     {
@@ -527,6 +551,21 @@ export function TenantManagement() {
                       <div className="text-right">
                         <p className={`text-sm ${text.muted} mb-1`}>Lease Ends</p>
                         <p className="text-sm">{tenant.lease?.lease_end ? formatDisplayDate(tenant.lease.lease_end, 'MMM yyyy') : 'N/A'}</p>
+                      </div>
+
+                      <div className="text-right">
+                        <p className={`text-sm ${text.muted} mb-1`}>Auto-Pay</p>
+                        <div className="flex items-center justify-end gap-2">
+                          <Switch
+                            checked={Boolean(tenant.lease?.auto_pay_enabled)}
+                            onCheckedChange={(checked) => handleAutoPayToggle(tenant, checked)}
+                            disabled={tenant.lease?.id ? Boolean(autoPayUpdating[tenant.lease.id]) : true}
+                            aria-label={`Toggle auto-pay for ${tenant.full_name || 'tenant'}`}
+                          />
+                          <span className={`text-xs ${text.muted}`}>
+                            {tenant.lease?.auto_pay_enabled ? 'On' : 'Off'}
+                          </span>
+                        </div>
                       </div>
 
                       <div>

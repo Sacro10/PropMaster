@@ -6,6 +6,8 @@ export type SubscriptionTier = 'basic' | 'pro' | 'premium'
 export interface UserProfile {
   id: string
   email: string
+  full_name?: string | null
+  phone?: string | null
   subscription_tier: SubscriptionTier
   stripe_customer_id?: string
   stripe_subscription_id?: string
