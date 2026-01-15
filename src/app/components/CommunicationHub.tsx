@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react';
-import { MessageSquare, Bell, Search, CircleCheck, Clock, RefreshCw } from 'lucide-react';
+import { MessageSquare, Bell, Search, CircleCheck, Clock, RefreshCw, Trash2 } from 'lucide-react';
 import { useHasFeature } from '../hooks/usePlanGating';
 import { useThemeStyles } from '../hooks/useThemeStyles';
 import { FeatureGate } from './UpgradeCTA';
@@ -18,6 +18,7 @@ import {
 } from '../../lib/hooks/useCommunications';
 import { formatRelativeTime } from '../../lib/utils/dateHelpers';
 import { NewReminderModal } from './NewReminderModal';
+import { deleteAutomatedReminder } from '../../lib/api/communicationsClient';
 
 export function CommunicationHub() {
   const { isDark, text, border } = useThemeStyles();
@@ -64,6 +65,7 @@ export function CommunicationHub() {
   const [templateBody, setTemplateBody] = useState('');
   const [templateVariables, setTemplateVariables] = useState('');
   const [templateError, setTemplateError] = useState<string | null>(null);
+  const [deletingReminderId, setDeletingReminderId] = useState<string | null>(null);
   const aiPanelRef = useRef<HTMLDivElement | null>(null);
 
   // Show loading state
@@ -270,6 +272,23 @@ export function CommunicationHub() {
       frequency,
     };
   });
+
+  const handleDeleteReminder = async (reminder: any) => {
+    const name = reminder?.reminderType || reminder?.name || 'this reminder';
+    const confirmed = confirm(`Delete ${name}? This action cannot be undone.`);
+    if (!confirmed) return;
+
+    try {
+      setDeletingReminderId(reminder.id);
+      await deleteAutomatedReminder(reminder.id);
+      await refetchReminders();
+    } catch (error) {
+      console.error('Failed to delete reminder:', error);
+      alert('Failed to delete reminder. Please try again.');
+    } finally {
+      setDeletingReminderId(null);
+    }
+  };
 
   const filteredConversations = conversations.filter((conversation) => {
     const term = conversationSearch.trim().toLowerCase();
@@ -795,7 +814,7 @@ export function CommunicationHub() {
             </div>
             <div>
               <h3 className="text-2xl" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
-                AUTOMATED REMINDERS
+                REMINDERS
               </h3>
               <p className={`text-sm ${text.muted}`}>Schedule and manage automated tenant communications</p>
             </div>
@@ -822,7 +841,7 @@ export function CommunicationHub() {
           <div className="text-center py-12">
             <Bell className={`w-12 h-12 mx-auto mb-4 ${text.inactive}`} />
             <p className={text.muted} style={{ fontFamily: 'Work Sans, sans-serif' }}>
-              No automated reminders configured
+              No reminders configured
             </p>
           </div>
         ) : (
@@ -881,15 +900,28 @@ export function CommunicationHub() {
                   </p>
                 </div>
 
-                <button
-                  onClick={() => {
-                    setEditingReminder(reminder.raw);
-                    setReminderModalOpen(true);
-                  }}
-                  className={`w-full py-2 ${isDark ? 'bg-white/5 hover:bg-white/10' : 'bg-gray-100 hover:bg-gray-200'} rounded-lg text-sm transition-colors`}
-                >
-                  Edit Schedule
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => {
+                      setEditingReminder(reminder.raw);
+                      setReminderModalOpen(true);
+                    }}
+                    className={`flex-1 py-2 ${isDark ? 'bg-white/5 hover:bg-white/10' : 'bg-gray-100 hover:bg-gray-200'} rounded-lg text-sm transition-colors`}
+                  >
+                    Edit Schedule
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleDeleteReminder(reminder)}
+                    disabled={deletingReminderId === reminder.id}
+                    className={`p-2 rounded-lg transition-colors ${
+                      isDark ? 'bg-white/5 hover:bg-white/10' : 'bg-gray-100 hover:bg-gray-200'
+                    } ${deletingReminderId === reminder.id ? 'opacity-50 cursor-not-allowed' : ''}`}
+                    title="Delete reminder"
+                  >
+                    <Trash2 className="w-4 h-4 text-red-400" />
+                  </button>
+                </div>
               </div>
             ))}
           </div>

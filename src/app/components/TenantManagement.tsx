@@ -30,6 +30,10 @@ export function TenantManagement() {
   // Fetch data
   const { data: tenants, loading: tenantsLoading, error: tenantsError, refetch: refetchTenants } = useTenants();
   const { data: applications, loading: appsLoading, error: appsError, refetch: refetchApps, approve, reject } = useRentalApplications();
+  const pendingApplications = useMemo(
+    () => applications.filter(app => ['submitted', 'under_review'].includes(app.status)),
+    [applications]
+  );
   const { data: metrics, loading: metricsLoading, error: metricsError, refetch: refetchMetrics } = useTenantMetrics();
 
   // Filter tenants based on search query with memoization for performance
@@ -159,17 +163,33 @@ export function TenantManagement() {
     let avgScreeningTime = baseMetrics.avg_screening_time;
     let evictionRate = baseMetrics.eviction_rate;
     let acceptanceRate = baseMetrics.acceptance_rate;
+    let aiAccuracySamples = aiAccuracy > 0 ? 1 : 0;
+    let avgScreeningSamples = avgScreeningTime > 0 ? 1 : 0;
+    let evictionSamples = evictionRate > 0 ? 1 : 0;
+    let acceptanceSamples = acceptanceRate > 0 ? 1 : 0;
+
+    const normalizeBackgroundStatus = (value: unknown) => {
+      if (!value) return null;
+      const status = String(value).toLowerCase();
+      if (['approved', 'passed', 'clear'].includes(status)) return 'approved';
+      if (['rejected', 'failed', 'deny', 'denied'].includes(status)) return 'rejected';
+      if (['pending', 'in_progress', 'waived', 'review'].includes(status)) return 'pending';
+      return status;
+    };
 
     // Calculate from tenant profiles if available
     if (tenants.length > 0) {
-      const tenantsWithAI = tenants.filter(t => t.ai_risk_score && t.background_check_status);
+      const tenantsWithAI = tenants
+        .map(t => ({ ...t, normalized_status: normalizeBackgroundStatus(t.background_check_status) }))
+        .filter(t => t.ai_risk_score && t.normalized_status);
       if (tenantsWithAI.length > 0 && aiAccuracy === 0) {
         // AI accuracy: how well the AI score predicted actual background check results
         const accurate = tenantsWithAI.filter(t =>
-          (t.ai_risk_score! >= 70 && t.background_check_status === 'approved') ||
-          (t.ai_risk_score! < 70 && (t.background_check_status === 'rejected' || t.background_check_status === 'pending'))
+          (t.ai_risk_score! >= 70 && t.normalized_status === 'approved') ||
+          (t.ai_risk_score! < 70 && (t.normalized_status === 'rejected' || t.normalized_status === 'pending'))
         ).length;
         aiAccuracy = Math.round((accurate / tenantsWithAI.length) * 100);
+        aiAccuracySamples = tenantsWithAI.length;
       }
 
       // Eviction rate from actual tenant data
@@ -180,20 +200,52 @@ export function TenantManagement() {
           t.ai_risk_score && t.ai_risk_score < 50
         ).length;
         evictionRate = (evictions / movedOutTenants.length) * 100;
+        evictionSamples = movedOutTenants.length;
       }
     }
+
+    const deriveApplicationRiskScore = (application: any) => {
+      const parts: Array<{ score: number; weight: number }> = [];
+
+      if (application.credit_score !== null && application.credit_score !== undefined) {
+        const normalized = Math.min(100, Math.max(0, ((Number(application.credit_score) - 300) / 550) * 100));
+        parts.push({ score: Math.round(normalized), weight: 0.6 });
+      }
+
+      const rentAmount = application.unit?.rent_amount || application.unit?.rentAmount || 0;
+      if (application.monthly_income !== null && application.monthly_income !== undefined && rentAmount > 0) {
+        const ratio = Number(application.monthly_income) / Number(rentAmount);
+        const ratioScore =
+          ratio >= 3 ? 100 :
+          ratio >= 2.5 ? 90 :
+          ratio >= 2 ? 80 :
+          ratio >= 1.5 ? 60 :
+          ratio >= 1.2 ? 50 :
+          ratio >= 1 ? 40 :
+          20;
+        parts.push({ score: ratioScore, weight: 0.4 });
+      }
+
+      if (parts.length === 0) return null;
+      const totalWeight = parts.reduce((sum, part) => sum + part.weight, 0);
+      const weightedScore = parts.reduce((sum, part) => sum + part.score * part.weight, 0) / totalWeight;
+      return Math.min(100, Math.max(0, Math.round(weightedScore)));
+    };
 
     // Calculate from applications data
     if (applications.length > 0) {
       // Average screening time in hours
-      const reviewed = applications.filter(a => a.reviewed_at && a.created_at);
+      const reviewed = applications.filter(a =>
+        a.created_at && (a.reviewed_at || (a.updated_at && (a.status === 'approved' || a.status === 'rejected')))
+      );
       if (reviewed.length > 0 && avgScreeningTime === 0) {
         const totalHours = reviewed.reduce((sum, a) => {
           const created = new Date(a.created_at).getTime();
-          const reviewedTime = new Date(a.reviewed_at!).getTime();
+          const reviewedTime = new Date(a.reviewed_at || a.updated_at!).getTime();
           return sum + (reviewedTime - created) / (1000 * 60 * 60);
         }, 0);
         avgScreeningTime = totalHours / reviewed.length;
+        avgScreeningSamples = reviewed.length;
       }
 
       // Acceptance rate
@@ -201,52 +253,65 @@ export function TenantManagement() {
       if (decidedApps.length > 0 && acceptanceRate === 0) {
         const approved = decidedApps.filter(a => a.status === 'approved').length;
         acceptanceRate = (approved / decidedApps.length) * 100;
+        acceptanceSamples = decidedApps.length;
       }
 
       // AI-enhanced accuracy: also check application AI scores
       if (aiAccuracy === 0) {
-        const appsWithScores = applications.filter(a => a.ai_risk_score !== null && a.status && !['pending', 'submitted', 'under_review'].includes(a.status));
+        const appsWithScores = applications
+          .map(a => ({ application: a, riskScore: a.ai_risk_score ?? deriveApplicationRiskScore(a) }))
+          .filter(entry => entry.riskScore !== null && entry.application.status && !['submitted', 'under_review'].includes(entry.application.status));
         if (appsWithScores.length > 0) {
-          const accurate = appsWithScores.filter(a =>
-            (a.ai_risk_score! >= 75 && a.status === 'approved') ||
-            (a.ai_risk_score! < 75 && a.status === 'rejected')
+          const accurate = appsWithScores.filter(entry =>
+            (entry.riskScore! >= 75 && entry.application.status === 'approved') ||
+            (entry.riskScore! < 75 && entry.application.status === 'rejected')
           ).length;
           aiAccuracy = Math.round((accurate / appsWithScores.length) * 100);
+          aiAccuracySamples = appsWithScores.length;
         }
       }
     }
 
-    return { aiAccuracy, avgScreeningTime, evictionRate, acceptanceRate };
+    return {
+      aiAccuracy,
+      avgScreeningTime,
+      evictionRate,
+      acceptanceRate,
+      aiAccuracySamples,
+      avgScreeningSamples,
+      evictionSamples,
+      acceptanceSamples,
+    };
   }, [metrics, applications, tenants]);
 
   const screeningMetrics = calculatedMetrics ? [
     {
       label: 'Accuracy Rate',
-      value: calculatedMetrics.aiAccuracy > 0 ? `${Math.round(calculatedMetrics.aiAccuracy)}%` : 'N/A',
-      change: calculatedMetrics.aiAccuracy > 0 ? '+2%' : '0%',
+      value: calculatedMetrics.aiAccuracySamples > 0 ? `${Math.round(calculatedMetrics.aiAccuracy)}%` : 'N/A',
+      change: calculatedMetrics.aiAccuracySamples > 0 ? '+2%' : '0%',
       color: calculatedMetrics.aiAccuracy >= 85 ? 'text-emerald-400' : calculatedMetrics.aiAccuracy >= 70 ? 'text-yellow-400' : 'text-red-400',
-      tooltip: calculatedMetrics.aiAccuracy > 0 ? 'AI prediction accuracy vs. actual background checks' : 'No data yet'
+      tooltip: calculatedMetrics.aiAccuracySamples > 0 ? 'AI prediction accuracy vs. actual background checks' : 'No data yet'
     },
     {
       label: 'Avg. Process Time',
-      value: calculatedMetrics.avgScreeningTime > 0 
+      value: calculatedMetrics.avgScreeningSamples > 0 
         ? calculatedMetrics.avgScreeningTime < 1 
           ? `${Math.round(calculatedMetrics.avgScreeningTime * 60)}min`
           : `${Math.round(calculatedMetrics.avgScreeningTime * 10) / 10}hr`
         : 'N/A',
-      change: calculatedMetrics.avgScreeningTime > 0 ? '-15%' : '0%',
+      change: calculatedMetrics.avgScreeningSamples > 0 ? '-15%' : '0%',
       color: calculatedMetrics.avgScreeningTime > 0 && calculatedMetrics.avgScreeningTime < 24 ? 'text-emerald-400' : 'text-yellow-400',
-      tooltip: calculatedMetrics.avgScreeningTime > 0 ? 'Average time from application to review completion' : 'No data yet'
+      tooltip: calculatedMetrics.avgScreeningSamples > 0 ? 'Average time from application to review completion' : 'No data yet'
     },
     {
       label: 'Eviction Rate',
-      value: Number.isFinite(calculatedMetrics.evictionRate)
+      value: calculatedMetrics.evictionSamples > 0
         ? calculatedMetrics.evictionRate < 1
           ? '<1%'
           : `${Math.round(calculatedMetrics.evictionRate * 10) / 10}%`
-        : '0%',
-      change: '0%',
-      color: Number.isFinite(calculatedMetrics.evictionRate)
+        : 'N/A',
+      change: calculatedMetrics.evictionSamples > 0 ? '0%' : '0%',
+      color: calculatedMetrics.evictionSamples > 0
         ? calculatedMetrics.evictionRate < 3
           ? 'text-emerald-400'
           : calculatedMetrics.evictionRate < 5
@@ -528,12 +593,12 @@ export function TenantManagement() {
                 APPLICATIONS
               </h3>
               <div className="px-2 py-1 bg-[#ff6b35]/20 text-[#ff6b35] rounded-full text-xs font-medium">
-                {applications.length} PENDING
+                {pendingApplications.length} PENDING
               </div>
             </div>
 
             <div className="space-y-4">
-              {applications.length === 0 ? (
+              {pendingApplications.length === 0 ? (
                 <div className="text-center py-12">
                   <UserSearch className={`w-12 h-12 ${text.muted} mx-auto mb-4`} />
                   <p className={`${text.muted} mb-2`} style={{ fontFamily: 'Work Sans, sans-serif' }}>
@@ -541,7 +606,7 @@ export function TenantManagement() {
                   </p>
                 </div>
               ) : (
-                applications.slice(0, 3).map((applicant) => (
+                pendingApplications.slice(0, 3).map((applicant) => (
                   <div
                     key={applicant.id}
                     className={`p-4 ${isDark ? 'bg-white/5' : 'bg-gray-50'} rounded-lg border ${border.default} hover:border-[#ff6b35]/50 transition-all`}
@@ -610,10 +675,10 @@ export function TenantManagement() {
               )}
             </div>
 
-            {applications.length > 3 && (
+            {pendingApplications.length > 3 && (
               <button className={`w-full mt-4 py-3 ${isDark ? 'bg-white/5 hover:bg-white/10' : 'bg-gray-100 hover:bg-gray-200'} rounded-lg text-sm font-medium transition-colors flex items-center justify-center gap-2`}>
                 <UserSearch className="w-4 h-4" />
-                View All {applications.length} Applications
+                View All {pendingApplications.length} Applications
               </button>
             )}
           </div>
@@ -642,13 +707,13 @@ export function TenantManagement() {
               <div className="grid grid-cols-4 gap-4">
                 <div className={`p-3 ${isDark ? 'bg-white/5' : 'bg-gray-50'} rounded-lg`}>
                   <p className="text-2xl font-bold text-emerald-400 mb-1" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
-                    {calculatedMetrics.aiAccuracy > 0 ? `${Math.round(calculatedMetrics.aiAccuracy)}%` : 'N/A'}
+                    {calculatedMetrics.aiAccuracySamples > 0 ? `${Math.round(calculatedMetrics.aiAccuracy)}%` : 'N/A'}
                   </p>
                   <p className={`text-xs ${text.muted}`}>Accuracy Rate</p>
                 </div>
                 <div className={`p-3 ${isDark ? 'bg-white/5' : 'bg-gray-50'} rounded-lg`}>
                   <p className="text-2xl font-bold text-emerald-400 mb-1" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
-                    {calculatedMetrics.avgScreeningTime > 0
+                    {calculatedMetrics.avgScreeningSamples > 0
                       ? calculatedMetrics.avgScreeningTime < 1
                         ? `${Math.round(calculatedMetrics.avgScreeningTime * 60)}min`
                         : `${Math.round(calculatedMetrics.avgScreeningTime * 10) / 10} hrs`
@@ -658,11 +723,11 @@ export function TenantManagement() {
                 </div>
                 <div className={`p-3 ${isDark ? 'bg-white/5' : 'bg-gray-50'} rounded-lg`}>
                   <p className="text-2xl font-bold text-emerald-400 mb-1" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
-                    {Number.isFinite(calculatedMetrics.evictionRate)
+                    {calculatedMetrics.evictionSamples > 0
                       ? calculatedMetrics.evictionRate < 1
                         ? '<1%'
                         : `${Math.round(calculatedMetrics.evictionRate * 10) / 10}%`
-                      : '0%'}
+                      : 'N/A'}
                   </p>
                   <p className={`text-xs ${text.muted}`}>Eviction Rate</p>
                 </div>

@@ -43,6 +43,7 @@ const PROPERTY_TYPES: Array<{ label: string; value: PropertyTypeValue }> = [
 export function AddPropertyModal({ isOpen, onClose, onSuccess }: AddPropertyModalProps) {
   const { isDark, text, border } = useThemeStyles();
   const [loading, setLoading] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
   const [formData, setFormData] = useState<PropertyFormData>({
     name: '',
     address1: '',
@@ -65,6 +66,7 @@ export function AddPropertyModal({ isOpen, onClose, onSuccess }: AddPropertyModa
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
+    setFormError(null);
 
     try {
       const accountId = await getCurrentAccountId();
@@ -78,6 +80,17 @@ export function AddPropertyModal({ isOpen, onClose, onSuccess }: AddPropertyModa
         .split(',')
         .map((value) => value.trim())
         .filter(Boolean);
+      const uniqueUnitNumbers = new Set(unitNumbers);
+
+      if (unitNumbers.length !== uniqueUnitNumbers.size) {
+        setFormError('Unit numbers must be unique.');
+        return;
+      }
+
+      if (unitNumbers.length > totalUnits) {
+        setFormError('Unit numbers count cannot exceed total units.');
+        return;
+      }
       const { data: property, error } = await supabase
         .from('properties')
         .insert({
@@ -129,6 +142,7 @@ export function AddPropertyModal({ isOpen, onClose, onSuccess }: AddPropertyModa
         defaultRent: '',
         unitNumbers: '',
       });
+      setFormError(null);
 
       onSuccess();
       onClose();
@@ -176,6 +190,11 @@ export function AddPropertyModal({ isOpen, onClose, onSuccess }: AddPropertyModa
 
         {/* Form */}
         <form onSubmit={handleSubmit} className="p-6 space-y-6 max-h-[70vh] overflow-y-auto">
+          {formError ? (
+            <div className="rounded-lg border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-200">
+              {formError}
+            </div>
+          ) : null}
           {/* Property Name */}
           <div>
             <label className={`block text-sm font-medium mb-2 ${text.primary}`}>

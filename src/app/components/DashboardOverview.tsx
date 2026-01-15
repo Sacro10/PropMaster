@@ -417,22 +417,27 @@ export function DashboardOverview() {
           <div className="grid grid-cols-4 gap-4">
             {upcomingTasks.map((task) => {
               // Format due date
-              const dueDate = new Date(`${task.dueDate}T00:00:00`);
-              const now = new Date();
-              const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-              const daysUntilDue = Math.ceil((dueDate.getTime() - todayStart.getTime()) / (1000 * 60 * 60 * 24));
+              let dueDateDisplay = 'Date unavailable';
+              let daysUntilDue: number | null = null;
+              if (task.dueDate) {
+                const dueDate = new Date(`${task.dueDate}T00:00:00`);
+                if (!Number.isNaN(dueDate.getTime())) {
+                  const now = new Date();
+                  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+                  daysUntilDue = Math.ceil((dueDate.getTime() - todayStart.getTime()) / (1000 * 60 * 60 * 24));
+                }
+              }
 
-              let dueDateDisplay = '';
-              if (daysUntilDue < 0) {
+              if (daysUntilDue !== null && daysUntilDue < 0) {
                 dueDateDisplay = 'Overdue';
               } else if (daysUntilDue === 0) {
                 dueDateDisplay = 'Today';
               } else if (daysUntilDue === 1) {
                 dueDateDisplay = 'Tomorrow';
-              } else if (daysUntilDue <= 7) {
+              } else if (daysUntilDue !== null && daysUntilDue <= 7) {
                 dueDateDisplay = `${daysUntilDue} days`;
-              } else {
-                dueDateDisplay = dueDate.toLocaleDateString();
+              } else if (task.dueDate) {
+                dueDateDisplay = new Date(`${task.dueDate}T00:00:00`).toLocaleDateString();
               }
 
               return (

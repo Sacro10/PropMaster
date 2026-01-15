@@ -66,6 +66,15 @@ function getApplicationEmployer(application: any) {
 function calculateTenantRiskScore(tenant: any, lease: any): number | null {
   const parts: Array<{ score: number; weight: number }> = [];
 
+  const normalizeBackgroundStatus = (value: unknown) => {
+    if (!value) return null;
+    const status = String(value).toLowerCase();
+    if (['approved', 'passed', 'clear'].includes(status)) return 'approved';
+    if (['rejected', 'failed', 'deny', 'denied'].includes(status)) return 'rejected';
+    if (['pending', 'in_progress', 'waived', 'review'].includes(status)) return 'pending';
+    return status;
+  };
+
   if (tenant?.credit_score !== null && tenant?.credit_score !== undefined) {
     const normalized = clamp(((Number(tenant.credit_score) - 300) / 550) * 100, 0, 100);
     parts.push({ score: Math.round(normalized), weight: 0.4 });
@@ -86,7 +95,7 @@ function calculateTenantRiskScore(tenant: any, lease: any): number | null {
   }
 
   if (tenant?.background_check_status) {
-    const status = String(tenant.background_check_status).toLowerCase();
+    const status = normalizeBackgroundStatus(tenant.background_check_status);
     const backgroundScore =
       status === 'approved' ? 90 :
       status === 'pending' ? 60 :
@@ -386,7 +395,6 @@ export async function getRentalApplications(params: PaginationParams = {}) {
         )
       `, { count: 'exact' })
       .eq('account_id', accountId)
-      .eq('status', 'submitted')
       .order('created_at', { ascending: false })
       .range(from, to);
 
@@ -500,16 +508,25 @@ export async function getTenantScreeningMetrics() {
         }
       }
 
+      const normalizeBackgroundStatus = (value: unknown) => {
+        if (!value) return null;
+        const status = String(value).toLowerCase();
+        if (['approved', 'passed', 'clear'].includes(status)) return 'approved';
+        if (['rejected', 'failed', 'deny', 'denied'].includes(status)) return 'rejected';
+        if (['pending', 'in_progress', 'waived', 'review'].includes(status)) return 'pending';
+        return status;
+      };
+
       // Calculate AI accuracy (simplified: % of high-risk scores that passed background check)
       let aiAccuracy = 0;
       if (tenantsData.data && tenantsData.data.length > 0) {
-        const tenantsWithScore = tenantsData.data.filter(t =>
-          t.ai_risk_score !== null && t.background_check_status
-        );
+        const tenantsWithScore = tenantsData.data
+          .map(t => ({ ...t, normalized_status: normalizeBackgroundStatus(t.background_check_status) }))
+          .filter(t => t.ai_risk_score !== null && t.normalized_status);
         if (tenantsWithScore.length > 0) {
           const accurate = tenantsWithScore.filter(t =>
-            (t.ai_risk_score! >= 70 && t.background_check_status === 'approved') ||
-            (t.ai_risk_score! < 70 && t.background_check_status === 'rejected')
+            (t.ai_risk_score! >= 70 && t.normalized_status === 'approved') ||
+            (t.ai_risk_score! < 70 && t.normalized_status === 'rejected')
           ).length;
           aiAccuracy = (accurate / tenantsWithScore.length) * 100;
         }
