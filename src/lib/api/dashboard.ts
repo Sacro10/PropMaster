@@ -4,6 +4,7 @@
  */
 
 import { supabase } from '../supabaseClient';
+import { fetchJsonWithRetry } from './client';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
 
@@ -150,29 +151,32 @@ export async function getDashboardSummary(): Promise<DashboardSummary> {
       return getMockDashboardSummary();
     }
 
-    const response = await fetch(`${API_URL}/api/dashboard/summary`, {
+    const url = `${API_URL}/api/dashboard/summary`;
+    const response = await fetchJsonWithRetry<DashboardSummary | Record<string, unknown>>(url, {
       headers: {
         'Authorization': `Bearer ${token}`,
         'Content-Type': 'application/json',
       },
+    }, {
+      cacheKey: `${url}|${token}`,
+      cacheTtlMs: 15000,
+      retries: 1,
     });
 
     if (!response.ok) {
       // Check if response is HTML (error page) instead of JSON
-      const contentType = response.headers.get('content-type');
-      if (contentType && contentType.includes('text/html')) {
+      if (response.contentType && response.contentType.includes('text/html')) {
         console.error('[Dashboard API] Received HTML instead of JSON - API server may not be running');
         console.warn('[Dashboard API] Using fallback mock data. Please start the backend server with: cd server && npm run dev');
         return getMockDashboardSummary();
       }
 
-      const errorData = await response.json().catch(() => ({}));
+      const errorData = response.data || {};
       console.error('[Dashboard API] API error:', errorData);
       return getMockDashboardSummary();
     }
 
-    const data = await response.json();
-    return data;
+    return (response.data as DashboardSummary) || getMockDashboardSummary();
   } catch (error) {
     console.error('[Dashboard API] Error fetching summary:', error);
 

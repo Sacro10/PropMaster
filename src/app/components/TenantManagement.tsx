@@ -410,19 +410,22 @@ export function TenantManagement() {
         {metricsLoading ? (
           <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-6">
             {[...Array(4)].map((_, i) => (
-              <div key={i} className={`${isDark ? 'bg-gradient-to-br from-[#1a1f35] to-[#0f1523]' : 'bg-gray-100'} border ${border.default} rounded-xl p-6 animate-pulse`}>
+              <div
+                key={i}
+                className={`${isDark ? 'bg-gradient-to-br from-[#1a1f35] to-[#0f1523]' : 'bg-gray-100'} border ${border.default} rounded-xl p-6 animate-pulse`}
+              >
                 <div className="h-4 bg-white/10 rounded w-1/2 mb-4"></div>
                 <div className="h-8 bg-white/10 rounded w-3/4"></div>
               </div>
             ))}
           </div>
         ) : (
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-6">
-        {screeningMetrics.map((metric, index) => (
-          <div
-            key={index}
-            className={`${isDark ? 'bg-gradient-to-br from-[#1a1f35] to-[#0f1523]' : 'bg-white shadow-md'} border ${border.default} rounded-xl p-6`}
-          >
+          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-6">
+            {screeningMetrics.map((metric, index) => (
+              <div
+                key={index}
+                className={`${isDark ? 'bg-gradient-to-br from-[#1a1f35] to-[#0f1523]' : 'bg-white shadow-md'} border ${border.default} rounded-xl p-6`}
+              >
                 <p className={`text-sm ${text.muted} mb-2`} style={{ fontFamily: 'Work Sans, sans-serif' }}>
                   {metric.label}
                 </p>

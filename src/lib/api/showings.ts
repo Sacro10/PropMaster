@@ -4,7 +4,7 @@
  */
 
 import { supabase } from '../supabaseClient';
-import { getCurrentAccountId, handleSupabaseError, getPaginationRange, calculatePaginationMeta, type PaginationParams } from './client';
+import { fetchJsonWithRetry, getCurrentAccountId, handleSupabaseError, getPaginationRange, calculatePaginationMeta, type PaginationParams } from './client';
 import type { ShowingWithDetails, PaginatedResponse } from './types';
 
 // API base URL
@@ -26,23 +26,27 @@ export async function getUpcomingShowings(params: PaginationParams = {}) {
       throw new Error('No active session');
     }
 
-    const response = await fetch(`${API_BASE}/api/showings?status=scheduled,confirmed&limit=50`, {
+    const url = `${API_BASE}/api/showings?status=scheduled,confirmed&limit=50`;
+    const response = await fetchJsonWithRetry<{ showings?: any[]; total?: number }>(url, {
       headers: {
         'Authorization': `Bearer ${session.access_token}`,
         'Content-Type': 'application/json',
       },
+    }, {
+      cacheKey: `${url}|${session.access_token}`,
+      cacheTtlMs: 10000,
+      retries: 1,
     });
 
     if (!response.ok) {
       // Check if response is HTML (error page) instead of JSON
-      const contentType = response.headers.get('content-type');
-      if (contentType && contentType.includes('text/html')) {
+      if (response.contentType && response.contentType.includes('text/html')) {
         throw new Error('Showings API unavailable');
       }
       throw new Error(`Failed to fetch showings: ${response.statusText}`);
     }
 
-    const result = await response.json();
+    const result = response.data || {};
     
     // Transform to expected format
     const showings: ShowingWithDetails[] = (result.showings || []).map((showing: any) => ({
@@ -89,23 +93,27 @@ export async function getAvailableProperties() {
       throw new Error('No active session');
     }
 
-    const response = await fetch(`${API_BASE}/api/showings/available-units`, {
+    const url = `${API_BASE}/api/showings/available-units`;
+    const response = await fetchJsonWithRetry<any[]>(url, {
       headers: {
         'Authorization': `Bearer ${session.access_token}`,
         'Content-Type': 'application/json',
       },
+    }, {
+      cacheKey: `${url}|${session.access_token}`,
+      cacheTtlMs: 10000,
+      retries: 1,
     });
 
     if (!response.ok) {
-      const contentType = response.headers.get('content-type');
-      if (contentType && contentType.includes('text/html')) {
+      if (response.contentType && response.contentType.includes('text/html')) {
         console.error('[Showings API] Received HTML instead of JSON - API may not be running');
         return [];
       }
       throw new Error(`Failed to fetch available units: ${response.statusText}`);
     }
 
-    const units = await response.json();
+    const units = response.data || [];
 
     // Transform to match expected format
     return units.map((unit: any) => ({
@@ -140,16 +148,25 @@ export async function getShowingStats() {
       throw new Error('No active session');
     }
 
-    const response = await fetch(`${API_BASE}/api/showings/stats`, {
+    const url = `${API_BASE}/api/showings/stats`;
+    const response = await fetchJsonWithRetry<{
+      scheduled_today: number;
+      total_this_week: number;
+      avg_response_time: string;
+      conversion_rate: string;
+    }>(url, {
       headers: {
         'Authorization': `Bearer ${session.access_token}`,
         'Content-Type': 'application/json',
       },
+    }, {
+      cacheKey: `${url}|${session.access_token}`,
+      cacheTtlMs: 15000,
+      retries: 1,
     });
 
     if (!response.ok) {
-      const contentType = response.headers.get('content-type');
-      if (contentType && contentType.includes('text/html')) {
+      if (response.contentType && response.contentType.includes('text/html')) {
         console.error('[Showings API] Received HTML instead of JSON - API may not be running');
         return {
           scheduled_today: 0,
@@ -161,7 +178,12 @@ export async function getShowingStats() {
       throw new Error(`Failed to fetch showing stats: ${response.statusText}`);
     }
 
-    return await response.json();
+    return response.data || {
+      scheduled_today: 0,
+      total_this_week: 0,
+      avg_response_time: '0.0',
+      conversion_rate: '0',
+    };
   } catch (error) {
     console.error('[Showings API] Error fetching stats:', error);
     return {

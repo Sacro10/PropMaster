@@ -4,7 +4,7 @@
  */
 
 import { supabase } from '../supabaseClient';
-import { getCurrentAccountId } from './client';
+import { fetchJsonWithRetry, getCurrentAccountId } from './client';
 import type {
   AnalyticsMetrics,
   RevenueData,
@@ -29,16 +29,20 @@ export async function getAnalyticsMetrics(timeframe: TimeframeOption = '30d'): P
       throw new Error('No active session');
     }
 
-    const response = await fetch(`${API_BASE}/api/analytics/summary?range=${timeframe}`, {
+    const url = `${API_BASE}/api/analytics/summary?range=${timeframe}`;
+    const response = await fetchJsonWithRetry<AnalyticsMetrics | Record<string, any>>(url, {
       headers: {
         'Authorization': `Bearer ${session.access_token}`,
         'Content-Type': 'application/json',
       },
+    }, {
+      cacheKey: `${url}|${session.access_token}`,
+      cacheTtlMs: 15000,
+      retries: 1,
     });
 
     if (!response.ok) {
-      const contentType = response.headers.get('content-type');
-      if (contentType && contentType.includes('text/html')) {
+      if (response.contentType && response.contentType.includes('text/html')) {
         console.error('[Analytics API] Received HTML instead of JSON - API may not be running');
         return {
           total_revenue: 0,
@@ -54,7 +58,7 @@ export async function getAnalyticsMetrics(timeframe: TimeframeOption = '30d'): P
       throw new Error('Failed to fetch analytics metrics');
     }
 
-    const payload = await response.json();
+    const payload = response.data;
 
     if (payload && typeof payload === 'object') {
       if ('total_revenue' in payload) {
@@ -111,23 +115,27 @@ export async function getRevenueTrend(timeframe: TimeframeOption = '30d'): Promi
       throw new Error('No active session');
     }
 
-    const response = await fetch(`${API_BASE}/api/analytics/timeseries?metric=revenue&range=${timeframe}`, {
+    const url = `${API_BASE}/api/analytics/timeseries?metric=revenue&range=${timeframe}`;
+    const response = await fetchJsonWithRetry<any[]>(url, {
       headers: {
         'Authorization': `Bearer ${session.access_token}`,
         'Content-Type': 'application/json',
       },
+    }, {
+      cacheKey: `${url}|${session.access_token}`,
+      cacheTtlMs: 15000,
+      retries: 1,
     });
 
     if (!response.ok) {
-      const contentType = response.headers.get('content-type');
-      if (contentType && contentType.includes('text/html')) {
+      if (response.contentType && response.contentType.includes('text/html')) {
         console.error('[Analytics API] Received HTML instead of JSON - API may not be running');
         return [];
       }
       throw new Error('Failed to fetch revenue trend');
     }
 
-    const data = await response.json();
+    const data = response.data || [];
     return (data || []).map((item: any) => ({
       month: item.label || item.month || item.date || '',
       revenue: Number(item.revenue ?? item.value ?? 0),
@@ -148,23 +156,27 @@ export async function getOccupancyTrend(timeframe: TimeframeOption = '30d'): Pro
       throw new Error('No active session');
     }
 
-    const response = await fetch(`${API_BASE}/api/analytics/timeseries?metric=occupancy&range=${timeframe}`, {
+    const url = `${API_BASE}/api/analytics/timeseries?metric=occupancy&range=${timeframe}`;
+    const response = await fetchJsonWithRetry<any[]>(url, {
       headers: {
         'Authorization': `Bearer ${session.access_token}`,
         'Content-Type': 'application/json',
       },
+    }, {
+      cacheKey: `${url}|${session.access_token}`,
+      cacheTtlMs: 15000,
+      retries: 1,
     });
 
     if (!response.ok) {
-      const contentType = response.headers.get('content-type');
-      if (contentType && contentType.includes('text/html')) {
+      if (response.contentType && response.contentType.includes('text/html')) {
         console.error('[Analytics API] Received HTML instead of JSON - API may not be running');
         return [];
       }
       throw new Error('Failed to fetch occupancy trend');
     }
 
-    const data = await response.json();
+    const data = response.data || [];
     return (data || []).map((item: any) => ({
       month: item.label || item.month || item.date || '',
       rate: Number(item.rate ?? item.value ?? 0),
@@ -185,23 +197,27 @@ export async function getPropertyPerformance(timeframe: TimeframeOption = '30d')
       throw new Error('No active session');
     }
 
-    const response = await fetch(`${API_BASE}/api/analytics/properties?range=${timeframe}`, {
+    const url = `${API_BASE}/api/analytics/properties?range=${timeframe}`;
+    const response = await fetchJsonWithRetry<any[]>(url, {
       headers: {
         'Authorization': `Bearer ${session.access_token}`,
         'Content-Type': 'application/json',
       },
+    }, {
+      cacheKey: `${url}|${session.access_token}`,
+      cacheTtlMs: 15000,
+      retries: 1,
     });
 
     if (!response.ok) {
-      const contentType = response.headers.get('content-type');
-      if (contentType && contentType.includes('text/html')) {
+      if (response.contentType && response.contentType.includes('text/html')) {
         console.error('[Analytics API] Received HTML instead of JSON - API may not be running');
         return [];
       }
       throw new Error('Failed to fetch property performance');
     }
 
-    const data = await response.json();
+    const data = response.data || [];
     const mapped = (data || []).map((item: any) => ({
       property_id: item.property_id || item.propertyId || item.id || '',
       name: item.name || item.propertyName || 'Unknown',
@@ -226,16 +242,20 @@ export async function getExpenseBreakdown(timeframe: TimeframeOption = '30d'): P
       throw new Error('No active session');
     }
 
-    const response = await fetch(`${API_BASE}/api/analytics/expenses/breakdown?range=${timeframe}`, {
+    const url = `${API_BASE}/api/analytics/expenses/breakdown?range=${timeframe}`;
+    const response = await fetchJsonWithRetry<any[]>(url, {
       headers: {
         'Authorization': `Bearer ${session.access_token}`,
         'Content-Type': 'application/json',
       },
+    }, {
+      cacheKey: `${url}|${session.access_token}`,
+      cacheTtlMs: 15000,
+      retries: 1,
     });
 
     if (!response.ok) {
-      const contentType = response.headers.get('content-type');
-      if (contentType && contentType.includes('text/html')) {
+      if (response.contentType && response.contentType.includes('text/html')) {
         console.error('[Analytics API] Received HTML instead of JSON - API may not be running');
         return [];
       }
@@ -243,7 +263,7 @@ export async function getExpenseBreakdown(timeframe: TimeframeOption = '30d'): P
     }
 
     const palette = ['#ff6b35', '#f7931e', '#10b981', '#06b6d4', '#8b5cf6', '#f59e0b', '#3b82f6', '#ef4444'];
-    const data = await response.json();
+    const data = response.data || [];
     const mapped = (data || []).map((item: any, index: number) => ({
       name: item.name || 'Other',
       value: Number((Number(item.percentage ?? item.value ?? 0)).toFixed(3)),
@@ -266,18 +286,23 @@ export async function getAnalyticsInsights(timeframe: TimeframeOption = '30d'): 
       throw new Error('No active session');
     }
 
-    const response = await fetch(`${API_BASE}/api/analytics/insights?range=${timeframe}`, {
+    const url = `${API_BASE}/api/analytics/insights?range=${timeframe}`;
+    const response = await fetchJsonWithRetry<AnalyticsInsight>(url, {
       headers: {
         'Authorization': `Bearer ${session.access_token}`,
         'Content-Type': 'application/json',
       },
+    }, {
+      cacheKey: `${url}|${session.access_token}`,
+      cacheTtlMs: 15000,
+      retries: 1,
     });
 
     if (!response.ok) {
       throw new Error('Failed to fetch analytics insights');
     }
 
-    return await response.json();
+    return response.data ?? { summary: '', provider: null };
   } catch (error) {
     console.error('[Analytics API] Failed to fetch analytics insights:', error);
     return { summary: '', provider: null };
