@@ -509,6 +509,9 @@ export function TenantManagement() {
                                  riskScore >= 90 ? 'from-emerald-400 to-emerald-500' :
                                  riskScore >= 70 ? 'from-amber-400 to-amber-500' :
                                  'from-red-400 to-red-500';
+                const leaseStatusClass = tenant.lease?.status === 'active'
+                  ? 'bg-emerald-500/20 text-emerald-400'
+                  : 'bg-amber-500/20 text-amber-400';
 
                 return (
                   <div
@@ -573,27 +576,20 @@ export function TenantManagement() {
                       </div>
 
                       <div className="flex items-center justify-between sm:justify-end gap-3">
-                        <span
-                          className={`px-3 py-1 rounded-full text-xs font-medium ${
-                            tenant.lease?.status === 'active'
-                              ? 'bg-emerald-500/20 text-emerald-400'
-                              : 'bg-amber-500/20 text-amber-400'
-                            }`}
-                          >
-                            {(tenant.lease?.status || 'unknown').toUpperCase()}
-                          </span>
-                          <button
-                            type="button"
-                            onClick={() => handleDeleteTenant(tenant)}
-                            disabled={deletingTenantId === tenant.lease?.id}
-                            className={`p-2 rounded-lg transition-colors ${
-                              isDark ? 'bg-white/5 hover:bg-white/10' : 'bg-white hover:bg-gray-100'
-                            } ${deletingTenantId === tenant.lease?.id ? 'opacity-50 cursor-not-allowed' : ''}`}
-                            title="Delete tenant"
-                          >
-                            <Trash2 className="w-4 h-4 text-red-400" />
-                          </button>
-                        </div>
+                        <span className={`px-3 py-1 rounded-full text-xs font-medium ${leaseStatusClass}`}>
+                          {(tenant.lease?.status || 'unknown').toUpperCase()}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteTenant(tenant)}
+                          disabled={deletingTenantId === tenant.lease?.id}
+                          className={`p-2 rounded-lg transition-colors ${
+                            isDark ? 'bg-white/5 hover:bg-white/10' : 'bg-white hover:bg-gray-100'
+                          } ${deletingTenantId === tenant.lease?.id ? 'opacity-50 cursor-not-allowed' : ''}`}
+                          title="Delete tenant"
+                        >
+                          <Trash2 className="w-4 h-4 text-red-400" />
+                        </button>
                       </div>
                     </div>
                   </div>
