@@ -510,25 +510,25 @@ export function TenantManagement() {
                 return (
                   <div
                     key={tenant.id}
-                    className={`flex items-center justify-between p-4 ${isDark ? 'bg-white/5 hover:bg-white/10' : 'bg-gray-50 hover:bg-gray-100'} rounded-lg transition-all border ${border.default} hover:border-[#ff6b35]/50 group`}
+                    className={`flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between p-4 ${isDark ? 'bg-white/5 hover:bg-white/10' : 'bg-gray-50 hover:bg-gray-100'} rounded-lg transition-all border ${border.default} hover:border-[#ff6b35]/50 group`}
                   >
-                    <div className="flex items-center gap-4">
+                    <div className="flex items-center gap-4 min-w-0">
                       <div className="w-12 h-12 bg-gradient-to-br from-[#ff6b35] to-[#f7931e] rounded-full flex items-center justify-center font-semibold text-white">
                         {initials}
                       </div>
-                      <div>
-                        <p className="font-medium mb-1" style={{ fontFamily: 'Work Sans, sans-serif' }}>
+                      <div className="min-w-0">
+                        <p className="font-medium mb-1 break-words" style={{ fontFamily: 'Work Sans, sans-serif' }}>
                           {tenant.full_name || 'Unknown Tenant'}
                         </p>
-                        <p className={`text-sm ${text.muted}`} style={{ fontFamily: 'Work Sans, sans-serif' }}>
+                        <p className={`text-sm ${text.muted} break-words`} style={{ fontFamily: 'Work Sans, sans-serif' }}>
                           {unitDisplay}
                         </p>
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-8">
+                    <div className="flex flex-col gap-4 sm:flex-row sm:flex-wrap lg:flex-nowrap lg:items-center lg:gap-6 w-full">
                       {aiRiskScoring.hasAccess && (
-                        <div className="text-right">
+                        <div className="text-left sm:text-right min-w-[160px]">
                           <p className={`text-sm ${text.muted} mb-1`}>Risk Score</p>
                           <div className="flex items-center gap-2">
                             <div className={`w-12 h-1 ${isDark ? 'bg-white/10' : 'bg-gray-200'} rounded-full overflow-hidden`}>
@@ -544,19 +544,19 @@ export function TenantManagement() {
                         </div>
                       )}
 
-                      <div className="text-right">
+                      <div className="text-left sm:text-right min-w-[140px]">
                         <p className={`text-sm ${text.muted} mb-1`}>Monthly Rent</p>
                         <p className="font-semibold">{formatCurrency(tenant.lease?.rent || 0)}</p>
                       </div>
 
-                      <div className="text-right">
+                      <div className="text-left sm:text-right min-w-[140px]">
                         <p className={`text-sm ${text.muted} mb-1`}>Lease Ends</p>
                         <p className="text-sm">{tenant.lease?.lease_end ? formatDisplayDate(tenant.lease.lease_end, 'MMM yyyy') : 'N/A'}</p>
                       </div>
 
-                      <div className="text-right">
+                      <div className="text-left sm:text-right">
                         <p className={`text-sm ${text.muted} mb-1`}>Auto-Pay</p>
-                        <div className="flex items-center justify-end gap-2">
+                        <div className="flex items-center justify-start sm:justify-end gap-2">
                           <Switch
                             checked={Boolean(tenant.lease?.auto_pay_enabled)}
                             onCheckedChange={(checked) => handleAutoPayToggle(tenant, checked)}
@@ -569,13 +569,12 @@ export function TenantManagement() {
                         </div>
                       </div>
 
-                      <div>
-                        <div className="flex items-center gap-3">
-                          <span
-                            className={`px-3 py-1 rounded-full text-xs font-medium ${
-                              tenant.lease?.status === 'active'
-                                ? 'bg-emerald-500/20 text-emerald-400'
-                                : 'bg-amber-500/20 text-amber-400'
+                      <div className="flex items-center justify-between sm:justify-end gap-3">
+                        <span
+                          className={`px-3 py-1 rounded-full text-xs font-medium ${
+                            tenant.lease?.status === 'active'
+                              ? 'bg-emerald-500/20 text-emerald-400'
+                              : 'bg-amber-500/20 text-amber-400'
                             }`}
                           >
                             {(tenant.lease?.status || 'unknown').toUpperCase()}

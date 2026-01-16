@@ -3,6 +3,10 @@
 @import './theme.css';
 @import './theme-adaptive.css';
 
+body {
+  overflow-x: hidden;
+}
+
 /* Utility helpers */
 .no-scrollbar {
   scrollbar-width: none;

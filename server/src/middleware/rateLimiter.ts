@@ -27,6 +27,60 @@ export interface RateLimitOptions {
   message?: string; // Custom error message
 }
 
+type AuthenticatedRequest = Request & {
+  user?: {
+    id?: string;
+    accountId?: string;
+  };
+};
+
+function decodeJwtPayload(token: string): Record<string, unknown> | null {
+  const parts = token.split('.');
+  if (parts.length < 2) {
+    return null;
+  }
+
+  const payload = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+  const padding = payload.length % 4 === 0 ? '' : '='.repeat(4 - (payload.length % 4));
+
+  try {
+    const json = Buffer.from(`${payload}${padding}`, 'base64').toString('utf8');
+    return JSON.parse(json) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
+function getAuthenticatedKey(req: Request): string | null {
+  const authReq = req as AuthenticatedRequest;
+  if (authReq.user?.accountId) {
+    return `account:${authReq.user.accountId}`;
+  }
+  if (authReq.user?.id) {
+    return `user:${authReq.user.id}`;
+  }
+
+  const authHeader = req.headers.authorization;
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    const token = authHeader.slice('Bearer '.length).trim();
+    const payload = decodeJwtPayload(token);
+    const sub = payload?.sub;
+    if (typeof sub === 'string' && sub.length > 0) {
+      return `user:${sub}`;
+    }
+  }
+
+  return null;
+}
+
+function rateLimitKey(req: Request, prefix: string): string {
+  const authKey = getAuthenticatedKey(req);
+  if (authKey) {
+    return `${prefix}:${authKey}`;
+  }
+  return `${prefix}:${req.ip || 'unknown'}`;
+}
+
 /**
  * Rate limiting middleware
  * Production: Use Redis-based rate limiter (e.g., express-rate-limit with Redis)
@@ -115,7 +169,7 @@ export const rateLimiters = {
   api: rateLimit({
     windowMs: 15 * 60 * 1000, // 15 minutes
     max: 100, // 100 requests per 15 min
-    keyGenerator: (req) => `api:${req.ip}`,
+    keyGenerator: (req) => rateLimitKey(req, 'api'),
     message: 'Too many requests, please slow down',
   }),
 
@@ -123,7 +177,7 @@ export const rateLimiters = {
   analytics: rateLimit({
     windowMs: 5 * 60 * 1000, // 5 minutes
     max: 30, // 30 analytics requests per 5 min
-    keyGenerator: (req) => `analytics:${req.ip}`,
+    keyGenerator: (req) => rateLimitKey(req, 'analytics'),
     message: 'Too many analytics requests, please try again later',
   }),
 };

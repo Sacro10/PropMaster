@@ -10,9 +10,9 @@ interface AnalyticsRequest extends AuthRequest {}
 
 const router = express.Router();
 
-// Apply rate limiting to all analytics routes
-router.use(rateLimiters.analytics);
 router.use(authenticate);
+// Apply rate limiting to all analytics routes after auth for per-account keys
+router.use(rateLimiters.analytics);
 
 interface TimeframeQuery {
   range: '7d' | '7m' | '30d' | '90d' | '1y' | 'all';
@@ -265,7 +265,6 @@ async function buildSummaryMetrics(accountId: string, range: TimeframeQuery['ran
     currentPayments,
     comparisonPayments,
     unitsData,
-    activeLeases,
     currentOccupiedUnits,
     comparisonOccupiedUnits,
     currentExpenses,
@@ -284,13 +283,8 @@ async function buildSummaryMetrics(accountId: string, range: TimeframeQuery['ran
     }),
     supabase
       .from('units')
-      .select('status')
+      .select('status, rent_amount')
       .eq('account_id', accountId),
-    supabase
-      .from('leases')
-      .select('rent')
-      .eq('account_id', accountId)
-      .eq('status', 'active'),
     fetchOccupiedUnitCount(accountId, end),
     fetchOccupiedUnitCount(accountId, comparisonEnd),
     fetchMaintenanceCostsInRange({
@@ -300,7 +294,7 @@ async function buildSummaryMetrics(accountId: string, range: TimeframeQuery['ran
     }),
   ]);
 
-  if (currentPayments.error || comparisonPayments.error || unitsData.error || activeLeases.error || currentExpenses.error) {
+  if (currentPayments.error || comparisonPayments.error || unitsData.error || currentExpenses.error) {
     throw new Error('Failed to fetch analytics data');
   }
 
@@ -317,11 +311,9 @@ async function buildSummaryMetrics(accountId: string, range: TimeframeQuery['ran
   const comparisonOccupancyRate = totalUnits > 0 ? (comparisonOccupiedUnits / totalUnits) * 100 : 0;
   const occupancyChange = occupancyRate - comparisonOccupancyRate;
 
-  const avgRent =
-    activeLeases.data?.length > 0
-      ? activeLeases.data.reduce((sum: number, l: any) => sum + Number(l.rent), 0) /
-        activeLeases.data.length
-      : 0;
+  const totalUnitRent =
+    unitsData.data?.reduce((sum: number, unit: any) => sum + Number(unit.rent_amount ?? 0), 0) || 0;
+  const avgRent = totalUnits > 0 ? totalUnitRent / totalUnits : 0;
 
   const currentExpenseTotal =
     currentExpenses.data?.reduce((sum: number, e: any) => {

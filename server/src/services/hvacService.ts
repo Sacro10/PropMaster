@@ -462,11 +462,12 @@ export async function getHVACVendorsForProperty(
     throw new Error('Property zip code is missing');
   }
 
-  const localVendors = await getAvailableVendors(accountId, 'hvac', property.zip, radiusMiles);
+  const localVendors = await getAvailableVendors(accountId, 'hvac', property.zip);
   const formattedAddress = formatPropertyAddress(property);
   const externalVendors = includeExternal
     ? await searchHVACVendorsFromNominatim({
         address: formattedAddress || property.zip,
+        radiusMiles,
       })
     : [];
 

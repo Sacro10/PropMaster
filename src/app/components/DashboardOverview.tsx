@@ -14,7 +14,7 @@ import { getCurrentAccountId } from '../../lib/api/client';
 export function DashboardOverview() {
   const { isDark, text, border } = useThemeStyles();
   const navigate = useNavigate();
-  const { metrics, recentActivity, systemMetrics, upcomingTasks, loading, error, refetch } = useDashboardData();
+  const { metrics, recentActivity, systemMetrics, loading, error, refetch } = useDashboardData();
   const [isPropertyModalOpen, setIsPropertyModalOpen] = useState(false);
   const [properties, setProperties] = useState<any[]>([]);
   const [loadingProperties, setLoadingProperties] = useState(true);
