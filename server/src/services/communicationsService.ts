@@ -5,7 +5,7 @@
 
 import { supabaseAdmin as supabase } from '../supabase';
 import { logActivityEvent } from './activityService';
-import { sendGmailMessage } from './gmailService';
+import { sendGmailMessage, listGmailInboxMessages } from './gmailService';
 import { AiDisabledError, generateText, getAiStatus } from './aiClient';
 
 // =========================================
@@ -543,6 +543,120 @@ export async function sendMessage(
     isRead: message.is_read,
     readAt: message.read_at,
     createdAt: message.created_at,
+  };
+}
+
+export async function syncInboundGmailMessages(
+  accountId: string,
+  userId: string,
+  options?: {
+    maxResults?: number;
+    query?: string;
+  }
+) {
+  const messages = await listGmailInboxMessages({
+    accountId,
+    userId,
+    maxResults: options?.maxResults,
+    query: options?.query,
+  });
+
+  if (!messages.length) {
+    return { processed: 0, inserted: 0, skipped: 0 };
+  }
+
+  const messageIds = messages
+    .map((message) => message.gmailMessageId)
+    .filter((id): id is string => Boolean(id));
+
+  const { data: existingLinks } = await supabase
+    .from('gmail_message_links')
+    .select('gmail_message_id')
+    .eq('account_id', accountId)
+    .in('gmail_message_id', messageIds);
+
+  const existingSet = new Set(
+    (existingLinks || []).map((link: any) => link.gmail_message_id)
+  );
+
+  let inserted = 0;
+  let skipped = 0;
+
+  for (const message of messages) {
+    if (!message.gmailMessageId || existingSet.has(message.gmailMessageId)) {
+      skipped += 1;
+      continue;
+    }
+
+    const fromEmail = message.from?.toLowerCase() || null;
+    if (!fromEmail) {
+      skipped += 1;
+      continue;
+    }
+
+    const { data: tenantProfile } = await supabase
+      .from('tenant_profiles')
+      .select('user_id')
+      .eq('account_id', accountId)
+      .eq('email', fromEmail)
+      .maybeSingle();
+
+    if (!tenantProfile?.user_id) {
+      skipped += 1;
+      continue;
+    }
+
+    const conversationId = await getOrCreateConversation(accountId, {
+      participants: [userId, tenantProfile.user_id],
+      subject: message.subject || undefined,
+    });
+
+    const { data: insertedMessage, error: insertError } = await supabase
+      .from('messages')
+      .insert({
+        account_id: accountId,
+        conversation_id: conversationId,
+        from_user_id: tenantProfile.user_id,
+        to_user_id: userId,
+        subject: message.subject || null,
+        body: message.body || '',
+        is_read: false,
+        created_at: message.receivedAt.toISOString(),
+      })
+      .select('id, created_at')
+      .single();
+
+    if (insertError || !insertedMessage) {
+      skipped += 1;
+      continue;
+    }
+
+    await supabase
+      .from('conversations')
+      .update({
+        last_message_at: insertedMessage.created_at,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', conversationId)
+      .eq('account_id', accountId);
+
+    await supabase.from('gmail_message_links').insert({
+      account_id: accountId,
+      user_id: userId,
+      gmail_message_id: message.gmailMessageId,
+      thread_id: message.threadId,
+      message_id: insertedMessage.id,
+      received_at: message.receivedAt.toISOString(),
+      created_at: new Date().toISOString(),
+    });
+
+    inserted += 1;
+  }
+
+  return {
+    processed: messages.length,
+    inserted,
+    skipped,
   };
 }
 

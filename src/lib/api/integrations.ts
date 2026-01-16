@@ -34,3 +34,19 @@ export async function getGmailConnectUrl() {
   const data = await response.json();
   return data.url as string;
 }
+
+export async function syncGmailInbox(params?: { maxResults?: number; query?: string }) {
+  const headers = await getAuthHeaders();
+  const response = await fetch(`${API_BASE}/api/integrations/gmail/sync`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      maxResults: params?.maxResults,
+      query: params?.query,
+    }),
+  });
+  if (!response.ok) {
+    throw new Error('Failed to sync Gmail inbox');
+  }
+  return await response.json();
+}

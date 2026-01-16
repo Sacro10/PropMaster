@@ -106,6 +106,7 @@ export function TenantManagement() {
       setDeletingTenantId(tenant.lease.id);
       await deleteTenant(tenant.lease.id, tenant.user_id);
       await refetchTenants();
+      await refetchApps();
       await refetchMetrics();
     } catch (error) {
       console.error('Failed to delete tenant:', error);

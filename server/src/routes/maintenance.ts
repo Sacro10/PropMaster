@@ -349,9 +349,34 @@ router.post(
       });
     } catch (error) {
       console.error('Create emergency request error:', error);
+      let message: string | undefined;
+      if (error instanceof Error && error.message) {
+        message = error.message;
+      } else if (typeof error === 'string') {
+        message = error;
+      } else if (error && typeof error === 'object' && 'message' in error && typeof (error as { message?: string }).message === 'string') {
+        message = (error as { message?: string }).message;
+      } else {
+        try {
+          message = JSON.stringify(error);
+        } catch {
+          message = undefined;
+        }
+      }
+      const details = message || 'Unknown error';
+
+      if (details === 'Unit not found') {
+        res.status(404).json({ error: 'Unit not found', details });
+        return;
+      }
+      if (details === 'Unit does not belong to your account') {
+        res.status(403).json({ error: 'Unit does not belong to your account', details });
+        return;
+      }
+
       res.status(500).json({
         error: 'Failed to create emergency request',
-        details: error instanceof Error ? error.message : 'Unknown error',
+        details,
       });
     }
   }

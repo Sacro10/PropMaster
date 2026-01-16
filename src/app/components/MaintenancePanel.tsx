@@ -202,6 +202,15 @@ export function MaintenancePanel() {
       return { ...vendor, email: cachedEmail };
     });
   };
+  const mergeVendors = (vendors: HVACVendorOption[]) => {
+    const map = new Map<string, HVACVendorOption>();
+    vendors.forEach((vendor) => {
+      if (!map.has(vendor.id)) {
+        map.set(vendor.id, vendor);
+      }
+    });
+    return Array.from(map.values());
+  };
 
   useEffect(() => {
     if (!showHVACOptions) return;
@@ -256,6 +265,10 @@ export function MaintenancePanel() {
           : selectedHVACOption === 'filter_delivery'
             ? filterDeliveryForm.propertyId
             : '';
+    const vendorPropertyId =
+      selectedHVACOption === 'filter_delivery' && propertyId === 'all'
+        ? hvacProperties[0]?.id
+        : propertyId;
     const radiusMiles =
       selectedHVACOption === 'replacement'
         ? replacementRadiusMiles
@@ -267,6 +280,7 @@ export function MaintenancePanel() {
 
     if (
       !propertyId ||
+      !vendorPropertyId ||
       (selectedHVACOption !== 'replacement' &&
         selectedHVACOption !== 'delivery' &&
         selectedHVACOption !== 'filter_delivery')
@@ -281,7 +295,24 @@ export function MaintenancePanel() {
       setHvacVendorsLoading(true);
       setHvacVendorsError(null);
       try {
-        const vendors = await getHVACVendors(propertyId, radiusMiles, true);
+        let vendors: HVACVendorOption[] = [];
+        if (selectedHVACOption === 'filter_delivery' && propertyId === 'all') {
+          const propertyIds = hvacProperties.map((property) => property.id).filter(Boolean);
+          if (propertyIds.length === 0) {
+            setHvacVendors([]);
+            return;
+          }
+
+          const localResults = await Promise.all(
+            propertyIds.map((id) => getHVACVendors(id, radiusMiles, false))
+          );
+          const flattenedLocal = localResults.flat();
+          const externalResults = await getHVACVendors(propertyIds[0], radiusMiles, true);
+          const externalOnly = externalResults.filter((vendor) => vendor.source === 'nominatim');
+          vendors = mergeVendors([...flattenedLocal, ...externalOnly]);
+        } else {
+          vendors = await getHVACVendors(vendorPropertyId, radiusMiles, true);
+        }
         if (isActive) {
           setHvacVendors(hydrateExternalVendorEmails(vendors || []));
         }
@@ -310,6 +341,7 @@ export function MaintenancePanel() {
     replacementRadiusMiles,
     deliveryRadiusMiles,
     filterRadiusMiles,
+    hvacProperties,
   ]);
 
   useEffect(() => {
@@ -661,11 +693,13 @@ export function MaintenancePanel() {
     const property = getPropertyById(filterDeliveryForm.propertyId);
     const vendor = hvacVendors.find((v) => v.id === filterDeliveryForm.vendorId);
     const vendorEmail = vendor?.email || filterDeliveryForm.vendorEmailOverride;
-    const eligibleUnits = property?.units || [];
+    const useAllProperties = filterDeliveryForm.propertyId === 'all';
+    const propertiesToEnroll = useAllProperties ? hvacProperties : property ? [property] : [];
+    const eligibleUnits = propertiesToEnroll.flatMap((prop) => prop.units || []);
     const missingFilterSizes = eligibleUnits.filter((unit) => !unit.hvac_filter_size);
 
-    if (!property || eligibleUnits.length === 0) {
-      alert('No units found for this property.');
+    if (propertiesToEnroll.length === 0 || eligibleUnits.length === 0) {
+      alert('No units found for the selected properties.');
       return;
     }
 
@@ -710,22 +744,23 @@ export function MaintenancePanel() {
         throw error;
       }
 
-      const unitLines = eligibleUnits
-        .map((unit) => `- ${unit.unit_number ? `Unit ${unit.unit_number}` : unit.id.slice(0, 6)} | Filter size: ${unit.hvac_filter_size || 'standard'}`)
-        .join('\n');
-      const subject = `HVAC Filter Delivery Setup - ${property.name}`;
+      const propertySummaryLines = propertiesToEnroll.map((prop) => {
+        const unitCount = (prop.units || []).length;
+        return `- ${prop.name}: ${unitCount} unit${unitCount === 1 ? '' : 's'}`;
+      });
+      const subject = `HVAC Filter Delivery Setup - ${useAllProperties ? 'All Properties' : property?.name || 'Property'}`;
       const body = [
         'HVAC Filter Delivery Setup (Monthly)',
         '',
-        `Property: ${property.name}`,
-        `Address: ${formatPropertyAddress(property)}`,
+        `Property: ${useAllProperties ? 'All Properties' : property?.name || 'Property'}`,
+        useAllProperties ? '' : `Address: ${formatPropertyAddress(property)}`,
         `Start Date: ${nextDelivery}`,
         `Annual Renewal Due: ${annualExpiresDate}`,
         `Filter Type: ${filterDeliveryForm.filterType}`,
         `Quantity per unit: ${filterDeliveryForm.quantity}`,
         '',
-        'Units included:',
-        unitLines,
+        'Properties included:',
+        propertySummaryLines.join('\n'),
         '',
         missingFilterSizes.length > 0
           ? `Units missing filter size (${missingFilterSizes.length}) will use "standard". Please confirm sizes.`
@@ -744,12 +779,13 @@ export function MaintenancePanel() {
 
       await logActivity({
         eventType: 'hvac_filter_delivery_setup',
-        summary: `HVAC filter delivery setup for ${property.name} (${eligibleUnits.length} units)`,
-        entityType: 'property',
-        entityId: property.id,
+        summary: `HVAC filter delivery setup for ${useAllProperties ? 'all properties' : property?.name || 'property'} (${eligibleUnits.length} units)`,
+        entityType: useAllProperties ? 'account' : 'property',
+        entityId: useAllProperties ? undefined : property?.id,
         metadata: {
           vendorId: filterDeliveryForm.vendorId,
           units: eligibleUnits.length,
+          properties: propertiesToEnroll.length,
           nextDelivery,
           annualRenewalRequired: true,
         },
@@ -1786,28 +1822,29 @@ export function MaintenancePanel() {
                           {selectedHVACOption === 'filter_delivery' && (
                             <form onSubmit={handleHVACFilterDeliverySubmit} className="space-y-3">
                               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                                <div>
-                                  <label className={`text-xs ${text.muted}`}>Property</label>
-                                  <select
-                                    value={filterDeliveryForm.propertyId}
-                                    onChange={(event) => {
-                                      const propertyId = event.target.value;
-                                      setFilterDeliveryForm((prev) => ({
-                                        ...prev,
-                                        propertyId,
-                                        vendorId: '',
-                                      }));
-                                    }}
-                                    className={formInputClass}
-                                  >
-                                    <option value="">Select property</option>
-                                    {hvacProperties.map((property) => (
-                                      <option key={property.id} value={property.id}>
-                                        {property.name}
-                                      </option>
-                                    ))}
-                                  </select>
-                                </div>
+                              <div>
+                                <label className={`text-xs ${text.muted}`}>Property</label>
+                                <select
+                                  value={filterDeliveryForm.propertyId}
+                                  onChange={(event) => {
+                                    const propertyId = event.target.value;
+                                    setFilterDeliveryForm((prev) => ({
+                                      ...prev,
+                                      propertyId,
+                                      vendorId: '',
+                                    }));
+                                  }}
+                                  className={formInputClass}
+                                >
+                                  <option value="">Select property</option>
+                                  <option value="all">All Properties</option>
+                                  {hvacProperties.map((property) => (
+                                    <option key={property.id} value={property.id}>
+                                      {property.name}
+                                    </option>
+                                  ))}
+                                </select>
+                              </div>
                                 <div>
                                   <label className={`text-xs ${text.muted}`}>Start Date</label>
                                   <input
@@ -1908,7 +1945,7 @@ export function MaintenancePanel() {
                               </div>
 
                               <p className={`text-xs ${text.muted}`}>
-                                All units in the selected property will be enrolled in the monthly filter delivery.
+                                All units in the selected property (or all properties) will be enrolled in the monthly filter delivery.
                               </p>
 
                               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">

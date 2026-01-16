@@ -215,6 +215,15 @@ export async function getHVACProgramByProperty(): Promise<HVACProgramByProperty[
       throw new Error('No account ID found');
     }
 
+    const { data: properties, error: propertiesError } = await supabase
+      .from('properties')
+      .select('id, name, total_units')
+      .eq('account_id', accountId);
+
+    if (propertiesError) {
+      throw handleSupabaseError(propertiesError, 'fetch HVAC properties');
+    }
+
     // Get all subscriptions with their units and properties
     const { data, error } = await supabase
       .from('hvac_filter_subscriptions')
@@ -242,8 +251,20 @@ export async function getHVACProgramByProperty(): Promise<HVACProgramByProperty[
       throw handleSupabaseError(error, 'fetch HVAC program');
     }
 
-    // Group by property
+    // Group by property (include all properties)
     const propertyMap = new Map<string, HVACProgramByProperty>();
+
+    (properties || []).forEach((property: any) => {
+      propertyMap.set(property.id, {
+        property_id: property.id,
+        property_name: property.name || 'Unknown Property',
+        unit_count: 0,
+        total_units: property.total_units ?? null,
+        next_delivery: null,
+        total_filters: 0,
+        status: 'inactive',
+      });
+    });
 
     (data || []).forEach((sub: any) => {
       const property = sub.units?.properties;
@@ -265,6 +286,7 @@ export async function getHVACProgramByProperty(): Promise<HVACProgramByProperty[
       const propertyData = propertyMap.get(propertyId)!;
       propertyData.unit_count += 1;
       propertyData.total_filters += sub.quantity || 1;
+      propertyData.status = sub.status || propertyData.status;
 
       // Set earliest next delivery date
       if (sub.next_delivery_date) {
@@ -274,7 +296,7 @@ export async function getHVACProgramByProperty(): Promise<HVACProgramByProperty[
       }
     });
 
-    return Array.from(propertyMap.values());
+    return Array.from(propertyMap.values()).sort((a, b) => a.property_name.localeCompare(b.property_name));
   } catch (error) {
     console.error('[Maintenance Metrics API] Error fetching HVAC program:', error);
     return [];

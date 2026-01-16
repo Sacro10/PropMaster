@@ -417,6 +417,30 @@ EXCEPTION
     RAISE NOTICE '✗ Failed to create calculate_avg_response_time: %', SQLERRM;
 END $$;
 
+-- Step 6e: Gmail message links
+DO $$
+BEGIN
+  CREATE TABLE IF NOT EXISTS gmail_message_links (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    account_id UUID NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+    gmail_message_id TEXT NOT NULL,
+    thread_id TEXT,
+    message_id UUID NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+    received_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE(account_id, gmail_message_id)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_gmail_message_links_account ON gmail_message_links(account_id, created_at DESC);
+  CREATE INDEX IF NOT EXISTS idx_gmail_message_links_message ON gmail_message_links(message_id);
+
+  RAISE NOTICE '✓ Created gmail_message_links table';
+EXCEPTION
+  WHEN OTHERS THEN
+    RAISE NOTICE '✗ Failed to create gmail_message_links: %', SQLERRM;
+END $$;
+
 -- Step 6f: Property stats columns
 ALTER TABLE properties ADD COLUMN IF NOT EXISTS occupied_units INTEGER DEFAULT 0;
 

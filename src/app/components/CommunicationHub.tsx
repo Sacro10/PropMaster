@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { MessageSquare, Bell, Search, CircleCheck, Clock, RefreshCw, Trash2 } from 'lucide-react';
 import { useHasFeature } from '../hooks/usePlanGating';
 import { useThemeStyles } from '../hooks/useThemeStyles';
@@ -6,11 +6,13 @@ import { FeatureGate } from './UpgradeCTA';
 import { LoadingPage } from './LoadingSpinner';
 import { ErrorState } from './ErrorBoundary';
 import { useTenants } from '../../lib/hooks/useTenants';
+import { getGmailStatus, syncGmailInbox } from '../../lib/api/integrations';
 import {
   useRecentMessages,
   useMessageTemplates,
   useAutomatedReminders,
   usePortalActivity,
+  useCommunicationStats,
   useMessageSuggestion,
   useSendMessage,
   useCreateMessageTemplate,
@@ -30,6 +32,7 @@ export function CommunicationHub() {
   const { data: templates, loading: templatesLoading, refetch: refetchTemplates } = useMessageTemplates();
   const { data: reminders, loading: remindersLoading, refetch: refetchReminders } = useAutomatedReminders();
   const { data: portalActivity, loading: activityLoading } = usePortalActivity();
+  const { data: communicationStats } = useCommunicationStats();
   const { data: tenants, loading: tenantsLoading } = useTenants();
   const {
     suggestion,
@@ -65,6 +68,28 @@ export function CommunicationHub() {
   const [templateError, setTemplateError] = useState<string | null>(null);
   const [deletingReminderId, setDeletingReminderId] = useState<string | null>(null);
   const aiPanelRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    let isActive = true;
+
+    const syncInbox = async () => {
+      try {
+        const status = await getGmailStatus();
+        if (!isActive || !status?.connected) return;
+        await syncGmailInbox();
+        if (isActive) {
+          await refetchMessages();
+        }
+      } catch (error) {
+        console.warn('[CommunicationHub] Gmail sync skipped:', error);
+      }
+    };
+
+    syncInbox();
+    return () => {
+      isActive = false;
+    };
+  }, [refetchMessages]);
 
   // Show loading state
   if (messagesLoading || activityLoading) {
@@ -116,6 +141,18 @@ export function CommunicationHub() {
     unreadMessages: 0,
     avgResponseTimeMinutes: 0,
     resolvedToday: 0,
+  };
+
+  const normalizedStats = communicationStats ? {
+    activeConversations: Number((communicationStats as any).active_conversations ?? communicationStats.activeConversations ?? 0),
+    avgResponseTimeMinutes: Number((communicationStats as any).avg_response_time_minutes ?? communicationStats.avgResponseTimeMinutes ?? 0),
+    automationRate: Number((communicationStats as any).automation_rate ?? communicationStats.automationRate ?? 0),
+    tenantSatisfaction: Number((communicationStats as any).tenant_satisfaction ?? communicationStats.tenantSatisfaction ?? 0),
+  } : {
+    activeConversations: 0,
+    avgResponseTimeMinutes: 0,
+    automationRate: 0,
+    tenantSatisfaction: 0,
   };
 
   const primaryConversationId = conversations[0]?.id;

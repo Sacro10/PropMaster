@@ -82,6 +82,15 @@ export function CreateMaintenanceRequestModal({
   const [loadingUnits, setLoadingUnits] = useState(true);
   const [emergencyChannels, setEmergencyChannels] = useState<EmergencyChannel[]>(DEFAULT_EMERGENCY_CHANNELS);
 
+  const getErrorMessage = (error: unknown, fallback: string) => {
+    if (error instanceof Error && error.message) return error.message;
+    if (typeof error === 'string' && error) return error;
+    if (error && typeof error === 'object' && 'message' in error && typeof (error as { message?: string }).message === 'string') {
+      return (error as { message?: string }).message as string;
+    }
+    return fallback;
+  };
+
   // Fetch available properties and units
   useEffect(() => {
     const fetchUnits = async () => {
@@ -231,7 +240,11 @@ export function CreateMaintenanceRequestModal({
         alert(emergencyMode ? 'Emergency request created successfully!' : 'Maintenance request created successfully!');
       }
     } else {
-      alert(emergencyMode ? 'Failed to create emergency request. Please try again.' : 'Failed to create maintenance request. Please try again.');
+      const fallback = emergencyMode
+        ? 'Failed to create emergency request. Please try again.'
+        : 'Failed to create maintenance request. Please try again.';
+      const message = getErrorMessage((result as { error?: unknown }).error, fallback);
+      alert(message);
     }
   };
 

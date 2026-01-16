@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import { getGmailAuthUrl, exchangeGmailCode, storeGmailTokens, getGmailToken } from '../services/gmailService';
+import { syncInboundGmailMessages } from '../services/communicationsService';
 import { config } from '../config';
 
 const router = Router();
@@ -60,6 +61,31 @@ router.get('/gmail/callback', async (req, res) => {
   } catch (error) {
     console.error('Gmail callback error:', error);
     res.redirect(`${config.frontendUrl}/app/showings?gmail=error`);
+  }
+});
+
+router.post('/gmail/sync', authenticate, async (req: AuthRequest, res) => {
+  try {
+    if (!req.user?.accountId || !req.user?.id) {
+      res.status(400).json({ error: 'Account ID and User ID required' });
+      return;
+    }
+
+    const maxResults = req.body?.maxResults ? Number(req.body.maxResults) : undefined;
+    const query = typeof req.body?.query === 'string' ? req.body.query : undefined;
+
+    const result = await syncInboundGmailMessages(req.user.accountId, req.user.id, {
+      maxResults,
+      query,
+    });
+
+    res.json(result);
+  } catch (error) {
+    console.error('Gmail sync error:', error);
+    res.status(500).json({
+      error: 'Failed to sync Gmail inbox',
+      details: error instanceof Error ? error.message : 'Unknown error',
+    });
   }
 });
 

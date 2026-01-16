@@ -586,6 +586,22 @@ AS $$
     AND prev_sender IS DISTINCT FROM from_user_id;
 $$;
 
+-- 6e. Communications - Gmail message links for inbound sync
+CREATE TABLE IF NOT EXISTS gmail_message_links (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  account_id UUID NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  gmail_message_id TEXT NOT NULL,
+  thread_id TEXT,
+  message_id UUID NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+  received_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(account_id, gmail_message_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_gmail_message_links_account ON gmail_message_links(account_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_gmail_message_links_message ON gmail_message_links(message_id);
+
 -- 6f. Property stats columns
 ALTER TABLE properties ADD COLUMN IF NOT EXISTS occupied_units INTEGER DEFAULT 0;
 
