@@ -155,7 +155,7 @@ export function AnalyticsPanel() {
       </div>
 
       {/* KPIs */}
-      <div className="grid grid-cols-4 gap-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-6">
         {kpis.map((kpi, index) => {
           const TrendIcon = kpi.trend === 'up' ? TrendingUp : TrendingDown;
           const trendColor = kpi.trend === 'up' ? 'text-emerald-400' : 'text-red-400';
@@ -191,7 +191,7 @@ export function AnalyticsPanel() {
         loading={standardReporting.loading}
         variant="inline"
       >
-        <div className="grid grid-cols-2 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           {/* Revenue Trend */}
           <div className={`${isDark ? 'bg-gradient-to-br from-[#1a1f35] to-[#0f1523]' : 'bg-white shadow-md'} border ${border.default} rounded-xl p-6`}>
             <h3 className="text-2xl mb-6" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
@@ -310,9 +310,9 @@ export function AnalyticsPanel() {
         loading={standardReporting.loading}
         variant="inline"
       >
-        <div className="grid grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
           {/* Property Performance */}
-          <div className={`col-span-2 ${isDark ? 'bg-gradient-to-br from-[#1a1f35] to-[#0f1523]' : 'bg-white shadow-md'} border ${border.default} rounded-xl p-6`}>
+          <div className={`xl:col-span-2 ${isDark ? 'bg-gradient-to-br from-[#1a1f35] to-[#0f1523]' : 'bg-white shadow-md'} border ${border.default} rounded-xl p-6`}>
             <h3 className="text-2xl mb-6" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
               PROPERTY PERFORMANCE
             </h3>
@@ -471,7 +471,7 @@ export function AnalyticsPanel() {
                   <p className={`text-sm ${text.muted}`}>AI insights unavailable.</p>
                 )}
               </div>
-              <div className="grid grid-cols-5 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
                 <div className={`p-3 ${isDark ? 'bg-white/5' : 'bg-gray-100'} rounded-lg`}>
                   <p className="text-2xl font-bold text-emerald-400 mb-1" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
                     23

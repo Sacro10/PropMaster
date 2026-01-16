@@ -121,7 +121,7 @@ export function ApplicationDetailModal({
             <h3 className="text-xl font-bold mb-4" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
               APPLICANT INFORMATION
             </h3>
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className={`p-4 ${isDark ? 'bg-white/5' : 'bg-gray-50'} rounded-lg`}>
                 <div className="flex items-center gap-2 mb-2">
                   <User className="w-4 h-4 text-[#ff6b35]" />
@@ -165,7 +165,7 @@ export function ApplicationDetailModal({
             <h3 className="text-xl font-bold mb-4" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
               PROPERTY DETAILS
             </h3>
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className={`p-4 ${isDark ? 'bg-white/5' : 'bg-gray-50'} rounded-lg`}>
                 <div className="flex items-center gap-2 mb-2">
                   <MapPin className="w-4 h-4 text-[#ff6b35]" />
@@ -189,7 +189,7 @@ export function ApplicationDetailModal({
             <h3 className="text-xl font-bold mb-4" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
               FINANCIAL INFORMATION
             </h3>
-            <div className="grid grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
               <div className={`p-4 ${isDark ? 'bg-white/5' : 'bg-gray-50'} rounded-lg`}>
                 <div className="flex items-center gap-2 mb-2">
                   <DollarSign className="w-4 h-4 text-[#ff6b35]" />
@@ -259,7 +259,7 @@ export function ApplicationDetailModal({
                 </div>
 
                 {/* Screening Details Grid */}
-                <div className="grid grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                   <div className={`p-4 ${isDark ? 'bg-white/5' : 'bg-gray-50'} rounded-lg`}>
                     <div className="flex items-center gap-2 mb-2">
                       {screening.backgroundCheckStatus === 'clear' || screening.background_check_status === 'clear' ? (

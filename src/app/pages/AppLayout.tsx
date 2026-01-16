@@ -307,8 +307,8 @@ export function AppLayout() {
           isDark ? 'border-white/10 bg-[#0f1523]/80' : 'border-gray-200 bg-white/80'
         } backdrop-blur-xl`}
       >
-        <div className="max-w-[1800px] mx-auto px-8 py-6">
-          <div className="flex items-center justify-between">
+        <div className="max-w-[1800px] mx-auto px-4 sm:px-6 lg:px-8 py-6">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
             <div className="flex items-center gap-4 cursor-pointer" onClick={() => navigate('/')}>
               <div className="bg-gradient-to-br from-[#ff6b35] to-[#f7931e] p-3 rounded-lg">
                 <Building className="w-7 h-7 text-white" />
@@ -323,14 +323,14 @@ export function AppLayout() {
               </div>
             </div>
 
-            <div className="flex items-center gap-6">
+            <div className="flex flex-wrap items-center gap-4 justify-end w-full lg:w-auto">
               <div className="relative" ref={unitsSummaryRef}>
                 <button
                   type="button"
                   onClick={() => setShowUnitsSummary(prev => !prev)}
                   aria-expanded={showUnitsSummary}
                   aria-haspopup="dialog"
-                  className={`flex items-center gap-3 px-4 py-2 ${
+                  className={`flex items-center gap-3 px-4 py-2 w-full sm:w-auto justify-between sm:justify-start ${
                     isDark ? 'bg-white/5 border-white/10 hover:bg-white/10' : 'bg-gray-50 border-gray-200 hover:bg-gray-100'
                   } rounded-lg border transition-colors`}
                 >
@@ -410,7 +410,7 @@ export function AppLayout() {
                 {/* Notifications Dropdown */}
                 {showNotifications && (
                   <div
-                    className={`absolute top-full right-0 mt-2 w-96 ${
+                    className={`absolute top-full right-0 mt-2 w-96 max-w-[calc(100vw-2rem)] sm:max-w-sm ${
                       isDark ? 'bg-[#1a1f35] border-white/10' : 'bg-white border-gray-200'
                     } border rounded-lg shadow-xl z-50 max-h-[500px] flex flex-col`}
                   >
@@ -531,7 +531,7 @@ export function AppLayout() {
                 <Settings className="w-5 h-5" />
               </button>
 
-              <div className={`flex items-center gap-3 pl-6 border-l ${isDark ? 'border-white/10' : 'border-gray-200'}`}>
+              <div className={`flex items-center gap-3 sm:pl-6 sm:border-l ${isDark ? 'border-white/10' : 'border-gray-200'}`}>
                 <div className="text-right">
                   <p className="text-sm font-medium" style={{ fontFamily: 'Work Sans, sans-serif' }}>
                     {user?.email}
@@ -576,8 +576,8 @@ export function AppLayout() {
           isDark ? 'border-white/10 bg-[#0f1523]/60' : 'border-gray-200 bg-gray-50/60'
         } backdrop-blur-lg`}
       >
-        <div className="max-w-[1800px] mx-auto px-8">
-          <div className="flex gap-1">
+        <div className="max-w-[1800px] mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex gap-1 overflow-x-auto no-scrollbar py-2">
             {navItems.map((item) => {
               const Icon = item.icon
               const isActive = location.pathname === item.path
@@ -585,7 +585,7 @@ export function AppLayout() {
                 <button
                   key={item.id}
                   onClick={() => navigate(item.path)}
-                  className={`flex items-center gap-2 px-6 py-4 transition-all relative ${
+                  className={`flex flex-shrink-0 items-center gap-2 px-4 sm:px-5 py-3 transition-all relative whitespace-nowrap ${
                     isActive
                       ? isDark
                         ? 'text-white'
@@ -609,7 +609,7 @@ export function AppLayout() {
       </nav>
 
       {/* Main Content */}
-      <main className="relative max-w-[1800px] mx-auto px-8 py-8">
+      <main className="relative max-w-[1800px] mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <Outlet />
       </main>
     </div>

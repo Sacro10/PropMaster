@@ -88,13 +88,13 @@ export function HomePage() {
 
   return (
     <div className={`min-h-screen ${isDark ? 'bg-[#0a0e1a] text-white' : 'bg-white text-gray-900'}`}>
-      <div className="max-w-7xl mx-auto px-8 pt-6">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-6">
         <SupabaseConfigBanner />
       </div>
       {/* Header */}
       <header className={`sticky top-0 z-50 border-b ${isDark ? 'border-white/10 bg-[#0f1523]/95' : 'border-gray-200 bg-white/95'} backdrop-blur-xl`}>
-        <div className="max-w-7xl mx-auto px-8 py-6">
-          <div className="flex items-center justify-between">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+          <div className="flex flex-wrap items-center justify-between gap-4">
             <div className="flex items-center gap-4">
               <div className="bg-gradient-to-br from-[#ff6b35] to-[#f7931e] p-3 rounded-lg">
                 <Building className="w-7 h-7 text-white" />
@@ -109,7 +109,7 @@ export function HomePage() {
               </div>
             </div>
 
-            <div className="flex items-center gap-4">
+            <div className="flex flex-wrap items-center justify-end gap-3 sm:gap-4">
               <button
                 onClick={() => navigate('/pricing')}
                 className={`px-6 py-2 rounded-lg font-medium transition-colors ${isDark ? 'hover:bg-white/5' : 'hover:bg-gray-100'}`}
@@ -150,7 +150,7 @@ export function HomePage() {
       </header>
 
       {/* Hero Section */}
-      <section className={`max-w-7xl mx-auto px-8 py-20 text-center relative isolate overflow-hidden rounded-3xl ${isDark ? 'bg-[#0a0e1a]' : 'bg-gradient-to-br from-gray-50 to-gray-100'}`}>
+      <section className={`max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-16 sm:py-20 text-center relative isolate overflow-hidden rounded-3xl ${isDark ? 'bg-[#0a0e1a]' : 'bg-gradient-to-br from-gray-50 to-gray-100'}`}>
         <div className="absolute inset-0 z-0 pointer-events-none">
           <video
             className="h-full w-full object-cover brightness-125"
@@ -172,16 +172,16 @@ export function HomePage() {
               AI-Powered Property Management
             </span>
           </div>
-          <h2 className={`text-6xl mb-6 ${isDark ? 'text-white' : 'text-gray-900'}`} style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
+          <h2 className={`text-4xl sm:text-5xl lg:text-6xl mb-6 ${isDark ? 'text-white' : 'text-gray-900'}`} style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
             AUTOMATE YOUR PROPERTY
             <br />
             MANAGEMENT WORKFLOW
           </h2>
-          <p className={`text-xl max-w-3xl mx-auto mb-8 ${isDark ? 'text-white/80' : 'text-gray-700'}`} style={{ fontFamily: 'Work Sans, sans-serif' }}>
+          <p className={`text-lg sm:text-xl max-w-3xl mx-auto mb-8 ${isDark ? 'text-white/80' : 'text-gray-700'}`} style={{ fontFamily: 'Work Sans, sans-serif' }}>
             From tenant screening to rent collection, maintenance tracking to analytics —
             manage everything in one intelligent platform.
           </p>
-          <div className="flex items-center justify-center gap-4">
+          <div className="flex flex-col sm:flex-row items-center justify-center gap-3 sm:gap-4">
             <button
               onClick={() => navigate(user ? '/app/dashboard' : '/auth')}
               className="px-8 py-4 bg-gradient-to-r from-[#ff6b35] to-[#f7931e] rounded-lg font-medium text-lg hover:scale-105 transition-transform"
@@ -207,16 +207,16 @@ export function HomePage() {
 
       {/* Features Section */}
       <section className={`py-20 ${isDark ? 'bg-[#0f1523]/50' : 'bg-gray-50'}`}>
-        <div className="max-w-7xl mx-auto px-8">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="text-center mb-16">
-            <h3 className="text-4xl mb-4" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
+            <h3 className="text-3xl sm:text-4xl mb-4" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
               EVERYTHING YOU NEED
             </h3>
             <p className={`text-lg ${isDark ? 'text-white/70' : 'text-gray-600'}`} style={{ fontFamily: 'Work Sans, sans-serif' }}>
               Powerful features to streamline your property management
             </p>
           </div>
-          <div className="grid grid-cols-3 gap-8">
+          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-6 lg:gap-8">
             {features.map((feature, index) => {
               const Icon = feature.icon
               return (
@@ -242,16 +242,16 @@ export function HomePage() {
 
       {/* Pricing Section */}
       <section id="pricing" className="py-20">
-        <div className="max-w-7xl mx-auto px-8">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="text-center mb-16">
-            <h3 className="text-4xl mb-4" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
+            <h3 className="text-3xl sm:text-4xl mb-4" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
               CHOOSE YOUR PLAN
             </h3>
             <p className={`text-lg ${isDark ? 'text-white/70' : 'text-gray-600'}`} style={{ fontFamily: 'Work Sans, sans-serif' }}>
               Start free, upgrade as you grow
             </p>
           </div>
-          <div className="grid grid-cols-3 gap-8">
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6 lg:gap-8">
             {plans.map((plan, index) => (
               <div
                 key={index}
@@ -305,8 +305,8 @@ export function HomePage() {
 
       {/* Footer */}
       <footer className={`border-t ${isDark ? 'border-white/10 bg-[#0f1523]' : 'border-gray-200 bg-gray-50'} py-12`}>
-        <div className="max-w-7xl mx-auto px-8">
-          <div className="flex items-center justify-between">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex items-center gap-4">
               <div className="bg-gradient-to-br from-[#ff6b35] to-[#f7931e] p-2 rounded-lg">
                 <Building className="w-5 h-5 text-white" />

@@ -287,6 +287,7 @@ export function MaintenancePanel() {
     ) {
       setHvacVendors([]);
       setHvacVendorsError(null);
+      setHvacVendorsLoading(false);
       return;
     }
 
@@ -904,7 +905,7 @@ export function MaintenancePanel() {
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-4 gap-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-6">
         {maintenanceStats.map((stat, index) => {
           const Icon = stat.icon;
           return (
@@ -934,10 +935,10 @@ export function MaintenancePanel() {
       </div>
 
       {/* Main Grid */}
-      <div className="grid grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
         {/* Maintenance Requests */}
-        <div className={`col-span-2 ${isDark ? 'bg-gradient-to-br from-[#1a1f35] to-[#0f1523]' : 'bg-white shadow-md'} border ${border.default} rounded-xl p-6`}>
-          <div className="flex items-center justify-between mb-6">
+        <div className={`xl:col-span-2 ${isDark ? 'bg-gradient-to-br from-[#1a1f35] to-[#0f1523]' : 'bg-white shadow-md'} border ${border.default} rounded-xl p-6`}>
+          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between mb-6">
             <h3 className="text-2xl" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
               MAINTENANCE REQUESTS
             </h3>
@@ -2068,7 +2069,7 @@ export function MaintenancePanel() {
               {maintenanceRouting.hasAccess && routingMetrics && (
                 <div className="space-y-3">
                   <p className={`text-sm ${text.muted} font-medium`}>Smart Routing Metrics</p>
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div className={`p-3 ${isDark ? 'bg-white/5' : 'bg-gray-50'} rounded-lg`}>
                       <p className={`text-xs ${text.inactive} mb-1`}>Assignment Rate</p>
                       <p className="text-lg font-bold text-emerald-400">{routingMetrics.assignment_rate}%</p>
@@ -2077,7 +2078,7 @@ export function MaintenancePanel() {
                       <p className={`text-xs ${text.inactive} mb-1`}>Avg Response</p>
                       <p className="text-lg font-bold text-emerald-400">{routingMetrics.avg_acceptance_time_hours}h</p>
                     </div>
-                    <div className={`p-3 ${isDark ? 'bg-white/5' : 'bg-gray-50'} rounded-lg col-span-2`}>
+                    <div className={`p-3 ${isDark ? 'bg-white/5' : 'bg-gray-50'} rounded-lg sm:col-span-2`}>
                       <p className={`text-xs ${text.inactive} mb-1`}>Routing Efficiency</p>
                       <p className="text-lg font-bold text-emerald-400">{routingMetrics.vendor_utilization_rate}%</p>
                     </div>

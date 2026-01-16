@@ -110,7 +110,7 @@ export function RentCollection() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h2 className="text-4xl mb-2" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
             RENT COLLECTIONS & DISBURSEMENTS
@@ -119,7 +119,7 @@ export function RentCollection() {
             Convenient payment options and owner disbursements with integrated accounting
           </p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
           <button
             onClick={handleRefreshData}
             className={`px-4 py-2 ${isDark ? 'bg-white/5 hover:bg-white/10' : 'bg-gray-100 hover:bg-gray-200'} rounded-lg transition-colors flex items-center gap-2`}
@@ -144,7 +144,7 @@ export function RentCollection() {
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-4 gap-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-6">
         {collectionStatsDisplay.map((stat, index) => (
           <div
             key={index}
@@ -161,9 +161,9 @@ export function RentCollection() {
       </div>
 
       {/* Main Grid */}
-      <div className="grid grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
         {/* Recent Payments */}
-        <div className={`col-span-2 ${isDark ? 'bg-gradient-to-br from-[#1a1f35] to-[#0f1523]' : 'bg-white shadow-md'} border ${border.default} rounded-xl p-6`}>
+        <div className={`xl:col-span-2 ${isDark ? 'bg-gradient-to-br from-[#1a1f35] to-[#0f1523]' : 'bg-white shadow-md'} border ${border.default} rounded-xl p-6`}>
           <div className="flex items-center justify-between mb-6">
             <h3 className="text-2xl" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
               RECENT PAYMENTS
@@ -204,25 +204,25 @@ export function RentCollection() {
                         </div>
                       </div>
 
-                      <div className="flex items-center gap-8">
-                        <div className="text-right">
+                      <div className="flex flex-col sm:flex-row sm:items-center gap-4 sm:gap-8 w-full sm:w-auto">
+                        <div className="text-left sm:text-right w-full sm:w-auto">
                           <p className={`text-sm ${text.muted} mb-1`}>Amount</p>
                           <p className="font-semibold text-lg" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
                             {formatCurrency(payment.amount)}
                           </p>
                         </div>
 
-                        <div className="text-right">
+                        <div className="text-left sm:text-right w-full sm:w-auto">
                           <p className={`text-sm ${text.muted} mb-1`}>Method</p>
                           <p className="text-sm">{payment.payment_method || 'N/A'}</p>
                         </div>
 
-                        <div className="text-right">
+                        <div className="text-left sm:text-right w-full sm:w-auto">
                           <p className={`text-sm ${text.muted} mb-1`}>Date</p>
                           <p className="text-sm">{formatDisplayDate(payment.payment_date)}</p>
                         </div>
 
-                        <div>
+                        <div className="w-full sm:w-auto">
                           <span
                             className={`px-3 py-1 rounded-full text-xs font-medium ${
                               payment.payment_status === 'completed'
@@ -260,7 +260,7 @@ export function RentCollection() {
         <div className="space-y-6">
           {/* Pending Payments */}
           <div className={`${isDark ? 'bg-gradient-to-br from-[#1a1f35] to-[#0f1523]' : 'bg-white shadow-md'} border ${border.default} rounded-xl p-6`}>
-            <div className="flex items-center justify-between mb-6">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-6">
               <h3 className="text-xl" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
                 PENDING PAYMENTS
               </h3>
@@ -389,7 +389,7 @@ export function RentCollection() {
 
       {/* Owner Disbursements */}
       <div className={`${isDark ? 'bg-gradient-to-br from-[#1a1f35] to-[#0f1523]' : 'bg-white shadow-md'} border ${border.default} rounded-xl p-6`}>
-        <div className="flex items-center justify-between mb-6">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-6">
           <h3 className="text-2xl" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
             OWNER DISBURSEMENTS
           </h3>
@@ -417,7 +417,7 @@ export function RentCollection() {
             </p>
           </div>
         ) : (
-          <div className="grid grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
             {disbursements.slice(0, 3).map((disbursement) => (
               <div
                 key={disbursement.id}
@@ -482,7 +482,7 @@ export function RentCollection() {
                 Accept payments via credit card, debit card, ACH, bank transfer, and check. Automated rent collection with auto-pay enrollment reduces late payments by 94%. Integrated accounting automatically categorizes income, tracks expenses, and generates financial reports.
               </p>
               {stats && (
-                <div className="grid grid-cols-5 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
                   <div className={`p-3 ${isDark ? 'bg-white/5' : 'bg-gray-100'} rounded-lg`}>
                     <p className="text-2xl font-bold text-emerald-400 mb-1" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
                       {stats.collection_rate}%

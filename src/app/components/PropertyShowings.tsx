@@ -199,7 +199,7 @@ export function PropertyShowings() {
         </div>
 
         {/* Stats */}
-        <div className="grid grid-cols-4 gap-6">
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-6">
           {showingStatsDisplay.map((stat, index) => (
             <div
               key={index}
@@ -216,9 +216,9 @@ export function PropertyShowings() {
         </div>
 
         {/* Main Grid */}
-        <div className="grid grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
           {/* Upcoming Showings */}
-          <div className={`col-span-2 ${isDark ? 'bg-gradient-to-br from-[#1a1f35] to-[#0f1523]' : 'bg-white shadow-md'} border ${border.default} rounded-xl p-6`}>
+          <div className={`xl:col-span-2 ${isDark ? 'bg-gradient-to-br from-[#1a1f35] to-[#0f1523]' : 'bg-white shadow-md'} border ${border.default} rounded-xl p-6`}>
             <h3 className="text-2xl mb-6" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
               UPCOMING SHOWINGS
             </h3>
@@ -448,7 +448,7 @@ export function PropertyShowings() {
             </div>
           ) : (
             <>
-              <div className="grid grid-cols-4 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
                 {visibleProperties.map((property, index) => (
                 <div
                   key={index}

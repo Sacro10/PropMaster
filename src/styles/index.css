@@ -2,3 +2,12 @@
 @import './tailwind.css';
 @import './theme.css';
 @import './theme-adaptive.css';
+
+/* Utility helpers */
+.no-scrollbar {
+  scrollbar-width: none;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}

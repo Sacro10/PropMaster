@@ -8,14 +8,16 @@ import * as api from '../api/communicationsClient';
 export function useRecentMessages() {
   const [data, setData] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<Error | null>(null);
   const [total, setTotal] = useState(0);
+  const pageSize = 10;
 
   const fetchData = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
-      const result = await api.getConversations({ limit: 10 });
+      const result = await api.getConversations({ limit: pageSize, offset: 0 });
       setData(result.conversations || []);
       setTotal(result.total);
     } catch (err) {
@@ -24,13 +26,47 @@ export function useRecentMessages() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [pageSize]);
+
+  const loadMore = useCallback(async () => {
+    if (loadingMore) return;
+    if (total && data.length >= total) return;
+    try {
+      setLoadingMore(true);
+      const result = await api.getConversations({ limit: pageSize, offset: data.length });
+      const next = result.conversations || [];
+      setData((prev) => {
+        const seen = new Set(prev.map((item: any) => item.id));
+        const merged = [...prev];
+        for (const item of next) {
+          if (!seen.has(item.id)) {
+            merged.push(item);
+          }
+        }
+        return merged;
+      });
+      setTotal(result.total);
+    } catch (err) {
+      console.error('[useRecentMessages] Error loading more messages:', err);
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [data.length, loadingMore, pageSize, total]);
 
   useEffect(() => {
     fetchData();
   }, [fetchData]);
 
-  return { data, loading, error, total, refetch: fetchData };
+  return {
+    data,
+    loading,
+    loadingMore,
+    error,
+    total,
+    hasMore: data.length < total,
+    refetch: fetchData,
+    loadMore,
+  };
 }
 
 export function useMessageTemplates() {

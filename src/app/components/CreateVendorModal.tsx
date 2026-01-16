@@ -210,7 +210,7 @@ export function CreateVendorModal({
             <h3 className={`text-lg font-semibold mb-4 ${text.primary}`} style={{ fontFamily: 'Work Sans, sans-serif' }}>
               Business Information
             </h3>
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="col-span-2">
                 <label className={`block text-sm font-medium mb-2 ${text.primary}`}>
                   Business Name <span className="text-red-500">*</span>
@@ -346,7 +346,7 @@ export function CreateVendorModal({
                 />
               </div>
 
-              <div className="grid grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 <div>
                   <label className={`block text-sm font-medium mb-2 ${text.primary}`}>
                     City <span className="text-red-500">*</span>
@@ -422,7 +422,7 @@ export function CreateVendorModal({
             <h3 className={`text-lg font-semibold mb-4 ${text.primary}`} style={{ fontFamily: 'Work Sans, sans-serif' }}>
               License & Insurance <span className="text-sm font-normal text-gray-500">(Optional)</span>
             </h3>
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label className={`block text-sm font-medium mb-2 ${text.primary}`}>
                   License Number
@@ -483,7 +483,7 @@ export function CreateVendorModal({
             <p className={`text-sm ${text.muted} mb-3`}>
               Select all services this vendor provides
             </p>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               {SERVICE_CATEGORIES.map((category) => (
                 <label
                   key={category.value}

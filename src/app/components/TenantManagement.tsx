@@ -371,7 +371,7 @@ export function TenantManagement() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h2 className="text-4xl mb-2" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
             TENANT MANAGEMENT
@@ -380,7 +380,7 @@ export function TenantManagement() {
             Comprehensive tenant screening with AI risk assessment
           </p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
           <button
             onClick={() => {
               refetchTenants();
@@ -408,7 +408,7 @@ export function TenantManagement() {
         variant="inline"
       >
         {metricsLoading ? (
-          <div className="grid grid-cols-4 gap-6">
+          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-6">
             {[...Array(4)].map((_, i) => (
               <div key={i} className={`${isDark ? 'bg-gradient-to-br from-[#1a1f35] to-[#0f1523]' : 'bg-gray-100'} border ${border.default} rounded-xl p-6 animate-pulse`}>
                 <div className="h-4 bg-white/10 rounded w-1/2 mb-4"></div>
@@ -417,12 +417,12 @@ export function TenantManagement() {
             ))}
           </div>
         ) : (
-          <div className="grid grid-cols-4 gap-6">
-            {screeningMetrics.map((metric, index) => (
-              <div
-                key={index}
-                className={`${isDark ? 'bg-gradient-to-br from-[#1a1f35] to-[#0f1523]' : 'bg-white shadow-md'} border ${border.default} rounded-xl p-6`}
-              >
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-6">
+        {screeningMetrics.map((metric, index) => (
+          <div
+            key={index}
+            className={`${isDark ? 'bg-gradient-to-br from-[#1a1f35] to-[#0f1523]' : 'bg-white shadow-md'} border ${border.default} rounded-xl p-6`}
+          >
                 <p className={`text-sm ${text.muted} mb-2`} style={{ fontFamily: 'Work Sans, sans-serif' }}>
                   {metric.label}
                 </p>
@@ -443,14 +443,14 @@ export function TenantManagement() {
       </FeatureGate>
 
       {/* Main Grid */}
-      <div className="grid grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
         {/* Active Tenants */}
-        <div className={`col-span-2 ${isDark ? 'bg-gradient-to-br from-[#1a1f35] to-[#0f1523]' : 'bg-white shadow-md'} border ${border.default} rounded-xl p-6`}>
-          <div className="flex items-center justify-between mb-6">
+        <div className={`xl:col-span-2 ${isDark ? 'bg-gradient-to-br from-[#1a1f35] to-[#0f1523]' : 'bg-white shadow-md'} border ${border.default} rounded-xl p-6`}>
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between mb-6">
             <h3 className="text-2xl" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
               ACTIVE TENANTS
             </h3>
-            <div className="flex items-center gap-3">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-3">
               <div className="flex flex-col gap-1">
                 <div className="relative">
                   <Search className={`w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 ${text.muted}`} />
@@ -459,7 +459,7 @@ export function TenantManagement() {
                     placeholder="Search by name, email, phone, property, or unit..."
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
-                    className={`pl-10 pr-10 py-2 w-96 ${isDark ? 'bg-white/5' : 'bg-gray-50'} border ${border.default} rounded-lg text-sm focus:outline-none focus:border-[#ff6b35]/50 transition-colors`}
+                    className={`pl-10 pr-10 py-2 w-full sm:w-96 ${isDark ? 'bg-white/5' : 'bg-gray-50'} border ${border.default} rounded-lg text-sm focus:outline-none focus:border-[#ff6b35]/50 transition-colors`}
                     style={{ fontFamily: 'Work Sans, sans-serif' }}
                   />
                   {searchQuery && (
@@ -675,7 +675,7 @@ export function TenantManagement() {
                       {applicant.unit ? `${applicant.property?.name} #${applicant.unit.unit_number}` : 'No unit specified'}
                     </p>
 
-                    <div className="grid grid-cols-2 gap-2 mb-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-4">
                       <div className={`p-2 ${isDark ? 'bg-white/5' : 'bg-white'} rounded`}>
                         <p className={`text-xs ${text.inactive} mb-1`}>Income</p>
                         <p className="text-sm font-medium">
@@ -744,7 +744,7 @@ export function TenantManagement() {
               <p className={`${text.secondary} mb-4`} style={{ fontFamily: 'Work Sans, sans-serif' }}>
                 Our advanced AI analyzes credit history, income verification, employment status, rental history, and behavioral patterns to provide comprehensive risk assessments in real-time. Less than 1% eviction rate across all screened tenants.
               </p>
-              <div className="grid grid-cols-4 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                 <div className={`p-3 ${isDark ? 'bg-white/5' : 'bg-gray-50'} rounded-lg`}>
                   <p className="text-2xl font-bold text-emerald-400 mb-1" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
                     {calculatedMetrics.aiAccuracySamples > 0 ? `${Math.round(calculatedMetrics.aiAccuracy)}%` : 'N/A'}

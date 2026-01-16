@@ -28,7 +28,15 @@ export function CommunicationHub() {
   const communicationHub = useHasFeature('communication_hub');
 
   // Fetch data
-  const { data: messages, loading: messagesLoading, error: messagesError, refetch: refetchMessages } = useRecentMessages();
+  const {
+    data: messages,
+    loading: messagesLoading,
+    loadingMore: messagesLoadingMore,
+    error: messagesError,
+    hasMore: hasMoreMessages,
+    refetch: refetchMessages,
+    loadMore: loadMoreMessages,
+  } = useRecentMessages();
   const { data: templates, loading: templatesLoading, refetch: refetchTemplates } = useMessageTemplates();
   const { data: reminders, loading: remindersLoading, refetch: refetchReminders } = useAutomatedReminders();
   const { data: portalActivity, loading: activityLoading } = usePortalActivity();
@@ -588,7 +596,7 @@ export function CommunicationHub() {
       )}
 
       {/* Stats */}
-      <div className="grid grid-cols-4 gap-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-6">
         {communicationStatsDisplay.map((stat, index) => (
           <div
             key={index}
@@ -608,10 +616,10 @@ export function CommunicationHub() {
       </div>
 
       {/* Main Grid */}
-      <div className="grid grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
         {/* Conversations */}
-        <div className={`col-span-2 ${isDark ? 'bg-gradient-to-br from-[#1a1f35] to-[#0f1523]' : 'bg-white shadow-md'} border ${border.default} rounded-xl p-6`}>
-          <div className="flex items-center justify-between mb-6">
+        <div className={`xl:col-span-2 ${isDark ? 'bg-gradient-to-br from-[#1a1f35] to-[#0f1523]' : 'bg-white shadow-md'} border ${border.default} rounded-xl p-6`}>
+          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between mb-6">
             <h3 className="text-2xl" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
               CONVERSATIONS
             </h3>
@@ -701,8 +709,12 @@ export function CommunicationHub() {
           </div>
           )}
 
-          <button className={`w-full mt-4 py-3 ${isDark ? 'bg-white/5 hover:bg-white/10' : 'bg-gray-100 hover:bg-gray-200'} rounded-lg text-sm font-medium transition-colors`}>
-            View All Conversations
+          <button
+            onClick={loadMoreMessages}
+            disabled={!hasMoreMessages || messagesLoadingMore}
+            className={`w-full mt-4 py-3 ${isDark ? 'bg-white/5 hover:bg-white/10' : 'bg-gray-100 hover:bg-gray-200'} rounded-lg text-sm font-medium transition-colors disabled:opacity-60 disabled:cursor-not-allowed`}
+          >
+            {messagesLoadingMore ? 'Loading...' : hasMoreMessages ? 'View More Conversations' : 'All Conversations Loaded'}
           </button>
         </div>
 
@@ -884,7 +896,7 @@ export function CommunicationHub() {
             </p>
           </div>
         ) : (
-          <div className="grid grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
             {normalizedReminders.map((reminder) => (
               <div
                 key={reminder.id}
@@ -967,54 +979,6 @@ export function CommunicationHub() {
         )}
       </div>
 
-      {/* Communication Features */}
-      <div className={`${isDark ? 'bg-gradient-to-br from-[#1a1f35] to-[#0f1523]' : 'bg-white shadow-md'} border ${border.default} rounded-xl p-6`}>
-        <div className="flex items-start gap-6">
-          <div className="p-4 bg-gradient-to-br from-[#ff6b35] to-[#f7931e] rounded-xl">
-            <MessageSquare className="w-8 h-8 text-white" />
-          </div>
-          <div className="flex-1">
-            <h3 className="text-2xl mb-2" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
-              COMPREHENSIVE COMMUNICATION PLATFORM
-            </h3>
-            <p className={`${text.secondary} mb-4`} style={{ fontFamily: 'Work Sans, sans-serif' }}>
-              Built-in messaging system with automated reminders for rent payments, lease renewals, maintenance updates, and property inspections. Smart templates and AI-powered responses reduce communication time by 78%. All conversations are automatically logged and searchable.
-            </p>
-            <div className="grid grid-cols-5 gap-4">
-              <div className={`p-3 ${isDark ? 'bg-white/5' : 'bg-gray-50'} rounded-lg`}>
-                <p className="text-2xl font-bold text-emerald-400 mb-1" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
-                  {normalizedStats?.automationRate || 78}%
-                </p>
-                <p className={`text-xs ${text.muted}`}>Automation Rate</p>
-              </div>
-              <div className={`p-3 ${isDark ? 'bg-white/5' : 'bg-gray-50'} rounded-lg`}>
-                <p className="text-2xl font-bold text-emerald-400 mb-1" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
-                  {normalizedStats?.avgResponseTimeMinutes || 18}min
-                </p>
-                <p className={`text-xs ${text.muted}`}>Avg. Response</p>
-              </div>
-              <div className={`p-3 ${isDark ? 'bg-white/5' : 'bg-gray-50'} rounded-lg`}>
-                <p className="text-2xl font-bold text-emerald-400 mb-1" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
-                  {normalizedStats?.tenantSatisfaction || 96}%
-                </p>
-                <p className={`text-xs ${text.muted}`}>Satisfaction</p>
-              </div>
-              <div className={`p-3 ${isDark ? 'bg-white/5' : 'bg-gray-50'} rounded-lg`}>
-                <p className="text-2xl font-bold text-emerald-400 mb-1" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
-                  24/7
-                </p>
-                <p className={`text-xs ${text.muted}`}>Portal Access</p>
-              </div>
-              <div className={`p-3 ${isDark ? 'bg-white/5' : 'bg-gray-50'} rounded-lg`}>
-                <p className="text-2xl font-bold text-emerald-400 mb-1" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
-                  {normalizedStats?.activeConversations || 142}
-                </p>
-                <p className={`text-xs ${text.muted}`}>Active Tenants</p>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
       </div>
 
       {/* New Reminder Modal */}
