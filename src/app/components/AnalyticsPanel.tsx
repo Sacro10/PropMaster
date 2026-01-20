@@ -1,12 +1,14 @@
 import { useState } from 'react';
-import { TrendingUp, TrendingDown, Activity, FileText, RefreshCw, Download } from 'lucide-react';
+import { TrendingUp, TrendingDown, Activity, FileText, RefreshCw, Download, Plus } from 'lucide-react';
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 import { useHasFeature } from '../hooks/usePlanGating';
 import { useThemeStyles } from '../hooks/useThemeStyles';
 import { FeatureGate } from './UpgradeCTA';
 import { LoadingPage } from './LoadingSpinner';
 import { ErrorState } from './ErrorBoundary';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from './ui/dialog';
 import { formatCurrencyCompact, formatPercentageChange, formatCurrency } from '../../lib/utils/currencyHelpers';
+import { createExpense } from '../../lib/api/expenses';
 import type { TimeframeOption } from '../../lib/hooks/useAnalytics';
 import {
   useAnalyticsMetrics,
@@ -32,9 +34,19 @@ export function AnalyticsPanel() {
   const { data: revenueTrend, loading: revenueLoading } = useRevenueTrend(timeframe);
   const { data: occupancyTrend, loading: occupancyLoading } = useOccupancyTrend(timeframe);
   const { data: propertyPerformance, loading: propertyLoading } = usePropertyPerformance(timeframe);
-  const { data: expenseBreakdown, loading: expenseLoading } = useExpenseBreakdown(timeframe);
+  const { data: expenseBreakdown, loading: expenseLoading, refetch: refetchExpenseBreakdown } = useExpenseBreakdown(timeframe);
   const { exportData, loading: exportLoading } = useExportAnalytics();
   const { data: insights, loading: insightsLoading } = useAnalyticsInsights(timeframe);
+  const [expenseOpen, setExpenseOpen] = useState(false);
+  const [expenseSubmitting, setExpenseSubmitting] = useState(false);
+  const [expenseError, setExpenseError] = useState<string | null>(null);
+  const [expenseForm, setExpenseForm] = useState({
+    amount: '',
+    expenseDate: new Date().toISOString().split('T')[0],
+    categoryName: '',
+    description: '',
+    paymentMethod: 'manual',
+  });
 
   // Show loading state
   if (metricsLoading) {
@@ -82,6 +94,47 @@ export function AnalyticsPanel() {
       trend: metrics.noi_change >= 0 ? 'up' as const : 'down' as const,
     },
   ];
+
+  const handleCreateExpense = async () => {
+    setExpenseError(null);
+    const amountValue = Number(expenseForm.amount);
+    if (!Number.isFinite(amountValue) || amountValue <= 0) {
+      setExpenseError('Enter a valid amount.');
+      return;
+    }
+    if (!expenseForm.expenseDate) {
+      setExpenseError('Select an expense date.');
+      return;
+    }
+    if (!expenseForm.categoryName.trim()) {
+      setExpenseError('Enter a category.');
+      return;
+    }
+
+    try {
+      setExpenseSubmitting(true);
+      await createExpense({
+        amount: amountValue,
+        expenseDate: expenseForm.expenseDate,
+        categoryName: expenseForm.categoryName.trim(),
+        description: expenseForm.description?.trim() || undefined,
+        paymentMethod: expenseForm.paymentMethod,
+      });
+      setExpenseOpen(false);
+      setExpenseForm((prev) => ({
+        ...prev,
+        amount: '',
+        categoryName: '',
+        description: '',
+      }));
+      refetchExpenseBreakdown();
+      refetchMetrics();
+    } catch (error) {
+      setExpenseError(error instanceof Error ? error.message : 'Failed to create expense.');
+    } finally {
+      setExpenseSubmitting(false);
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -370,9 +423,98 @@ export function AnalyticsPanel() {
 
           {/* Expense Breakdown */}
           <div className={`${isDark ? 'bg-gradient-to-br from-[#1a1f35] to-[#0f1523]' : 'bg-white shadow-md'} border ${border.default} rounded-xl p-6`}>
-            <h3 className="text-2xl mb-6" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
-              EXPENSE BREAKDOWN
-            </h3>
+            <div className="flex items-center justify-between mb-6">
+              <h3 className="text-2xl" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
+                EXPENSE BREAKDOWN
+              </h3>
+              <Dialog open={expenseOpen} onOpenChange={setExpenseOpen}>
+                <DialogTrigger asChild>
+                  <button
+                    className={`px-3 py-2 text-xs font-semibold ${isDark ? 'bg-white/10 hover:bg-white/20' : 'bg-gray-200 hover:bg-gray-300'} border ${border.default} rounded-lg transition-colors flex items-center gap-2`}
+                    style={{ fontFamily: 'Work Sans, sans-serif' }}
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    Add Expense
+                  </button>
+                </DialogTrigger>
+                <DialogContent className={`${isDark ? 'bg-[#0f1523]' : 'bg-white'} border ${border.default} text-left`}>
+                  <DialogHeader>
+                    <DialogTitle style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
+                      Add Expense
+                    </DialogTitle>
+                    <DialogDescription className={text.muted} style={{ fontFamily: 'Work Sans, sans-serif' }}>
+                      Log a new expense to keep analytics up to date.
+                    </DialogDescription>
+                  </DialogHeader>
+                  <div className="space-y-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div>
+                        <label className={`text-xs ${text.muted}`} style={{ fontFamily: 'Work Sans, sans-serif' }}>
+                          Amount
+                        </label>
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={expenseForm.amount}
+                          onChange={(e) => setExpenseForm((prev) => ({ ...prev, amount: e.target.value }))}
+                          className={`mt-1 w-full px-3 py-2 ${isDark ? 'bg-white/5' : 'bg-gray-100'} border ${border.default} rounded-lg text-sm focus:outline-none focus:border-[#ff6b35]/50`}
+                          placeholder="0.00"
+                        />
+                      </div>
+                      <div>
+                        <label className={`text-xs ${text.muted}`} style={{ fontFamily: 'Work Sans, sans-serif' }}>
+                          Expense Date
+                        </label>
+                        <input
+                          type="date"
+                          value={expenseForm.expenseDate}
+                          onChange={(e) => setExpenseForm((prev) => ({ ...prev, expenseDate: e.target.value }))}
+                          className={`mt-1 w-full px-3 py-2 ${isDark ? 'bg-white/5' : 'bg-gray-100'} border ${border.default} rounded-lg text-sm focus:outline-none focus:border-[#ff6b35]/50`}
+                        />
+                      </div>
+                    </div>
+                    <div>
+                      <label className={`text-xs ${text.muted}`} style={{ fontFamily: 'Work Sans, sans-serif' }}>
+                        Category
+                      </label>
+                      <input
+                        type="text"
+                        value={expenseForm.categoryName}
+                        onChange={(e) => setExpenseForm((prev) => ({ ...prev, categoryName: e.target.value }))}
+                        className={`mt-1 w-full px-3 py-2 ${isDark ? 'bg-white/5' : 'bg-gray-100'} border ${border.default} rounded-lg text-sm focus:outline-none focus:border-[#ff6b35]/50`}
+                        placeholder="Plumbing, HVAC, General..."
+                      />
+                    </div>
+                    <div>
+                      <label className={`text-xs ${text.muted}`} style={{ fontFamily: 'Work Sans, sans-serif' }}>
+                        Description
+                      </label>
+                      <textarea
+                        rows={3}
+                        value={expenseForm.description}
+                        onChange={(e) => setExpenseForm((prev) => ({ ...prev, description: e.target.value }))}
+                        className={`mt-1 w-full px-3 py-2 ${isDark ? 'bg-white/5' : 'bg-gray-100'} border ${border.default} rounded-lg text-sm focus:outline-none focus:border-[#ff6b35]/50`}
+                        placeholder="Optional notes about this expense"
+                      />
+                    </div>
+                    {expenseError ? (
+                      <p className="text-sm text-red-400">{expenseError}</p>
+                    ) : null}
+                  </div>
+                  <DialogFooter className="mt-6">
+                    <button
+                      onClick={handleCreateExpense}
+                      disabled={expenseSubmitting}
+                      className="px-5 py-2 bg-gradient-to-r from-[#ff6b35] to-[#f7931e] rounded-lg font-medium text-sm hover:scale-105 transition-transform disabled:opacity-60 disabled:cursor-not-allowed"
+                      style={{ fontFamily: 'Work Sans, sans-serif' }}
+                    >
+                      {expenseSubmitting ? 'Saving...' : 'Save Expense'}
+                    </button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
+            </div>
             {expenseLoading ? (
               <div className="flex items-center justify-center h-[200px]">
                 <div className="text-center">
@@ -474,13 +616,13 @@ export function AnalyticsPanel() {
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
                 <div className={`p-3 ${isDark ? 'bg-white/5' : 'bg-gray-100'} rounded-lg`}>
                   <p className="text-2xl font-bold text-emerald-400 mb-1" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
-                    23
+                    {Math.round(metrics.days_to_lease)}
                   </p>
                   <p className={`text-xs ${text.inactive}`}>Days to Lease</p>
                 </div>
                 <div className={`p-3 ${isDark ? 'bg-white/5' : 'bg-gray-100'} rounded-lg`}>
                   <p className="text-2xl font-bold text-emerald-400 mb-1" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
-                    94%
+                    {metrics.renewal_rate.toFixed(1)}%
                   </p>
                   <p className={`text-xs ${text.inactive}`}>Renewal Rate</p>
                 </div>

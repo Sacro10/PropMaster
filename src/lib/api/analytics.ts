@@ -53,6 +53,8 @@ export async function getAnalyticsMetrics(timeframe: TimeframeOption = '30d'): P
           rent_change: 0,
           noi_margin: 0,
           noi_change: 0,
+          days_to_lease: 0,
+          renewal_rate: 0,
         };
       }
       throw new Error('Failed to fetch analytics metrics');
@@ -62,7 +64,19 @@ export async function getAnalyticsMetrics(timeframe: TimeframeOption = '30d'): P
 
     if (payload && typeof payload === 'object') {
       if ('total_revenue' in payload) {
-        return payload as AnalyticsMetrics;
+        const summary = payload as Partial<AnalyticsMetrics>;
+        return {
+          total_revenue: Number(summary.total_revenue ?? 0),
+          revenue_change: Number(summary.revenue_change ?? 0),
+          occupancy_rate: Number(summary.occupancy_rate ?? 0),
+          occupancy_change: Number(summary.occupancy_change ?? 0),
+          avg_rent_per_unit: Number(summary.avg_rent_per_unit ?? 0),
+          rent_change: Number(summary.rent_change ?? 0),
+          noi_margin: Number(summary.noi_margin ?? 0),
+          noi_change: Number(summary.noi_change ?? 0),
+          days_to_lease: Number(summary.days_to_lease ?? 0),
+          renewal_rate: Number(summary.renewal_rate ?? 0),
+        };
       }
 
       if ('totalRevenue' in payload) {
@@ -76,6 +90,8 @@ export async function getAnalyticsMetrics(timeframe: TimeframeOption = '30d'): P
           rent_change: Number(summary.avgRentPerUnit?.change || 0),
           noi_margin: Number(summary.noiMargin?.value || 0),
           noi_change: Number(summary.noiMargin?.change || 0),
+          days_to_lease: Number(summary.daysToLease?.value || 0),
+          renewal_rate: Number(summary.renewalRate?.value || 0),
         };
       }
     }
@@ -89,6 +105,8 @@ export async function getAnalyticsMetrics(timeframe: TimeframeOption = '30d'): P
       rent_change: 0,
       noi_margin: 0,
       noi_change: 0,
+      days_to_lease: 0,
+      renewal_rate: 0,
     };
   } catch (error) {
     console.error('[Analytics API] Failed to fetch analytics metrics:', error);
@@ -101,6 +119,8 @@ export async function getAnalyticsMetrics(timeframe: TimeframeOption = '30d'): P
       rent_change: 0,
       noi_margin: 0,
       noi_change: 0,
+      days_to_lease: 0,
+      renewal_rate: 0,
     };
   }
 }

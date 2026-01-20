@@ -269,6 +269,8 @@ export interface AnalyticsMetrics {
   rent_change: number;
   noi_margin: number;
   noi_change: number;
+  days_to_lease: number;
+  renewal_rate: number;
 }
 
 export interface RevenueData {

@@ -268,6 +268,8 @@ async function buildSummaryMetrics(accountId: string, range: TimeframeQuery['ran
     currentOccupiedUnits,
     comparisonOccupiedUnits,
     currentExpenses,
+    leaseStartData,
+    renewalData,
   ] = await Promise.all([
     fetchPaymentsInRange({
       accountId,
@@ -292,9 +294,28 @@ async function buildSummaryMetrics(accountId: string, range: TimeframeQuery['ran
       start,
       end,
     }),
+    supabase
+      .from('leases')
+      .select('created_at, lease_start')
+      .eq('account_id', accountId)
+      .gte('lease_start', start.toISOString().split('T')[0])
+      .lte('lease_start', end.toISOString().split('T')[0]),
+    supabase
+      .from('leases')
+      .select('renewal_status')
+      .eq('account_id', accountId)
+      .gte('lease_end', start.toISOString().split('T')[0])
+      .lte('lease_end', end.toISOString().split('T')[0]),
   ]);
 
-  if (currentPayments.error || comparisonPayments.error || unitsData.error || currentExpenses.error) {
+  if (
+    currentPayments.error ||
+    comparisonPayments.error ||
+    unitsData.error ||
+    currentExpenses.error ||
+    leaseStartData.error ||
+    renewalData.error
+  ) {
     throw new Error('Failed to fetch analytics data');
   }
 
@@ -322,6 +343,28 @@ async function buildSummaryMetrics(accountId: string, range: TimeframeQuery['ran
     }, 0) || 0;
   const noiMargin = currentRevenue > 0 ? ((currentRevenue - currentExpenseTotal) / currentRevenue) * 100 : 0;
 
+  const leaseStarts = leaseStartData.data || [];
+  const daysToLeaseValues = leaseStarts
+    .map((lease: any) => {
+      const createdAt = lease.created_at ? new Date(lease.created_at) : null;
+      const leaseStart = lease.lease_start ? new Date(lease.lease_start) : null;
+      if (!createdAt || !leaseStart || Number.isNaN(createdAt.getTime()) || Number.isNaN(leaseStart.getTime())) {
+        return null;
+      }
+      const diffDays = (leaseStart.getTime() - createdAt.getTime()) / (1000 * 60 * 60 * 24);
+      return Math.max(0, diffDays);
+    })
+    .filter((value: number | null): value is number => value !== null);
+  const daysToLease =
+    daysToLeaseValues.length > 0
+      ? Number((daysToLeaseValues.reduce((sum, value) => sum + value, 0) / daysToLeaseValues.length).toFixed(1))
+      : 0;
+
+  const renewalRows = (renewalData.data || []).filter((row: any) => row.renewal_status);
+  const renewalTotal = renewalRows.length;
+  const renewalAccepted = renewalRows.filter((row: any) => row.renewal_status === 'accepted').length;
+  const renewalRate = renewalTotal > 0 ? Number(((renewalAccepted / renewalTotal) * 100).toFixed(1)) : 0;
+
   return {
     summary: {
       totalRevenue: {
@@ -344,6 +387,16 @@ async function buildSummaryMetrics(accountId: string, range: TimeframeQuery['ran
         change: 0,
         trend: noiMargin >= 20 ? 'up' : noiMargin >= 10 ? 'neutral' : 'down',
       },
+      daysToLease: {
+        value: daysToLease,
+        change: 0,
+        trend: 'neutral',
+      },
+      renewalRate: {
+        value: renewalRate,
+        change: 0,
+        trend: renewalRate >= 70 ? 'up' : renewalRate >= 50 ? 'neutral' : 'down',
+      },
     },
     context: {
       timeframe: range,
@@ -353,6 +406,8 @@ async function buildSummaryMetrics(accountId: string, range: TimeframeQuery['ran
       avgRent,
       noiMargin,
       currentExpenseTotal,
+      daysToLease,
+      renewalRate,
     },
   };
 }
