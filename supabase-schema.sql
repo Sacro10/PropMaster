@@ -9,7 +9,7 @@ CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 -- 1. ACCOUNTS & TEAM MANAGEMENT
 -- ============================================================================
 
-CREATE TABLE accounts (
+CREATE TABLE IF NOT EXISTS accounts (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   name TEXT NOT NULL,
   plan TEXT NOT NULL DEFAULT 'basic' CHECK (plan IN ('basic', 'pro', 'premium')),
@@ -26,7 +26,7 @@ CREATE TABLE accounts (
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE TABLE account_members (
+CREATE TABLE IF NOT EXISTS account_members (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   account_id UUID NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
   user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
@@ -44,7 +44,7 @@ CREATE TABLE account_members (
 -- 2. PROPERTIES & UNITS
 -- ============================================================================
 
-CREATE TABLE properties (
+CREATE TABLE IF NOT EXISTS properties (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   account_id UUID NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
   name TEXT NOT NULL,
@@ -67,7 +67,7 @@ CREATE TABLE properties (
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE TABLE owner_entities (
+CREATE TABLE IF NOT EXISTS owner_entities (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   account_id UUID NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
   name TEXT NOT NULL,
@@ -84,7 +84,7 @@ CREATE TABLE owner_entities (
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE TABLE property_owners (
+CREATE TABLE IF NOT EXISTS property_owners (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   account_id UUID NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
   property_id UUID NOT NULL REFERENCES properties(id) ON DELETE CASCADE,
@@ -94,10 +94,10 @@ CREATE TABLE property_owners (
   UNIQUE(property_id, owner_id)
 );
 
-CREATE INDEX idx_owner_entities_account ON owner_entities(account_id);
-CREATE INDEX idx_property_owners_account ON property_owners(account_id);
+CREATE INDEX IF NOT EXISTS idx_owner_entities_account ON owner_entities(account_id);
+CREATE INDEX IF NOT EXISTS idx_property_owners_account ON property_owners(account_id);
 
-CREATE TABLE units (
+CREATE TABLE IF NOT EXISTS units (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   account_id UUID NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
   property_id UUID NOT NULL REFERENCES properties(id) ON DELETE CASCADE,
@@ -122,7 +122,7 @@ CREATE TABLE units (
 -- 3. TENANT PROFILES
 -- ============================================================================
 
-CREATE TABLE tenant_profiles (
+CREATE TABLE IF NOT EXISTS tenant_profiles (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   account_id UUID NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
   user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
@@ -150,7 +150,7 @@ CREATE TABLE tenant_profiles (
 -- 4. VENDOR PROFILES
 -- ============================================================================
 
-CREATE TABLE vendor_profiles (
+CREATE TABLE IF NOT EXISTS vendor_profiles (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   account_id UUID NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
   user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
@@ -165,6 +165,7 @@ CREATE TABLE vendor_profiles (
   license_number TEXT,
   insurance_policy_number TEXT,
   insurance_expiry DATE,
+  stripe_connected_account_id TEXT,
   avg_rating NUMERIC(3, 2) DEFAULT 0 CHECK (avg_rating >= 0 AND avg_rating <= 5),
   total_jobs_completed INTEGER DEFAULT 0,
   on_time_completion_rate NUMERIC(5, 2) DEFAULT 0,
@@ -177,7 +178,7 @@ CREATE TABLE vendor_profiles (
   UNIQUE(account_id, user_id)
 );
 
-CREATE TABLE vendor_services (
+CREATE TABLE IF NOT EXISTS vendor_services (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   account_id UUID NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
   vendor_profile_id UUID NOT NULL REFERENCES vendor_profiles(id) ON DELETE CASCADE,
@@ -188,7 +189,7 @@ CREATE TABLE vendor_services (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE TABLE vendor_availability (
+CREATE TABLE IF NOT EXISTS vendor_availability (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   account_id UUID NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
   vendor_profile_id UUID NOT NULL REFERENCES vendor_profiles(id) ON DELETE CASCADE,
@@ -205,7 +206,7 @@ CREATE TABLE vendor_availability (
 -- 5. LEASES & TENANCY
 -- ============================================================================
 
-CREATE TABLE leases (
+CREATE TABLE IF NOT EXISTS leases (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   account_id UUID NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
   unit_id UUID NOT NULL REFERENCES units(id) ON DELETE CASCADE,
@@ -233,7 +234,7 @@ CREATE TABLE leases (
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE TABLE lease_tenants (
+CREATE TABLE IF NOT EXISTS lease_tenants (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   account_id UUID NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
   lease_id UUID NOT NULL REFERENCES leases(id) ON DELETE CASCADE,
@@ -247,7 +248,7 @@ CREATE TABLE lease_tenants (
 -- 6. MAINTENANCE MANAGEMENT
 -- ============================================================================
 
-CREATE TABLE maintenance_requests (
+CREATE TABLE IF NOT EXISTS maintenance_requests (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   account_id UUID NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
   unit_id UUID REFERENCES units(id) ON DELETE CASCADE,
@@ -274,7 +275,7 @@ CREATE TABLE maintenance_requests (
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE TABLE maintenance_assignments (
+CREATE TABLE IF NOT EXISTS maintenance_assignments (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   account_id UUID NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
   request_id UUID NOT NULL REFERENCES maintenance_requests(id) ON DELETE CASCADE,
@@ -293,7 +294,7 @@ CREATE TABLE maintenance_assignments (
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE TABLE maintenance_updates (
+CREATE TABLE IF NOT EXISTS maintenance_updates (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   account_id UUID NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
   request_id UUID NOT NULL REFERENCES maintenance_requests(id) ON DELETE CASCADE,
@@ -305,10 +306,56 @@ CREATE TABLE maintenance_updates (
 );
 
 -- ============================================================================
+-- 6.5 TENANT + VENDOR INVITES & PAYMENT METHODS
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS tenant_invites (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  account_id UUID NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+  unit_id UUID REFERENCES units(id) ON DELETE CASCADE,
+  property_id UUID REFERENCES properties(id) ON DELETE SET NULL,
+  email TEXT NOT NULL,
+  invite_token TEXT NOT NULL UNIQUE,
+  lease_start DATE,
+  lease_end DATE,
+  rent NUMERIC(10, 2),
+  status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'accepted', 'expired', 'revoked')),
+  created_by UUID REFERENCES auth.users(id),
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  accepted_at TIMESTAMPTZ,
+  expires_at TIMESTAMPTZ
+);
+
+CREATE TABLE IF NOT EXISTS vendor_invites (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  account_id UUID NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+  email TEXT NOT NULL,
+  invite_token TEXT NOT NULL UNIQUE,
+  status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'accepted', 'expired', 'revoked')),
+  created_by UUID REFERENCES auth.users(id),
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  accepted_at TIMESTAMPTZ,
+  expires_at TIMESTAMPTZ
+);
+
+CREATE TABLE IF NOT EXISTS tenant_payment_methods (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  account_id UUID NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+  tenant_user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  method_type TEXT NOT NULL CHECK (method_type IN ('card', 'ach')),
+  label TEXT NOT NULL,
+  brand TEXT,
+  last4 TEXT,
+  bank_name TEXT,
+  is_default BOOLEAN DEFAULT true,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- ============================================================================
 -- 7. PAYMENTS & FINANCIALS
 -- ============================================================================
 
-CREATE TABLE payments (
+CREATE TABLE IF NOT EXISTS payments (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   account_id UUID NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
   lease_id UUID REFERENCES leases(id) ON DELETE SET NULL,
@@ -332,7 +379,7 @@ CREATE TABLE payments (
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE TABLE expense_categories (
+CREATE TABLE IF NOT EXISTS expense_categories (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   account_id UUID NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
   name TEXT NOT NULL,
@@ -342,7 +389,7 @@ CREATE TABLE expense_categories (
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE TABLE expenses (
+CREATE TABLE IF NOT EXISTS expenses (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   account_id UUID NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
   property_id UUID REFERENCES properties(id) ON DELETE SET NULL,
@@ -358,7 +405,7 @@ CREATE TABLE expenses (
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE TABLE owner_disbursements (
+CREATE TABLE IF NOT EXISTS owner_disbursements (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   account_id UUID NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
   owner_id UUID REFERENCES owner_entities(id) ON DELETE SET NULL,
@@ -385,7 +432,7 @@ CREATE TABLE owner_disbursements (
 -- 8. COMMUNICATION
 -- ============================================================================
 
-CREATE TABLE messages (
+CREATE TABLE IF NOT EXISTS messages (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   account_id UUID NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
   from_user_id UUID NOT NULL REFERENCES auth.users(id),
@@ -403,7 +450,7 @@ CREATE TABLE messages (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE TABLE user_oauth_tokens (
+CREATE TABLE IF NOT EXISTS user_oauth_tokens (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   account_id UUID NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
   user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
@@ -417,10 +464,10 @@ CREATE TABLE user_oauth_tokens (
   UNIQUE(account_id, user_id, provider)
 );
 
-CREATE INDEX idx_user_oauth_tokens_account_id ON user_oauth_tokens(account_id);
-CREATE INDEX idx_user_oauth_tokens_user_id ON user_oauth_tokens(user_id);
+CREATE INDEX IF NOT EXISTS idx_user_oauth_tokens_account_id ON user_oauth_tokens(account_id);
+CREATE INDEX IF NOT EXISTS idx_user_oauth_tokens_user_id ON user_oauth_tokens(user_id);
 
-CREATE TABLE notifications (
+CREATE TABLE IF NOT EXISTS notifications (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   account_id UUID NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
   user_id UUID NOT NULL REFERENCES auth.users(id),
@@ -443,7 +490,7 @@ CREATE TABLE notifications (
 -- 9. SHOWINGS & APPLICATIONS
 -- ============================================================================
 
-CREATE TABLE showings (
+CREATE TABLE IF NOT EXISTS showings (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   account_id UUID NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
   property_id UUID NOT NULL REFERENCES properties(id) ON DELETE CASCADE,
@@ -465,7 +512,7 @@ CREATE TABLE showings (
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE TABLE rental_applications (
+CREATE TABLE IF NOT EXISTS rental_applications (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   account_id UUID NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
   property_id UUID NOT NULL REFERENCES properties(id) ON DELETE CASCADE,
@@ -495,7 +542,7 @@ CREATE TABLE rental_applications (
 -- 10. HVAC FILTER SUBSCRIPTION PROGRAM
 -- ============================================================================
 
-CREATE TABLE hvac_filter_subscriptions (
+CREATE TABLE IF NOT EXISTS hvac_filter_subscriptions (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   account_id UUID NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
   unit_id UUID NOT NULL REFERENCES units(id) ON DELETE CASCADE,
@@ -514,7 +561,7 @@ CREATE TABLE hvac_filter_subscriptions (
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE TABLE hvac_filter_deliveries (
+CREATE TABLE IF NOT EXISTS hvac_filter_deliveries (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   account_id UUID NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
   subscription_id UUID NOT NULL REFERENCES hvac_filter_subscriptions(id) ON DELETE CASCADE,
@@ -530,7 +577,7 @@ CREATE TABLE hvac_filter_deliveries (
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE TABLE unit_hvac_status (
+CREATE TABLE IF NOT EXISTS unit_hvac_status (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   account_id UUID NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
   unit_id UUID NOT NULL REFERENCES units(id) ON DELETE CASCADE,
@@ -546,7 +593,7 @@ CREATE TABLE unit_hvac_status (
 -- 11. ANALYTICS & AUDIT
 -- ============================================================================
 
-CREATE TABLE analytics_events (
+CREATE TABLE IF NOT EXISTS analytics_events (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   account_id UUID REFERENCES accounts(id) ON DELETE CASCADE,
   user_id UUID REFERENCES auth.users(id),
@@ -556,7 +603,7 @@ CREATE TABLE analytics_events (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE TABLE audit_log (
+CREATE TABLE IF NOT EXISTS audit_log (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   account_id UUID REFERENCES accounts(id) ON DELETE CASCADE,
   actor_user_id UUID REFERENCES auth.users(id),
@@ -575,106 +622,115 @@ CREATE TABLE audit_log (
 -- ============================================================================
 
 -- Account members
-CREATE INDEX idx_account_members_account_id ON account_members(account_id);
-CREATE INDEX idx_account_members_user_id ON account_members(user_id);
-CREATE INDEX idx_account_members_role ON account_members(role);
+CREATE INDEX IF NOT EXISTS idx_account_members_account_id ON account_members(account_id);
+CREATE INDEX IF NOT EXISTS idx_account_members_user_id ON account_members(user_id);
+CREATE INDEX IF NOT EXISTS idx_account_members_role ON account_members(role);
 
 -- Properties
-CREATE INDEX idx_properties_account_id ON properties(account_id);
-CREATE INDEX idx_properties_manager_user_id ON properties(manager_user_id);
+CREATE INDEX IF NOT EXISTS idx_properties_account_id ON properties(account_id);
+CREATE INDEX IF NOT EXISTS idx_properties_manager_user_id ON properties(manager_user_id);
 
 -- Units
-CREATE INDEX idx_units_account_id ON units(account_id);
-CREATE INDEX idx_units_property_id ON units(property_id);
-CREATE INDEX idx_units_status ON units(status);
+CREATE INDEX IF NOT EXISTS idx_units_account_id ON units(account_id);
+CREATE INDEX IF NOT EXISTS idx_units_property_id ON units(property_id);
+CREATE INDEX IF NOT EXISTS idx_units_status ON units(status);
 
 -- Tenant profiles
-CREATE INDEX idx_tenant_profiles_account_id ON tenant_profiles(account_id);
-CREATE INDEX idx_tenant_profiles_user_id ON tenant_profiles(user_id);
+CREATE INDEX IF NOT EXISTS idx_tenant_profiles_account_id ON tenant_profiles(account_id);
+CREATE INDEX IF NOT EXISTS idx_tenant_profiles_user_id ON tenant_profiles(user_id);
+
+-- Tenant invites + payment methods
+CREATE INDEX IF NOT EXISTS idx_tenant_invites_account_id ON tenant_invites(account_id);
+CREATE INDEX IF NOT EXISTS idx_tenant_invites_unit_id ON tenant_invites(unit_id);
+CREATE INDEX IF NOT EXISTS idx_tenant_invites_token ON tenant_invites(invite_token);
+CREATE INDEX IF NOT EXISTS idx_vendor_invites_account_id ON vendor_invites(account_id);
+CREATE INDEX IF NOT EXISTS idx_vendor_invites_token ON vendor_invites(invite_token);
+CREATE INDEX IF NOT EXISTS idx_tenant_payment_methods_account_id ON tenant_payment_methods(account_id);
+CREATE INDEX IF NOT EXISTS idx_tenant_payment_methods_user_id ON tenant_payment_methods(tenant_user_id);
 
 -- Vendor profiles
-CREATE INDEX idx_vendor_profiles_account_id ON vendor_profiles(account_id);
-CREATE INDEX idx_vendor_profiles_user_id ON vendor_profiles(user_id);
-CREATE INDEX idx_vendor_profiles_is_active ON vendor_profiles(is_active);
+CREATE INDEX IF NOT EXISTS idx_vendor_profiles_account_id ON vendor_profiles(account_id);
+CREATE INDEX IF NOT EXISTS idx_vendor_profiles_user_id ON vendor_profiles(user_id);
+CREATE INDEX IF NOT EXISTS idx_vendor_profiles_is_active ON vendor_profiles(is_active);
 
 -- Vendor services
-CREATE INDEX idx_vendor_services_account_id ON vendor_services(account_id);
-CREATE INDEX idx_vendor_services_vendor_profile_id ON vendor_services(vendor_profile_id);
-CREATE INDEX idx_vendor_services_service_type ON vendor_services(service_type);
+CREATE INDEX IF NOT EXISTS idx_vendor_services_account_id ON vendor_services(account_id);
+CREATE INDEX IF NOT EXISTS idx_vendor_services_vendor_profile_id ON vendor_services(vendor_profile_id);
+CREATE INDEX IF NOT EXISTS idx_vendor_services_service_type ON vendor_services(service_type);
 
 -- Leases
-CREATE INDEX idx_leases_account_id ON leases(account_id);
-CREATE INDEX idx_leases_unit_id ON leases(unit_id);
-CREATE INDEX idx_leases_tenant_user_id ON leases(tenant_user_id);
-CREATE INDEX idx_leases_status ON leases(status);
-CREATE INDEX idx_leases_lease_end ON leases(lease_end);
+CREATE INDEX IF NOT EXISTS idx_leases_account_id ON leases(account_id);
+CREATE INDEX IF NOT EXISTS idx_leases_unit_id ON leases(unit_id);
+CREATE INDEX IF NOT EXISTS idx_leases_tenant_user_id ON leases(tenant_user_id);
+CREATE INDEX IF NOT EXISTS idx_leases_status ON leases(status);
+CREATE INDEX IF NOT EXISTS idx_leases_lease_end ON leases(lease_end);
 
 -- Maintenance requests
-CREATE INDEX idx_maintenance_requests_account_id ON maintenance_requests(account_id);
-CREATE INDEX idx_maintenance_requests_unit_id ON maintenance_requests(unit_id);
-CREATE INDEX idx_maintenance_requests_property_id ON maintenance_requests(property_id);
-CREATE INDEX idx_maintenance_requests_status ON maintenance_requests(status);
-CREATE INDEX idx_maintenance_requests_priority ON maintenance_requests(priority);
-CREATE INDEX idx_maintenance_requests_created_by ON maintenance_requests(created_by_user_id);
-CREATE INDEX idx_maintenance_requests_created_at ON maintenance_requests(created_at);
+CREATE INDEX IF NOT EXISTS idx_maintenance_requests_account_id ON maintenance_requests(account_id);
+CREATE INDEX IF NOT EXISTS idx_maintenance_requests_unit_id ON maintenance_requests(unit_id);
+CREATE INDEX IF NOT EXISTS idx_maintenance_requests_property_id ON maintenance_requests(property_id);
+CREATE INDEX IF NOT EXISTS idx_maintenance_requests_status ON maintenance_requests(status);
+CREATE INDEX IF NOT EXISTS idx_maintenance_requests_priority ON maintenance_requests(priority);
+CREATE INDEX IF NOT EXISTS idx_maintenance_requests_created_by ON maintenance_requests(created_by_user_id);
+CREATE INDEX IF NOT EXISTS idx_maintenance_requests_created_at ON maintenance_requests(created_at);
 
 -- Maintenance assignments
-CREATE INDEX idx_maintenance_assignments_account_id ON maintenance_assignments(account_id);
-CREATE INDEX idx_maintenance_assignments_request_id ON maintenance_assignments(request_id);
-CREATE INDEX idx_maintenance_assignments_vendor_id ON maintenance_assignments(vendor_profile_id);
-CREATE INDEX idx_maintenance_assignments_status ON maintenance_assignments(status);
+CREATE INDEX IF NOT EXISTS idx_maintenance_assignments_account_id ON maintenance_assignments(account_id);
+CREATE INDEX IF NOT EXISTS idx_maintenance_assignments_request_id ON maintenance_assignments(request_id);
+CREATE INDEX IF NOT EXISTS idx_maintenance_assignments_vendor_id ON maintenance_assignments(vendor_profile_id);
+CREATE INDEX IF NOT EXISTS idx_maintenance_assignments_status ON maintenance_assignments(status);
 
 -- Payments
-CREATE INDEX idx_payments_account_id ON payments(account_id);
-CREATE INDEX idx_payments_lease_id ON payments(lease_id);
-CREATE INDEX idx_payments_tenant_user_id ON payments(tenant_user_id);
-CREATE INDEX idx_payments_status ON payments(status);
-CREATE INDEX idx_payments_due_date ON payments(due_date);
-CREATE INDEX idx_payments_created_at ON payments(created_at);
-CREATE UNIQUE INDEX idx_expense_categories_account_name ON expense_categories(account_id, name);
-CREATE INDEX idx_expenses_account_id ON expenses(account_id);
-CREATE INDEX idx_expenses_property_id ON expenses(property_id);
-CREATE INDEX idx_expenses_category_id ON expenses(category_id);
-CREATE INDEX idx_expenses_expense_date ON expenses(expense_date);
-CREATE UNIQUE INDEX idx_expenses_maintenance_request_id ON expenses(maintenance_request_id);
+CREATE INDEX IF NOT EXISTS idx_payments_account_id ON payments(account_id);
+CREATE INDEX IF NOT EXISTS idx_payments_lease_id ON payments(lease_id);
+CREATE INDEX IF NOT EXISTS idx_payments_tenant_user_id ON payments(tenant_user_id);
+CREATE INDEX IF NOT EXISTS idx_payments_status ON payments(status);
+CREATE INDEX IF NOT EXISTS idx_payments_due_date ON payments(due_date);
+CREATE INDEX IF NOT EXISTS idx_payments_created_at ON payments(created_at);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_expense_categories_account_name ON expense_categories(account_id, name);
+CREATE INDEX IF NOT EXISTS idx_expenses_account_id ON expenses(account_id);
+CREATE INDEX IF NOT EXISTS idx_expenses_property_id ON expenses(property_id);
+CREATE INDEX IF NOT EXISTS idx_expenses_category_id ON expenses(category_id);
+CREATE INDEX IF NOT EXISTS idx_expenses_expense_date ON expenses(expense_date);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_expenses_maintenance_request_id ON expenses(maintenance_request_id);
 
 -- Messages
-CREATE INDEX idx_messages_account_id ON messages(account_id);
-CREATE INDEX idx_messages_from_user_id ON messages(from_user_id);
-CREATE INDEX idx_messages_to_user_id ON messages(to_user_id);
-CREATE INDEX idx_messages_thread_id ON messages(thread_id);
-CREATE INDEX idx_messages_created_at ON messages(created_at);
+CREATE INDEX IF NOT EXISTS idx_messages_account_id ON messages(account_id);
+CREATE INDEX IF NOT EXISTS idx_messages_from_user_id ON messages(from_user_id);
+CREATE INDEX IF NOT EXISTS idx_messages_to_user_id ON messages(to_user_id);
+CREATE INDEX IF NOT EXISTS idx_messages_thread_id ON messages(thread_id);
+CREATE INDEX IF NOT EXISTS idx_messages_created_at ON messages(created_at);
 
 -- Notifications
-CREATE INDEX idx_notifications_account_id ON notifications(account_id);
-CREATE INDEX idx_notifications_user_id ON notifications(user_id);
-CREATE INDEX idx_notifications_is_read ON notifications(is_read);
-CREATE INDEX idx_notifications_created_at ON notifications(created_at);
+CREATE INDEX IF NOT EXISTS idx_notifications_account_id ON notifications(account_id);
+CREATE INDEX IF NOT EXISTS idx_notifications_user_id ON notifications(user_id);
+CREATE INDEX IF NOT EXISTS idx_notifications_is_read ON notifications(is_read);
+CREATE INDEX IF NOT EXISTS idx_notifications_created_at ON notifications(created_at);
 
 -- Showings
-CREATE INDEX idx_showings_account_id ON showings(account_id);
-CREATE INDEX idx_showings_property_id ON showings(property_id);
-CREATE INDEX idx_showings_unit_id ON showings(unit_id);
-CREATE INDEX idx_showings_scheduled_at ON showings(scheduled_at);
+CREATE INDEX IF NOT EXISTS idx_showings_account_id ON showings(account_id);
+CREATE INDEX IF NOT EXISTS idx_showings_property_id ON showings(property_id);
+CREATE INDEX IF NOT EXISTS idx_showings_unit_id ON showings(unit_id);
+CREATE INDEX IF NOT EXISTS idx_showings_scheduled_at ON showings(scheduled_at);
 
 -- Rental applications
-CREATE INDEX idx_rental_applications_account_id ON rental_applications(account_id);
-CREATE INDEX idx_rental_applications_property_id ON rental_applications(property_id);
-CREATE INDEX idx_rental_applications_status ON rental_applications(status);
+CREATE INDEX IF NOT EXISTS idx_rental_applications_account_id ON rental_applications(account_id);
+CREATE INDEX IF NOT EXISTS idx_rental_applications_property_id ON rental_applications(property_id);
+CREATE INDEX IF NOT EXISTS idx_rental_applications_status ON rental_applications(status);
 
 -- HVAC subscriptions
-CREATE INDEX idx_hvac_filter_subs_account_id ON hvac_filter_subscriptions(account_id);
-CREATE INDEX idx_hvac_filter_subs_unit_id ON hvac_filter_subscriptions(unit_id);
-CREATE INDEX idx_hvac_filter_subs_status ON hvac_filter_subscriptions(status);
-CREATE INDEX idx_unit_hvac_status_account ON unit_hvac_status(account_id, created_at DESC);
-CREATE INDEX idx_unit_hvac_status_unit ON unit_hvac_status(unit_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_hvac_filter_subs_account_id ON hvac_filter_subscriptions(account_id);
+CREATE INDEX IF NOT EXISTS idx_hvac_filter_subs_unit_id ON hvac_filter_subscriptions(unit_id);
+CREATE INDEX IF NOT EXISTS idx_hvac_filter_subs_status ON hvac_filter_subscriptions(status);
+CREATE INDEX IF NOT EXISTS idx_unit_hvac_status_account ON unit_hvac_status(account_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_unit_hvac_status_unit ON unit_hvac_status(unit_id, created_at DESC);
 
 -- Analytics & audit
-CREATE INDEX idx_analytics_events_account_id ON analytics_events(account_id);
-CREATE INDEX idx_analytics_events_created_at ON analytics_events(created_at);
-CREATE INDEX idx_audit_log_account_id ON audit_log(account_id);
-CREATE INDEX idx_audit_log_entity ON audit_log(entity_type, entity_id);
-CREATE INDEX idx_audit_log_created_at ON audit_log(created_at);
+CREATE INDEX IF NOT EXISTS idx_analytics_events_account_id ON analytics_events(account_id);
+CREATE INDEX IF NOT EXISTS idx_analytics_events_created_at ON analytics_events(created_at);
+CREATE INDEX IF NOT EXISTS idx_audit_log_account_id ON audit_log(account_id);
+CREATE INDEX IF NOT EXISTS idx_audit_log_entity ON audit_log(entity_type, entity_id);
+CREATE INDEX IF NOT EXISTS idx_audit_log_created_at ON audit_log(created_at);
 
 -- ============================================================================
 -- FUNCTIONS FOR RLS
@@ -834,6 +890,9 @@ ALTER TABLE account_members ENABLE ROW LEVEL SECURITY;
 ALTER TABLE properties ENABLE ROW LEVEL SECURITY;
 ALTER TABLE units ENABLE ROW LEVEL SECURITY;
 ALTER TABLE tenant_profiles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE tenant_invites ENABLE ROW LEVEL SECURITY;
+ALTER TABLE vendor_invites ENABLE ROW LEVEL SECURITY;
+ALTER TABLE tenant_payment_methods ENABLE ROW LEVEL SECURITY;
 ALTER TABLE vendor_profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE vendor_services ENABLE ROW LEVEL SECURITY;
 ALTER TABLE vendor_availability ENABLE ROW LEVEL SECURITY;
@@ -859,204 +918,335 @@ ALTER TABLE analytics_events ENABLE ROW LEVEL SECURITY;
 ALTER TABLE audit_log ENABLE ROW LEVEL SECURITY;
 
 -- Accounts: Users can only see accounts they're members of
+DROP POLICY IF EXISTS accounts_select ON accounts;
 CREATE POLICY accounts_select ON accounts FOR SELECT USING (is_account_member(id));
+DROP POLICY IF EXISTS accounts_update ON accounts;
 CREATE POLICY accounts_update ON accounts FOR UPDATE USING (has_account_role(id, 'owner'));
 
 -- Account members: Users can see members of their accounts
+DROP POLICY IF EXISTS account_members_select ON account_members;
 CREATE POLICY account_members_select ON account_members FOR SELECT USING (is_account_member(account_id));
+DROP POLICY IF EXISTS account_members_insert ON account_members;
 CREATE POLICY account_members_insert ON account_members FOR INSERT WITH CHECK (has_account_role(account_id, 'owner') OR has_account_role(account_id, 'admin'));
+DROP POLICY IF EXISTS account_members_update ON account_members;
 CREATE POLICY account_members_update ON account_members FOR UPDATE USING (has_account_role(account_id, 'owner') OR has_account_role(account_id, 'admin'));
+DROP POLICY IF EXISTS account_members_delete ON account_members;
 CREATE POLICY account_members_delete ON account_members FOR DELETE USING (has_account_role(account_id, 'owner'));
 
 -- Properties: Account members can see all properties
+DROP POLICY IF EXISTS properties_select ON properties;
 CREATE POLICY properties_select ON properties FOR SELECT USING (is_account_member(account_id));
+DROP POLICY IF EXISTS properties_insert ON properties;
 CREATE POLICY properties_insert ON properties FOR INSERT WITH CHECK (is_account_member(account_id));
+DROP POLICY IF EXISTS properties_update ON properties;
 CREATE POLICY properties_update ON properties FOR UPDATE USING (is_account_member(account_id) AND (get_user_role(account_id) IN ('owner', 'manager', 'admin')));
+DROP POLICY IF EXISTS properties_delete ON properties;
 CREATE POLICY properties_delete ON properties FOR DELETE USING (has_account_role(account_id, 'owner'));
 
 -- Units: Account members can see all units
+DROP POLICY IF EXISTS units_select ON units;
 CREATE POLICY units_select ON units FOR SELECT USING (is_account_member(account_id));
+DROP POLICY IF EXISTS units_insert ON units;
 CREATE POLICY units_insert ON units FOR INSERT WITH CHECK (is_account_member(account_id));
+DROP POLICY IF EXISTS units_update ON units;
 CREATE POLICY units_update ON units FOR UPDATE USING (is_account_member(account_id) AND (get_user_role(account_id) IN ('owner', 'manager', 'admin')));
+DROP POLICY IF EXISTS units_delete ON units;
 CREATE POLICY units_delete ON units FOR DELETE USING (has_account_role(account_id, 'owner'));
 
 -- Tenant profiles: Users can see their own profile and managers can see all
+DROP POLICY IF EXISTS tenant_profiles_select ON tenant_profiles;
 CREATE POLICY tenant_profiles_select ON tenant_profiles FOR SELECT USING (
   is_account_member(account_id) AND (
-    user_id = auth.uid() OR
+    user_id = (select auth.uid()) OR
     get_user_role(account_id) IN ('owner', 'manager', 'admin')
   )
 );
+DROP POLICY IF EXISTS tenant_profiles_insert ON tenant_profiles;
 CREATE POLICY tenant_profiles_insert ON tenant_profiles FOR INSERT WITH CHECK (is_account_member(account_id));
+DROP POLICY IF EXISTS tenant_profiles_update ON tenant_profiles;
 CREATE POLICY tenant_profiles_update ON tenant_profiles FOR UPDATE USING (
   is_account_member(account_id) AND (
-    user_id = auth.uid() OR
+    user_id = (select auth.uid()) OR
     get_user_role(account_id) IN ('owner', 'manager', 'admin')
   )
 );
 
--- Vendor profiles: Vendors see their own, managers see all
-CREATE POLICY vendor_profiles_select ON vendor_profiles FOR SELECT USING (
+-- Tenant invites: Managers can manage invites
+DROP POLICY IF EXISTS tenant_invites_select ON tenant_invites;
+CREATE POLICY tenant_invites_select ON tenant_invites FOR SELECT USING (
+  is_account_member(account_id) AND get_user_role(account_id) IN ('owner', 'manager', 'admin')
+);
+DROP POLICY IF EXISTS tenant_invites_insert ON tenant_invites;
+CREATE POLICY tenant_invites_insert ON tenant_invites FOR INSERT WITH CHECK (
+  is_account_member(account_id) AND get_user_role(account_id) IN ('owner', 'manager', 'admin')
+);
+DROP POLICY IF EXISTS tenant_invites_update ON tenant_invites;
+CREATE POLICY tenant_invites_update ON tenant_invites FOR UPDATE USING (
+  is_account_member(account_id) AND get_user_role(account_id) IN ('owner', 'manager', 'admin')
+);
+
+-- Vendor invites: Managers can manage invites
+DROP POLICY IF EXISTS vendor_invites_select ON vendor_invites;
+CREATE POLICY vendor_invites_select ON vendor_invites FOR SELECT USING (
+  is_account_member(account_id) AND get_user_role(account_id) IN ('owner', 'manager', 'admin')
+);
+DROP POLICY IF EXISTS vendor_invites_insert ON vendor_invites;
+CREATE POLICY vendor_invites_insert ON vendor_invites FOR INSERT WITH CHECK (
+  is_account_member(account_id) AND get_user_role(account_id) IN ('owner', 'manager', 'admin')
+);
+DROP POLICY IF EXISTS vendor_invites_update ON vendor_invites;
+CREATE POLICY vendor_invites_update ON vendor_invites FOR UPDATE USING (
+  is_account_member(account_id) AND get_user_role(account_id) IN ('owner', 'manager', 'admin')
+);
+
+-- Tenant payment methods: Tenants manage their own methods
+DROP POLICY IF EXISTS tenant_payment_methods_select ON tenant_payment_methods;
+CREATE POLICY tenant_payment_methods_select ON tenant_payment_methods FOR SELECT USING (
   is_account_member(account_id) AND (
-    user_id = auth.uid() OR
+    tenant_user_id = (select auth.uid()) OR
     get_user_role(account_id) IN ('owner', 'manager', 'admin')
   )
 );
+DROP POLICY IF EXISTS tenant_payment_methods_insert ON tenant_payment_methods;
+CREATE POLICY tenant_payment_methods_insert ON tenant_payment_methods FOR INSERT WITH CHECK (
+  is_account_member(account_id) AND tenant_user_id = (select auth.uid())
+);
+DROP POLICY IF EXISTS tenant_payment_methods_update ON tenant_payment_methods;
+CREATE POLICY tenant_payment_methods_update ON tenant_payment_methods FOR UPDATE USING (
+  is_account_member(account_id) AND tenant_user_id = (select auth.uid())
+);
+
+-- Vendor profiles: Vendors see their own, managers see all
+DROP POLICY IF EXISTS vendor_profiles_select ON vendor_profiles;
+CREATE POLICY vendor_profiles_select ON vendor_profiles FOR SELECT USING (
+  is_account_member(account_id) AND (
+    user_id = (select auth.uid()) OR
+    get_user_role(account_id) IN ('owner', 'manager', 'admin')
+  )
+);
+DROP POLICY IF EXISTS vendor_profiles_insert ON vendor_profiles;
 CREATE POLICY vendor_profiles_insert ON vendor_profiles FOR INSERT WITH CHECK (is_account_member(account_id));
+DROP POLICY IF EXISTS vendor_profiles_update ON vendor_profiles;
 CREATE POLICY vendor_profiles_update ON vendor_profiles FOR UPDATE USING (
   is_account_member(account_id) AND (
-    user_id = auth.uid() OR
+    user_id = (select auth.uid()) OR
     get_user_role(account_id) IN ('owner', 'manager', 'admin')
   )
 );
 
 -- Vendor services
+DROP POLICY IF EXISTS vendor_services_select ON vendor_services;
 CREATE POLICY vendor_services_select ON vendor_services FOR SELECT USING (is_account_member(account_id));
+DROP POLICY IF EXISTS vendor_services_insert ON vendor_services;
 CREATE POLICY vendor_services_insert ON vendor_services FOR INSERT WITH CHECK (is_account_member(account_id));
+DROP POLICY IF EXISTS vendor_services_update ON vendor_services;
 CREATE POLICY vendor_services_update ON vendor_services FOR UPDATE USING (is_account_member(account_id));
+DROP POLICY IF EXISTS vendor_services_delete ON vendor_services;
 CREATE POLICY vendor_services_delete ON vendor_services FOR DELETE USING (is_account_member(account_id));
 
 -- Vendor availability
+DROP POLICY IF EXISTS vendor_availability_select ON vendor_availability;
 CREATE POLICY vendor_availability_select ON vendor_availability FOR SELECT USING (is_account_member(account_id));
+DROP POLICY IF EXISTS vendor_availability_insert ON vendor_availability;
 CREATE POLICY vendor_availability_insert ON vendor_availability FOR INSERT WITH CHECK (is_account_member(account_id));
+DROP POLICY IF EXISTS vendor_availability_update ON vendor_availability;
 CREATE POLICY vendor_availability_update ON vendor_availability FOR UPDATE USING (is_account_member(account_id));
+DROP POLICY IF EXISTS vendor_availability_delete ON vendor_availability;
 CREATE POLICY vendor_availability_delete ON vendor_availability FOR DELETE USING (is_account_member(account_id));
 
 -- Leases: Tenants see their own, managers see all
+DROP POLICY IF EXISTS leases_select ON leases;
 CREATE POLICY leases_select ON leases FOR SELECT USING (
   is_account_member(account_id) AND (
-    tenant_user_id = auth.uid() OR
-    id IN (SELECT lease_id FROM lease_tenants WHERE tenant_user_id = auth.uid()) OR
+    tenant_user_id = (select auth.uid()) OR
+    id IN (SELECT lease_id FROM lease_tenants WHERE tenant_user_id = (select auth.uid())) OR
     get_user_role(account_id) IN ('owner', 'manager', 'admin')
   )
 );
+DROP POLICY IF EXISTS leases_insert ON leases;
 CREATE POLICY leases_insert ON leases FOR INSERT WITH CHECK (is_account_member(account_id));
+DROP POLICY IF EXISTS leases_update ON leases;
 CREATE POLICY leases_update ON leases FOR UPDATE USING (is_account_member(account_id) AND get_user_role(account_id) IN ('owner', 'manager', 'admin'));
 
 -- Lease tenants
+DROP POLICY IF EXISTS lease_tenants_select ON lease_tenants;
 CREATE POLICY lease_tenants_select ON lease_tenants FOR SELECT USING (
   is_account_member(account_id) AND (
-    tenant_user_id = auth.uid() OR
+    tenant_user_id = (select auth.uid()) OR
     get_user_role(account_id) IN ('owner', 'manager', 'admin')
   )
 );
+DROP POLICY IF EXISTS lease_tenants_insert ON lease_tenants;
 CREATE POLICY lease_tenants_insert ON lease_tenants FOR INSERT WITH CHECK (is_account_member(account_id));
 
 -- Maintenance requests: Tenants see their own, vendors see assigned, managers see all
+DROP POLICY IF EXISTS maintenance_requests_select ON maintenance_requests;
 CREATE POLICY maintenance_requests_select ON maintenance_requests FOR SELECT USING (
   is_account_member(account_id) AND (
-    created_by_user_id = auth.uid() OR
+    created_by_user_id = (select auth.uid()) OR
     is_unit_tenant(unit_id) OR
     is_assigned_vendor(id) OR
     get_user_role(account_id) IN ('owner', 'manager', 'admin')
   )
 );
+DROP POLICY IF EXISTS maintenance_requests_insert ON maintenance_requests;
 CREATE POLICY maintenance_requests_insert ON maintenance_requests FOR INSERT WITH CHECK (is_account_member(account_id));
+DROP POLICY IF EXISTS maintenance_requests_update ON maintenance_requests;
 CREATE POLICY maintenance_requests_update ON maintenance_requests FOR UPDATE USING (
   is_account_member(account_id) AND (
-    created_by_user_id = auth.uid() OR
+    created_by_user_id = (select auth.uid()) OR
     is_assigned_vendor(id) OR
     get_user_role(account_id) IN ('owner', 'manager', 'admin')
   )
 );
 
 -- Maintenance assignments
+DROP POLICY IF EXISTS maintenance_assignments_select ON maintenance_assignments;
 CREATE POLICY maintenance_assignments_select ON maintenance_assignments FOR SELECT USING (is_account_member(account_id));
+DROP POLICY IF EXISTS maintenance_assignments_insert ON maintenance_assignments;
 CREATE POLICY maintenance_assignments_insert ON maintenance_assignments FOR INSERT WITH CHECK (is_account_member(account_id));
+DROP POLICY IF EXISTS maintenance_assignments_update ON maintenance_assignments;
 CREATE POLICY maintenance_assignments_update ON maintenance_assignments FOR UPDATE USING (is_account_member(account_id));
 
 -- Maintenance updates
+DROP POLICY IF EXISTS maintenance_updates_select ON maintenance_updates;
 CREATE POLICY maintenance_updates_select ON maintenance_updates FOR SELECT USING (is_account_member(account_id));
+DROP POLICY IF EXISTS maintenance_updates_insert ON maintenance_updates;
 CREATE POLICY maintenance_updates_insert ON maintenance_updates FOR INSERT WITH CHECK (is_account_member(account_id));
 
 -- Payments: Tenants see their own, managers see all
+DROP POLICY IF EXISTS payments_select ON payments;
 CREATE POLICY payments_select ON payments FOR SELECT USING (
   is_account_member(account_id) AND (
-    tenant_user_id = auth.uid() OR
+    tenant_user_id = (select auth.uid()) OR
     get_user_role(account_id) IN ('owner', 'manager', 'admin')
   )
 );
+DROP POLICY IF EXISTS payments_insert ON payments;
 CREATE POLICY payments_insert ON payments FOR INSERT WITH CHECK (is_account_member(account_id));
+DROP POLICY IF EXISTS payments_update ON payments;
 CREATE POLICY payments_update ON payments FOR UPDATE USING (is_account_member(account_id));
 
 -- Owner entities + ownership links: Account members
+DROP POLICY IF EXISTS owner_entities_select ON owner_entities;
 CREATE POLICY owner_entities_select ON owner_entities FOR SELECT USING (is_account_member(account_id));
+DROP POLICY IF EXISTS owner_entities_insert ON owner_entities;
 CREATE POLICY owner_entities_insert ON owner_entities FOR INSERT WITH CHECK (is_account_member(account_id));
+DROP POLICY IF EXISTS owner_entities_update ON owner_entities;
 CREATE POLICY owner_entities_update ON owner_entities FOR UPDATE USING (is_account_member(account_id));
+DROP POLICY IF EXISTS owner_entities_delete ON owner_entities;
 CREATE POLICY owner_entities_delete ON owner_entities FOR DELETE USING (is_account_member(account_id));
 
+DROP POLICY IF EXISTS property_owners_select ON property_owners;
 CREATE POLICY property_owners_select ON property_owners FOR SELECT USING (is_account_member(account_id));
+DROP POLICY IF EXISTS property_owners_insert ON property_owners;
 CREATE POLICY property_owners_insert ON property_owners FOR INSERT WITH CHECK (is_account_member(account_id));
+DROP POLICY IF EXISTS property_owners_update ON property_owners;
 CREATE POLICY property_owners_update ON property_owners FOR UPDATE USING (is_account_member(account_id));
+DROP POLICY IF EXISTS property_owners_delete ON property_owners;
 CREATE POLICY property_owners_delete ON property_owners FOR DELETE USING (is_account_member(account_id));
 
 -- Expenses: Account members
+DROP POLICY IF EXISTS expense_categories_select ON expense_categories;
 CREATE POLICY expense_categories_select ON expense_categories FOR SELECT USING (is_account_member(account_id));
+DROP POLICY IF EXISTS expense_categories_insert ON expense_categories;
 CREATE POLICY expense_categories_insert ON expense_categories FOR INSERT WITH CHECK (is_account_member(account_id));
+DROP POLICY IF EXISTS expense_categories_update ON expense_categories;
 CREATE POLICY expense_categories_update ON expense_categories FOR UPDATE USING (is_account_member(account_id));
+DROP POLICY IF EXISTS expense_categories_delete ON expense_categories;
 CREATE POLICY expense_categories_delete ON expense_categories FOR DELETE USING (is_account_member(account_id));
 
+DROP POLICY IF EXISTS expenses_select ON expenses;
 CREATE POLICY expenses_select ON expenses FOR SELECT USING (is_account_member(account_id));
+DROP POLICY IF EXISTS expenses_insert ON expenses;
 CREATE POLICY expenses_insert ON expenses FOR INSERT WITH CHECK (is_account_member(account_id));
+DROP POLICY IF EXISTS expenses_update ON expenses;
 CREATE POLICY expenses_update ON expenses FOR UPDATE USING (is_account_member(account_id));
+DROP POLICY IF EXISTS expenses_delete ON expenses;
 CREATE POLICY expenses_delete ON expenses FOR DELETE USING (is_account_member(account_id));
 
 -- Owner disbursements: Only owners
+DROP POLICY IF EXISTS owner_disbursements_select ON owner_disbursements;
 CREATE POLICY owner_disbursements_select ON owner_disbursements FOR SELECT USING (has_account_role(account_id, 'owner'));
+DROP POLICY IF EXISTS owner_disbursements_insert ON owner_disbursements;
 CREATE POLICY owner_disbursements_insert ON owner_disbursements FOR INSERT WITH CHECK (has_account_role(account_id, 'owner'));
 
 -- Messages: Users see messages they sent or received
+DROP POLICY IF EXISTS messages_select ON messages;
 CREATE POLICY messages_select ON messages FOR SELECT USING (
   is_account_member(account_id) AND (
-    from_user_id = auth.uid() OR
-    to_user_id = auth.uid() OR
+    from_user_id = (select auth.uid()) OR
+    to_user_id = (select auth.uid()) OR
     get_user_role(account_id) IN ('owner', 'admin')
   )
 );
-CREATE POLICY messages_insert ON messages FOR INSERT WITH CHECK (is_account_member(account_id) AND from_user_id = auth.uid());
-CREATE POLICY messages_update ON messages FOR UPDATE USING (to_user_id = auth.uid());
+DROP POLICY IF EXISTS messages_insert ON messages;
+CREATE POLICY messages_insert ON messages FOR INSERT WITH CHECK (is_account_member(account_id) AND from_user_id = (select auth.uid()));
+DROP POLICY IF EXISTS messages_update ON messages;
+CREATE POLICY messages_update ON messages FOR UPDATE USING (to_user_id = (select auth.uid()));
 
 -- Notifications: Users see their own
-CREATE POLICY notifications_select ON notifications FOR SELECT USING (user_id = auth.uid());
-CREATE POLICY notifications_update ON notifications FOR UPDATE USING (user_id = auth.uid());
+DROP POLICY IF EXISTS notifications_select ON notifications;
+CREATE POLICY notifications_select ON notifications FOR SELECT USING (user_id = (select auth.uid()));
+DROP POLICY IF EXISTS notifications_update ON notifications;
+CREATE POLICY notifications_update ON notifications FOR UPDATE USING (user_id = (select auth.uid()));
 
 -- Showings: Account members can see all
+DROP POLICY IF EXISTS showings_select ON showings;
 CREATE POLICY showings_select ON showings FOR SELECT USING (is_account_member(account_id));
+DROP POLICY IF EXISTS showings_insert ON showings;
 CREATE POLICY showings_insert ON showings FOR INSERT WITH CHECK (is_account_member(account_id));
+DROP POLICY IF EXISTS showings_update ON showings;
 CREATE POLICY showings_update ON showings FOR UPDATE USING (is_account_member(account_id));
 
 -- Rental applications: Account members can see all
+DROP POLICY IF EXISTS rental_applications_select ON rental_applications;
 CREATE POLICY rental_applications_select ON rental_applications FOR SELECT USING (
-  is_account_member(account_id) OR applicant_user_id = auth.uid()
+  is_account_member(account_id) OR applicant_user_id = (select auth.uid())
 );
+DROP POLICY IF EXISTS rental_applications_insert ON rental_applications;
 CREATE POLICY rental_applications_insert ON rental_applications FOR INSERT WITH CHECK (true);
+DROP POLICY IF EXISTS rental_applications_update ON rental_applications;
 CREATE POLICY rental_applications_update ON rental_applications FOR UPDATE USING (
   is_account_member(account_id) AND get_user_role(account_id) IN ('owner', 'manager', 'admin')
 );
 
 -- HVAC subscriptions: Account members
+DROP POLICY IF EXISTS hvac_filter_subs_select ON hvac_filter_subscriptions;
 CREATE POLICY hvac_filter_subs_select ON hvac_filter_subscriptions FOR SELECT USING (is_account_member(account_id));
+DROP POLICY IF EXISTS hvac_filter_subs_insert ON hvac_filter_subscriptions;
 CREATE POLICY hvac_filter_subs_insert ON hvac_filter_subscriptions FOR INSERT WITH CHECK (is_account_member(account_id));
+DROP POLICY IF EXISTS hvac_filter_subs_update ON hvac_filter_subscriptions;
 CREATE POLICY hvac_filter_subs_update ON hvac_filter_subscriptions FOR UPDATE USING (is_account_member(account_id));
 
 -- HVAC deliveries: Account members
+DROP POLICY IF EXISTS hvac_filter_deliveries_select ON hvac_filter_deliveries;
 CREATE POLICY hvac_filter_deliveries_select ON hvac_filter_deliveries FOR SELECT USING (is_account_member(account_id));
+DROP POLICY IF EXISTS hvac_filter_deliveries_insert ON hvac_filter_deliveries;
 CREATE POLICY hvac_filter_deliveries_insert ON hvac_filter_deliveries FOR INSERT WITH CHECK (is_account_member(account_id));
+DROP POLICY IF EXISTS hvac_filter_deliveries_update ON hvac_filter_deliveries;
 CREATE POLICY hvac_filter_deliveries_update ON hvac_filter_deliveries FOR UPDATE USING (is_account_member(account_id));
 
 -- HVAC status: Account members
+DROP POLICY IF EXISTS unit_hvac_status_select ON unit_hvac_status;
 CREATE POLICY unit_hvac_status_select ON unit_hvac_status FOR SELECT USING (is_account_member(account_id));
+DROP POLICY IF EXISTS unit_hvac_status_insert ON unit_hvac_status;
 CREATE POLICY unit_hvac_status_insert ON unit_hvac_status FOR INSERT WITH CHECK (is_account_member(account_id));
+DROP POLICY IF EXISTS unit_hvac_status_update ON unit_hvac_status;
 CREATE POLICY unit_hvac_status_update ON unit_hvac_status FOR UPDATE USING (is_account_member(account_id));
 
 -- Analytics events: Account members can see their account's events
+DROP POLICY IF EXISTS analytics_events_select ON analytics_events;
 CREATE POLICY analytics_events_select ON analytics_events FOR SELECT USING (is_account_member(account_id));
+DROP POLICY IF EXISTS analytics_events_insert ON analytics_events;
 CREATE POLICY analytics_events_insert ON analytics_events FOR INSERT WITH CHECK (true);
 
 -- Audit log: Only owners and admins can view
+DROP POLICY IF EXISTS audit_log_select ON audit_log;
 CREATE POLICY audit_log_select ON audit_log FOR SELECT USING (
   is_account_member(account_id) AND get_user_role(account_id) IN ('owner', 'admin')
 );
+DROP POLICY IF EXISTS audit_log_insert ON audit_log;
 CREATE POLICY audit_log_insert ON audit_log FOR INSERT WITH CHECK (true);
 
 -- ============================================================================
@@ -1074,24 +1264,43 @@ BEGIN
 END;
 $$;
 
+DROP TRIGGER IF EXISTS update_accounts_updated_at ON accounts;
 CREATE TRIGGER update_accounts_updated_at BEFORE UPDATE ON accounts FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+DROP TRIGGER IF EXISTS update_account_members_updated_at ON account_members;
 CREATE TRIGGER update_account_members_updated_at BEFORE UPDATE ON account_members FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+DROP TRIGGER IF EXISTS update_properties_updated_at ON properties;
 CREATE TRIGGER update_properties_updated_at BEFORE UPDATE ON properties FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+DROP TRIGGER IF EXISTS update_units_updated_at ON units;
 CREATE TRIGGER update_units_updated_at BEFORE UPDATE ON units FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+DROP TRIGGER IF EXISTS update_tenant_profiles_updated_at ON tenant_profiles;
 CREATE TRIGGER update_tenant_profiles_updated_at BEFORE UPDATE ON tenant_profiles FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+DROP TRIGGER IF EXISTS update_vendor_profiles_updated_at ON vendor_profiles;
 CREATE TRIGGER update_vendor_profiles_updated_at BEFORE UPDATE ON vendor_profiles FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+DROP TRIGGER IF EXISTS update_leases_updated_at ON leases;
 CREATE TRIGGER update_leases_updated_at BEFORE UPDATE ON leases FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+DROP TRIGGER IF EXISTS update_maintenance_requests_updated_at ON maintenance_requests;
 CREATE TRIGGER update_maintenance_requests_updated_at BEFORE UPDATE ON maintenance_requests FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+DROP TRIGGER IF EXISTS update_maintenance_assignments_updated_at ON maintenance_assignments;
 CREATE TRIGGER update_maintenance_assignments_updated_at BEFORE UPDATE ON maintenance_assignments FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+DROP TRIGGER IF EXISTS update_payments_updated_at ON payments;
 CREATE TRIGGER update_payments_updated_at BEFORE UPDATE ON payments FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+DROP TRIGGER IF EXISTS update_owner_entities_updated_at ON owner_entities;
 CREATE TRIGGER update_owner_entities_updated_at BEFORE UPDATE ON owner_entities FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+DROP TRIGGER IF EXISTS update_expense_categories_updated_at ON expense_categories;
 CREATE TRIGGER update_expense_categories_updated_at BEFORE UPDATE ON expense_categories FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+DROP TRIGGER IF EXISTS update_expenses_updated_at ON expenses;
 CREATE TRIGGER update_expenses_updated_at BEFORE UPDATE ON expenses FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+DROP TRIGGER IF EXISTS update_owner_disbursements_updated_at ON owner_disbursements;
 CREATE TRIGGER update_owner_disbursements_updated_at BEFORE UPDATE ON owner_disbursements FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+DROP TRIGGER IF EXISTS update_showings_updated_at ON showings;
 CREATE TRIGGER update_showings_updated_at BEFORE UPDATE ON showings FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+DROP TRIGGER IF EXISTS update_rental_applications_updated_at ON rental_applications;
 CREATE TRIGGER update_rental_applications_updated_at BEFORE UPDATE ON rental_applications FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+DROP TRIGGER IF EXISTS update_hvac_filter_subs_updated_at ON hvac_filter_subscriptions;
 CREATE TRIGGER update_hvac_filter_subs_updated_at BEFORE UPDATE ON hvac_filter_subscriptions FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+DROP TRIGGER IF EXISTS update_hvac_filter_deliveries_updated_at ON hvac_filter_deliveries;
 CREATE TRIGGER update_hvac_filter_deliveries_updated_at BEFORE UPDATE ON hvac_filter_deliveries FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+DROP TRIGGER IF EXISTS update_unit_hvac_status_updated_at ON unit_hvac_status;
 CREATE TRIGGER update_unit_hvac_status_updated_at BEFORE UPDATE ON unit_hvac_status FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 -- ============================================================================
@@ -1099,7 +1308,7 @@ CREATE TRIGGER update_unit_hvac_status_updated_at BEFORE UPDATE ON unit_hvac_sta
 -- ============================================================================
 
 -- User profiles table for app compatibility
-CREATE TABLE user_profiles (
+CREATE TABLE IF NOT EXISTS user_profiles (
   id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
   email TEXT NOT NULL,
   full_name TEXT,
@@ -1115,20 +1324,24 @@ CREATE TABLE user_profiles (
 ALTER TABLE user_profiles ENABLE ROW LEVEL SECURITY;
 
 -- Users can read their own profile
-CREATE POLICY user_profiles_select ON user_profiles FOR SELECT USING (auth.uid() = id);
+DROP POLICY IF EXISTS user_profiles_select ON user_profiles;
+CREATE POLICY user_profiles_select ON user_profiles FOR SELECT USING ((select auth.uid()) = id);
 
 -- Allow inserts during signup (auth.uid() matches the profile being created OR it's a service role)
+DROP POLICY IF EXISTS user_profiles_insert ON user_profiles;
 CREATE POLICY user_profiles_insert ON user_profiles FOR INSERT WITH CHECK (
-  auth.uid() = id OR auth.uid() IS NULL
+  (select auth.uid()) = id OR (select auth.uid()) IS NULL
 );
 
 -- Users can update their own profile
-CREATE POLICY user_profiles_update ON user_profiles FOR UPDATE USING (auth.uid() = id);
+DROP POLICY IF EXISTS user_profiles_update ON user_profiles;
+CREATE POLICY user_profiles_update ON user_profiles FOR UPDATE USING ((select auth.uid()) = id);
 
 -- Index for performance
-CREATE INDEX idx_user_profiles_email ON user_profiles(email);
+CREATE INDEX IF NOT EXISTS idx_user_profiles_email ON user_profiles(email);
 
 -- Trigger for updated_at
+DROP TRIGGER IF EXISTS update_user_profiles_updated_at ON user_profiles;
 CREATE TRIGGER update_user_profiles_updated_at BEFORE UPDATE ON user_profiles FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 -- ============================================================================
@@ -1178,6 +1391,7 @@ END;
 $$;
 
 -- Trigger to run the function after user signup
+DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
 CREATE TRIGGER on_auth_user_created
   AFTER INSERT ON auth.users
   FOR EACH ROW

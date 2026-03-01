@@ -25,9 +25,12 @@ export interface CreateVendorData {
 /**
  * Create a new vendor profile
  */
-export async function createVendor(data: CreateVendorData): Promise<{ success: boolean; error?: any }> {
+export async function createVendor(
+  data: CreateVendorData,
+  options?: { accountId?: string }
+): Promise<{ success: boolean; error?: any }> {
   try {
-    const accountId = await getCurrentAccountId();
+    const accountId = options?.accountId || await getCurrentAccountId();
     if (!accountId) {
       return { success: false, error: { message: 'No account ID found' } };
     }

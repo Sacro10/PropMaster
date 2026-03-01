@@ -63,8 +63,7 @@ export function UpgradeCTA({
     if (onUpgrade) {
       onUpgrade();
     } else {
-      // Default: navigate to billing/upgrade page
-      window.location.href = '/billing?upgrade=' + plan;
+      window.location.href = `/app/billing?plan=${plan}&checkout=1`;
     }
   };
 
@@ -397,7 +396,7 @@ export function LockedFeatureCard({
     if (onUpgrade) {
       onUpgrade();
     } else {
-      window.location.href = '/billing?upgrade=' + plan;
+      window.location.href = `/app/billing?plan=${plan}&checkout=1`;
     }
   };
 

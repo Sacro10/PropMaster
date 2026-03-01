@@ -1,14 +1,43 @@
+import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Building, Check } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import { useThemeContext } from '../context/ThemeContext'
 import { ThemeToggle } from '../components/ThemeToggle'
+import { getPlanCtaLabel, getPlanSelectionPath } from '../../lib/subscriptionRouting'
+import { getAccountPlan } from '../../lib/planGating'
+import type { SubscriptionPlan } from '../../lib/stripe'
 
 export function PricingPage() {
-  const { user } = useAuth()
+  const { user, profile } = useAuth()
   const navigate = useNavigate()
   const { theme, toggleTheme } = useThemeContext()
   const isDark = theme === 'dark'
+  const [currentPlan, setCurrentPlan] = useState<SubscriptionPlan>((profile?.subscription_tier || 'basic') as SubscriptionPlan)
+
+  useEffect(() => {
+    let cancelled = false
+
+    const loadCurrentPlan = async () => {
+      if (!user) {
+        setCurrentPlan((profile?.subscription_tier || 'basic') as SubscriptionPlan)
+        return
+      }
+
+      const planInfo = await getAccountPlan()
+      if (cancelled) {
+        return
+      }
+
+      setCurrentPlan((planInfo?.plan || profile?.subscription_tier || 'basic') as SubscriptionPlan)
+    }
+
+    void loadCurrentPlan()
+
+    return () => {
+      cancelled = true
+    }
+  }, [user, profile?.subscription_tier])
 
   const plans = [
     {
@@ -17,11 +46,10 @@ export function PricingPage() {
       price: 'Free',
       description: 'Perfect for getting started',
       features: [
-        'Up to 3 units',
-        'Tenant portal',
-        'Basic maintenance requests',
-        'Basic rent collection',
-        'Property management'
+        'Up to 10 properties',
+        'Basic tenant screening',
+        'Maintenance tracking',
+        'Email support'
       ],
       cta: 'Get Started',
       highlighted: false
@@ -32,16 +60,13 @@ export function PricingPage() {
       price: '$10',
       period: '/month',
       badge: 'Recommended',
-      description: 'Up to 100 units',
+      description: 'For growing property managers',
       features: [
-        'Up to 100 units',
-        'Everything in Basic',
-        'Tenant screening',
-        'Maintenance routing',
-        'Marketing tools',
-        'Standard reporting',
-        'Lease renewals',
-        'Communication hub'
+        'Up to 50 properties',
+        'AI tenant screening',
+        'Advanced analytics',
+        'Automated rent collection',
+        'Priority support'
       ],
       cta: 'Upgrade Now',
       highlighted: true
@@ -51,33 +76,22 @@ export function PricingPage() {
       name: 'PREMIUM',
       price: '$20',
       period: '/month',
-      description: 'Up to unlimited units',
+      description: 'For professionals',
       features: [
-        'Unlimited units',
-        'Everything in Pro',
-        'AI risk scoring',
-        'Integrated accounting',
-        'HVAC filter program',
-        'Electronic showings',
-        '24/7 emergency support',
-        'Advanced analytics',
-        'Advanced exports',
+        'Unlimited properties',
+        'Full AI automation',
         'Custom reports',
-        'API access'
+        'API access',
+        'Dedicated account manager',
+        '24/7 phone support'
       ],
       cta: 'Start Free Trial',
       highlighted: false
     }
   ]
 
-  const handlePlanSelect = (planId: string) => {
-    if (user) {
-      // If logged in, go to billing page
-      navigate('/app/settings')
-    } else {
-      // If not logged in, go to auth page
-      navigate('/auth')
-    }
+  const handlePlanSelect = (planId: SubscriptionPlan) => {
+    navigate(getPlanSelectionPath(planId, Boolean(user), currentPlan))
   }
 
   return (
@@ -202,7 +216,8 @@ export function PricingPage() {
 
               {/* CTA Button */}
               <button
-                onClick={() => handlePlanSelect(plan.id)}
+                onClick={() => handlePlanSelect(plan.id as SubscriptionPlan)}
+                disabled={Boolean(user) && plan.id === currentPlan}
                 className={`w-full py-3 rounded-lg font-semibold transition-all ${
                   plan.highlighted
                     ? 'bg-gradient-to-r from-[#ff6b35] to-[#f7931e] text-white hover:scale-105'
@@ -213,10 +228,10 @@ export function PricingPage() {
                     : isDark
                     ? 'bg-white/10 hover:bg-white/20 border border-white/20'
                     : 'bg-gray-900 text-white hover:bg-gray-800'
-                }`}
+                } disabled:cursor-not-allowed disabled:hover:scale-100 disabled:opacity-70`}
                 style={{ fontFamily: 'Work Sans, sans-serif' }}
               >
-                {plan.id === 'basic' && user ? 'Current Plan' : plan.cta}
+                {getPlanCtaLabel(plan.id as SubscriptionPlan, Boolean(user), currentPlan)}
               </button>
             </div>
           ))}

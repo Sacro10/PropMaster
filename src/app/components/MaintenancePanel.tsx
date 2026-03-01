@@ -1,4 +1,4 @@
-import { Wrench, CircleCheck, Activity, Bell, ListFilter, RefreshCw, AlertTriangle, CheckCircle, Trash2 } from 'lucide-react';
+import { Wrench, CircleCheck, Activity, Bell, ListFilter, RefreshCw, CheckCircle, Trash2 } from 'lucide-react';
 import { useEffect, useState, type FormEvent } from 'react';
 import { useThemeStyles } from '../hooks/useThemeStyles';
 import { useHasFeature } from '../hooks/usePlanGating';
@@ -15,15 +15,15 @@ import {
   type HVACStatusEntry,
   type HVACUnitStatusSummary,
 } from '../../lib/api/maintenanceMetrics';
-import { updateMaintenanceRequestStatus, deleteMaintenanceRequest } from '../../lib/api/maintenance';
+import { deleteMaintenanceRequest } from '../../lib/api/maintenance';
 import { LoadingPage } from './LoadingSpinner';
 import { ErrorState } from './ErrorBoundary';
 import { formatRelativeTime, formatDisplayDate } from '../../lib/utils/dateHelpers';
-import { CreateMaintenanceRequestModal } from './CreateMaintenanceRequestModal';
-import { CreateVendorModal } from './CreateVendorModal';
+import { InviteVendorModal } from './InviteVendorModal';
 import { getCurrentAccountId } from '../../lib/api/client';
 import { supabase } from '../../lib/supabaseClient';
 import { useAuth } from '../context/AuthContext';
+import { useLocation } from 'react-router-dom';
 
 type HVACUnitOption = {
   id: string;
@@ -45,19 +45,16 @@ type HVACPropertyOption = {
 export function MaintenancePanel() {
   const { isDark, bg, text, border } = useThemeStyles();
   const { user, profile } = useAuth();
+  const location = useLocation();
   const [assigningRequestId, setAssigningRequestId] = useState<string | null>(null);
   const [availableVendors, setAvailableVendors] = useState<any[]>([]);
   const [isLoadingVendors, setIsLoadingVendors] = useState(false);
   const [assignError, setAssignError] = useState<string | null>(null);
-  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
-  const [isEmergencyModalOpen, setIsEmergencyModalOpen] = useState(false);
   const [isVendorModalOpen, setIsVendorModalOpen] = useState(false);
   const [showAllRequests, setShowAllRequests] = useState(false);
   const [showAllHVACProperties, setShowAllHVACProperties] = useState(false);
   const [selectedPriority, setSelectedPriority] = useState<'all' | 'emergency' | 'high' | 'normal' | 'low'>('all');
   const [selectedStatus, setSelectedStatus] = useState<'all' | 'open' | 'submitted' | 'reviewed' | 'assigned' | 'scheduled' | 'in_progress' | 'completed' | 'closed' | 'cancelled'>('all');
-  const [updatingStatusId, setUpdatingStatusId] = useState<string | null>(null);
-  const [statusUpdateError, setStatusUpdateError] = useState<{ id: string; message: string } | null>(null);
   const [deletingRequestId, setDeletingRequestId] = useState<string | null>(null);
   const [showHVACOptions, setShowHVACOptions] = useState(false);
   const [selectedHVACOption, setSelectedHVACOption] = useState<'replacement' | 'delivery' | 'status' | 'filter_delivery' | null>(null);
@@ -131,6 +128,14 @@ export function MaintenancePanel() {
   const { data: metrics, loading: metricsLoading, error: metricsError, refetch: refetchMetrics } = useMaintenanceMetrics();
   const { data: hvacProgram, loading: hvacLoading, refetch: refetchHVACProgram } = useHVACProgram();
   const { data: routingMetrics } = useRoutingMetrics();
+  const highlightedRequestId = new URLSearchParams(location.search).get('request') || new URLSearchParams(location.search).get('request_id');
+
+  useEffect(() => {
+    if (!highlightedRequestId || requests.length === 0) return;
+    const element = document.getElementById(`maintenance-request-${highlightedRequestId}`);
+    if (!element) return;
+    element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }, [highlightedRequestId, requests]);
 
   useEffect(() => {
     if (!profile && !user) return;
@@ -813,26 +818,6 @@ export function MaintenancePanel() {
     });
   };
 
-  // Handle emergency request
-  const handleEmergencyClick = () => {
-    setIsEmergencyModalOpen(true);
-  };
-
-  const handleStatusChange = async (requestId: string, status: string) => {
-    setUpdatingStatusId(requestId);
-    setStatusUpdateError(null);
-    try {
-      await updateMaintenanceRequestStatus(requestId, status);
-      await refetchRequests();
-      await refetchMetrics();
-    } catch (error) {
-      console.error('Failed to update status:', error);
-      setStatusUpdateError({ id: requestId, message: 'Failed to update status. Please try again.' });
-    } finally {
-      setUpdatingStatusId(null);
-    }
-  };
-
   const filteredRequests = selectedPriority === 'all'
     ? requests
     : requests.filter((request) => request.priority === selectedPriority);
@@ -857,11 +842,21 @@ export function MaintenancePanel() {
     isDark ? 'bg-white/5 border-white/10 text-white' : 'bg-white border-gray-200 text-gray-900'
   }`;
 
+  const formatAvgResponseTime = (hours: number) => {
+    if (!Number.isFinite(hours) || hours <= 0) {
+      return 'N/A';
+    }
+    if (hours < 1) {
+      return `${Math.max(1, Math.round(hours * 60))} min`;
+    }
+    return `${Math.round(hours * 10) / 10} hrs`;
+  };
+
   const maintenanceStats = metrics ? [
-    { label: 'Active Requests', value: metrics.active_requests.toString(), change: '0%', icon: Wrench },
-    { label: 'Avg. Response Time', value: `${metrics.avg_response_time_hours} hrs`, change: '0%', icon: Activity },
-    { label: 'Completion Rate', value: `${metrics.completion_rate}%`, change: '0%', icon: CheckCircle },
-    { label: 'Emergency Support', value: metrics.emergency_support_status, change: metrics.emergency_support_status === '24/7' ? 'Active' : 'Limited', icon: Bell },
+    { label: 'Active Requests', value: metrics.active_requests.toString(), icon: Wrench },
+    { label: 'Avg. Response Time', value: formatAvgResponseTime(metrics.avg_response_time_hours), icon: Activity },
+    { label: 'Completion Rate', value: `${metrics.completion_rate}%`, icon: CheckCircle },
+    { label: 'Emergency Support', value: metrics.emergency_support_status, icon: Bell },
   ] : [];
 
   const selectedReplacementVendor = hvacVendors.find((vendor) => vendor.id === replacementForm.vendorId) || null;
@@ -895,12 +890,6 @@ export function MaintenancePanel() {
           >
             + Add Vendor
           </button>
-          <button
-            onClick={() => setIsCreateModalOpen(true)}
-            className="px-6 py-3 bg-gradient-to-r from-[#ff6b35] to-[#f7931e] rounded-lg font-medium hover:scale-105 transition-transform"
-          >
-            + Create Request
-          </button>
         </div>
       </div>
 
@@ -925,9 +914,6 @@ export function MaintenancePanel() {
                 <p className="text-3xl font-bold" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
                   {stat.value}
                 </p>
-                <span className={`text-sm ${stat.change.includes('Active') || stat.change.includes('+') ? 'text-emerald-400' : stat.change.includes('-') ? 'text-red-400' : 'text-gray-400'}`}>
-                  {stat.change}
-                </span>
               </div>
             </div>
           );
@@ -1009,7 +995,8 @@ export function MaintenancePanel() {
                 return (
                   <div
                     key={request.id}
-                    className={`p-4 ${isDark ? 'bg-white/5 hover:bg-white/10' : 'bg-gray-50 hover:bg-gray-100'} rounded-lg transition-all border ${border.default} hover:border-[#ff6b35]/50`}
+                    id={`maintenance-request-${request.id}`}
+                    className={`p-4 ${isDark ? 'bg-white/5 hover:bg-white/10' : 'bg-gray-50 hover:bg-gray-100'} rounded-lg transition-all border ${highlightedRequestId === request.id ? 'border-[#ff6b35] shadow-[0_0_0_1px_rgba(255,107,53,0.4)]' : border.default} hover:border-[#ff6b35]/50`}
                   >
                     <div className="flex items-start justify-between mb-3">
                       <div className="flex-1">
@@ -1045,18 +1032,6 @@ export function MaintenancePanel() {
                           >
                             {request.status.replace('_', ' ').toUpperCase()}
                           </span>
-                          <select
-                            value={request.status}
-                            onChange={(event) => handleStatusChange(request.id, event.target.value)}
-                            disabled={updatingStatusId === request.id}
-                            className={`px-2 py-1 ${isDark ? 'bg-white/10' : 'bg-white'} border ${border.default} rounded-md text-xs focus:outline-none focus:border-[#ff6b35]/50`}
-                          >
-                            {maintenanceStatusOptions.map((option) => (
-                              <option key={option.value} value={option.value}>
-                                {option.label}
-                              </option>
-                            ))}
-                          </select>
                           <button
                             type="button"
                             onClick={() => handleDeleteRequest(request)}
@@ -1069,9 +1044,6 @@ export function MaintenancePanel() {
                             <Trash2 className="w-4 h-4 text-red-400" />
                           </button>
                         </div>
-                        {statusUpdateError?.id === request.id && (
-                          <p className="text-xs text-red-400 mb-2">{statusUpdateError.message}</p>
-                        )}
                         <p className="font-medium mb-2" style={{ fontFamily: 'Work Sans, sans-serif' }}>
                           {request.title}
                         </p>
@@ -2057,13 +2029,6 @@ export function MaintenancePanel() {
                   </div>
                 )}
 
-                <button
-                  onClick={handleEmergencyClick}
-                  className={`w-full py-3 ${isDark ? 'bg-red-500/20 hover:bg-red-500/30' : 'bg-red-50 hover:bg-red-100'} border border-red-500/30 text-red-400 rounded-lg font-medium transition-colors flex items-center justify-center gap-2`}
-                >
-                  <AlertTriangle className="w-4 h-4" />
-                  Create Emergency Request
-                </button>
               </div>
 
               {maintenanceRouting.hasAccess && routingMetrics && (
@@ -2090,35 +2055,10 @@ export function MaintenancePanel() {
         </div>
       </div>
 
-      {/* Create Maintenance Request Modal */}
-      <CreateMaintenanceRequestModal
-        isOpen={isCreateModalOpen}
-        onClose={() => setIsCreateModalOpen(false)}
-        onSuccess={() => {
-          refetchRequests();
-          refetchMetrics();
-        }}
-      />
-
-      {/* Create Emergency Request Modal */}
-      <CreateMaintenanceRequestModal
-        isOpen={isEmergencyModalOpen}
-        onClose={() => setIsEmergencyModalOpen(false)}
-        onSuccess={() => {
-          refetchRequests();
-          refetchMetrics();
-        }}
-        emergencyMode
-      />
-
-      {/* Create Vendor Modal */}
-      <CreateVendorModal
+      {/* Invite Vendor Modal */}
+      <InviteVendorModal
         isOpen={isVendorModalOpen}
         onClose={() => setIsVendorModalOpen(false)}
-        onSuccess={() => {
-          // Optionally refresh vendor list or show success message
-          console.log('Vendor created successfully');
-        }}
       />
     </div>
   );

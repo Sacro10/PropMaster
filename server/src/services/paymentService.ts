@@ -6,6 +6,13 @@
 import { supabaseAdmin as supabase } from '../supabase';
 import { logActivityEvent } from './activityService';
 import { createLedgerEntry } from './ledgerService';
+import { sendResendEmail } from './emailService';
+import {
+  buildRentActionUrl,
+  createNotifications,
+  getAccountRoleMap,
+  getAccountUsersByRoles,
+} from './notificationService';
 
 export interface Payment {
   id: string;
@@ -58,6 +65,238 @@ export interface CollectionStats {
   autoPayEnrolled: number;
   avgCollectionTime: number;
   overdueCount: number;
+}
+
+interface PaymentNotificationContext {
+  id: string;
+  account_id: string;
+  tenant_user_id: string;
+  amount: number;
+  due_date: string;
+  paid_at: string | null;
+  status: string;
+  payment_type: string;
+  tenant: {
+    full_name: string | null;
+    email: string | null;
+    phone: string | null;
+  } | null;
+  unit: {
+    unit_number: string | null;
+    properties: {
+      name: string | null;
+    } | null;
+  } | null;
+}
+
+function formatRentReminderDate(dueDate: string) {
+  return new Date(`${dueDate}T12:00:00Z`).toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  });
+}
+
+function getPaymentLocationLabel(payment: PaymentNotificationContext) {
+  const propertyName = payment.unit?.properties?.name || 'Property';
+  const unitLabel = payment.unit?.unit_number ? ` #${payment.unit.unit_number}` : '';
+  return `${propertyName}${unitLabel}`;
+}
+
+async function getPaymentNotificationContext(
+  accountId: string,
+  paymentId: string
+): Promise<PaymentNotificationContext | null> {
+  const { data, error } = await supabase
+    .from('payments')
+    .select(`
+      id,
+      account_id,
+      tenant_user_id,
+      amount,
+      due_date,
+      paid_at,
+      status,
+      payment_type,
+      unit:units(unit_number, properties(name))
+    `)
+    .eq('id', paymentId)
+    .eq('account_id', accountId)
+    .maybeSingle();
+
+  if (error) {
+    throw error;
+  }
+
+  if (!data) {
+    return null;
+  }
+
+  const { data: tenantProfile } = await supabase
+    .from('tenant_profiles')
+    .select('full_name, email, phone')
+    .eq('account_id', accountId)
+    .eq('user_id', data.tenant_user_id)
+    .maybeSingle();
+
+  return {
+    ...(data as any),
+    tenant: tenantProfile || null,
+  } as PaymentNotificationContext;
+}
+
+export async function notifyPaymentPaid(params: {
+  accountId: string;
+  paymentId: string;
+  actorUserId?: string | null;
+}): Promise<void> {
+  const payment = await getPaymentNotificationContext(params.accountId, params.paymentId);
+  if (!payment) {
+    return;
+  }
+
+  const ownerRecipients = await getAccountUsersByRoles(
+    params.accountId,
+    ['owner', 'manager', 'admin'],
+    {
+      excludeUserIds: params.actorUserId ? [params.actorUserId] : [],
+    }
+  );
+
+  const recipientIds = Array.from(
+    new Set(
+      [
+        ...ownerRecipients,
+        payment.tenant_user_id && payment.tenant_user_id !== params.actorUserId
+          ? payment.tenant_user_id
+          : null,
+      ].filter(Boolean)
+    )
+  ) as string[];
+
+  if (recipientIds.length === 0) {
+    return;
+  }
+
+  const roleMap = await getAccountRoleMap(params.accountId, recipientIds);
+  const propertyLabel = getPaymentLocationLabel(payment);
+  const tenantName = payment.tenant?.full_name || 'Tenant';
+  const message = [
+    `Rent payment received for ${propertyLabel}.`,
+    `Tenant: ${tenantName}`,
+    `Amount: $${Number(payment.amount).toFixed(2)}`,
+    `Paid: ${payment.paid_at ? formatRentReminderDate(payment.paid_at.split('T')[0]) : 'Today'}`,
+  ].join('\n');
+
+  await createNotifications(
+    recipientIds.map((recipientId) => ({
+      accountId: params.accountId,
+      userId: recipientId,
+      type: 'payment_received',
+      title: recipientId === payment.tenant_user_id ? 'Your rent payment was received' : 'Rent payment received',
+      message,
+      actionUrl: buildRentActionUrl(roleMap.get(recipientId), payment.id),
+      relatedEntityType: 'payment',
+      relatedEntityId: payment.id,
+      payload: {
+        paymentId: payment.id,
+        status: payment.status,
+      },
+    }))
+  );
+}
+
+async function sendRentReminderNotification(params: {
+  accountId: string;
+  paymentId: string;
+  stage: 'manual' | 'ten_day' | 'due_today' | 'overdue';
+  actorUserId?: string | null;
+}) {
+  const payment = await getPaymentNotificationContext(params.accountId, params.paymentId);
+  if (!payment || !payment.tenant_user_id) {
+    return;
+  }
+
+  const dueDateText = formatRentReminderDate(payment.due_date);
+  const propertyLabel = getPaymentLocationLabel(payment);
+  const tenantName = payment.tenant?.full_name || 'Tenant';
+
+  const stageCopy = {
+    manual: {
+      eventType: 'payment_reminder_sent',
+      title: 'Rent payment reminder',
+      subject: `Rent payment reminder for ${propertyLabel}`,
+      body: `Hi ${tenantName},\n\nThis is a reminder that your rent payment for ${propertyLabel} is due on ${dueDateText}.\n\nAmount due: $${Number(payment.amount).toFixed(2)}.`,
+    },
+    ten_day: {
+      eventType: 'rent_reminder_10_day_sent',
+      title: 'Rent due in 10 days',
+      subject: `Rent due soon for ${propertyLabel}`,
+      body: `Hi ${tenantName},\n\nYour rent for ${propertyLabel} is due in 10 days on ${dueDateText}.\n\nAmount due: $${Number(payment.amount).toFixed(2)}.`,
+    },
+    due_today: {
+      eventType: 'rent_reminder_due_day_sent',
+      title: 'Rent due today',
+      subject: `Rent due today for ${propertyLabel}`,
+      body: `Hi ${tenantName},\n\nYour rent for ${propertyLabel} is due today, ${dueDateText}.\n\nAmount due: $${Number(payment.amount).toFixed(2)}.`,
+    },
+    overdue: {
+      eventType: 'rent_reminder_overdue_sent',
+      title: 'Rent is overdue',
+      subject: `Rent overdue for ${propertyLabel}`,
+      body: `Hi ${tenantName},\n\nYour rent for ${propertyLabel} was due on ${dueDateText} and is now overdue.\n\nAmount due: $${Number(payment.amount).toFixed(2)}.`,
+    },
+  }[params.stage];
+
+  try {
+    if (payment.tenant?.email) {
+      await sendResendEmail({
+        to: payment.tenant.email,
+        subject: stageCopy.subject,
+        text: stageCopy.body,
+      });
+    }
+  } catch (error) {
+    console.warn('[Payment] Failed to send rent reminder email:', error);
+  }
+
+  await createNotifications([
+    {
+      accountId: params.accountId,
+      userId: payment.tenant_user_id,
+      type: 'payment_due',
+      title: stageCopy.title,
+      message: [
+        `${propertyLabel}`,
+        `Amount: $${Number(payment.amount).toFixed(2)}`,
+        `Due: ${dueDateText}`,
+      ].join('\n'),
+      actionUrl: buildRentActionUrl('tenant', payment.id),
+      relatedEntityType: 'payment',
+      relatedEntityId: payment.id,
+      payload: {
+        paymentId: payment.id,
+        reminderStage: params.stage,
+      },
+      sentViaEmail: Boolean(payment.tenant?.email),
+    },
+  ]);
+
+  await logActivityEvent(
+    params.accountId,
+    params.actorUserId || payment.tenant_user_id,
+    stageCopy.eventType,
+    `${stageCopy.title}: ${tenantName}`,
+    {
+      entityType: 'payment',
+      entityId: payment.id,
+      metadata: {
+        amount: payment.amount,
+        dueDate: payment.due_date,
+        reminderStage: params.stage,
+      },
+    }
+  );
 }
 
 /**
@@ -293,53 +532,88 @@ export async function sendPaymentReminder(
   userId: string,
   paymentId: string
 ): Promise<void> {
-  // Get payment details
-  const { data: payment, error } = await supabase
-    .from('payments')
-    .select(`
-      *,
-      tenant:user_profiles!tenant_user_id(full_name, email, phone),
-      unit:units(unit_number, properties(name))
-    `)
-    .eq('id', paymentId)
-    .eq('account_id', accountId)
-    .single();
-
-  if (error || !payment) {
+  const payment = await getPaymentNotificationContext(accountId, paymentId);
+  if (!payment) {
     throw new Error('Payment not found');
   }
 
-  // TODO: Implement actual email/SMS sending
-  // For now, just log the activity
-
-  await logActivityEvent(
+  await sendRentReminderNotification({
     accountId,
-    userId,
-    'payment_reminder_sent',
-    `Payment reminder sent to ${payment.tenant.full_name}`,
-    {
-      entityType: 'payment',
-      entityId: paymentId,
-      metadata: {
-        tenant_name: payment.tenant.full_name,
-        tenant_email: payment.tenant.email,
-        amount: payment.amount,
-        due_date: payment.due_date,
-        days_overdue: Math.floor(
-          (Date.now() - new Date(payment.due_date).getTime()) / (1000 * 60 * 60 * 24)
-        ),
-      },
-    }
-  );
-
-  console.log('[Payment] Reminder stub:', {
-    to: payment.tenant.email,
-    phone: payment.tenant.phone,
-    amount: payment.amount,
-    due_date: payment.due_date,
-    property: payment.unit.properties.name,
-    unit: payment.unit.unit_number,
+    paymentId,
+    actorUserId: userId,
+    stage: 'manual',
   });
+}
+
+export async function processAutomatedRentReminders(): Promise<void> {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const todayIso = today.toISOString();
+
+  const { data: payments, error } = await supabase
+    .from('payments')
+    .select('id, account_id, due_date, status, payment_type')
+    .eq('payment_type', 'rent')
+    .in('status', ['pending', 'late'])
+    .lte('due_date', new Date(today.getTime() + 10 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]);
+
+  if (error) {
+    throw error;
+  }
+
+  for (const payment of payments || []) {
+    const dueDate = new Date(`${payment.due_date}T12:00:00Z`);
+    const dayDiff = Math.round((dueDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+
+    const stage =
+      dayDiff === 10
+        ? 'ten_day'
+        : dayDiff === 0
+          ? 'due_today'
+          : dayDiff < 0
+            ? 'overdue'
+            : null;
+
+    if (!stage) {
+      continue;
+    }
+
+    const eventType =
+      stage === 'ten_day'
+        ? 'rent_reminder_10_day_sent'
+        : stage === 'due_today'
+          ? 'rent_reminder_due_day_sent'
+          : 'rent_reminder_overdue_sent';
+
+    let activityQuery = supabase
+      .from('activity_events')
+      .select('id')
+      .eq('account_id', payment.account_id)
+      .eq('entity_type', 'payment')
+      .eq('entity_id', payment.id)
+      .eq('event_type', eventType);
+
+    if (stage === 'overdue') {
+      activityQuery = activityQuery.gte('created_at', todayIso);
+    }
+
+    const { data: existingLogs, error: existingLogsError } = await activityQuery.limit(1);
+
+    if (existingLogsError) {
+      console.warn('[Payment] Failed to check prior reminder logs:', existingLogsError);
+      continue;
+    }
+
+    if ((existingLogs || []).length > 0) {
+      continue;
+    }
+
+    await sendRentReminderNotification({
+      accountId: payment.account_id,
+      paymentId: payment.id,
+      stage,
+    });
+  }
 }
 
 /**
@@ -399,6 +673,18 @@ export async function recordPayment(
     entityType: 'payment',
     entityId: payment.id,
   });
+
+  if (payment.status === 'paid') {
+    try {
+      await notifyPaymentPaid({
+        accountId,
+        paymentId: payment.id,
+        actorUserId: userId,
+      });
+    } catch (notificationError) {
+      console.warn('[Payment] Failed to create payment received notifications:', notificationError);
+    }
+  }
 
   return {
     id: payment.id,

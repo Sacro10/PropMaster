@@ -13,6 +13,9 @@ import showingsRoutes from './routes/showings';
 import paymentsRoutes from './routes/payments';
 import disbursementsRoutes from './routes/disbursements';
 import leasesRoutes from './routes/leases';
+import tenantInvitesRoutes from './routes/tenantInvites';
+import vendorInvitesRoutes from './routes/vendorInvites';
+import tenantPortalRoutes from './routes/tenantPortal';
 import messagesRoutes from './routes/messages';
 import communicationsRoutes from './routes/communications';
 import analyticsRoutes from './routes/analytics';
@@ -44,6 +47,14 @@ const expandOrigin = (origin: string) => {
 
 const rawFrontendUrls = [
   config.frontendUrl,
+  ...(config.nodeEnv === 'development'
+    ? [
+        'http://localhost:5173',
+        'http://localhost:5174',
+        'http://127.0.0.1:5173',
+        'http://127.0.0.1:5174',
+      ]
+    : []),
   ...((process.env.FRONTEND_URLS || '')
     .split(',')
     .map((value) => value.trim())
@@ -92,6 +103,9 @@ app.get('/', (_req, res) => {
       communications: '/api/communications',
       analytics: '/api/analytics',
       expenses: '/api/expenses',
+      tenantInvites: '/api/tenant-invites',
+      vendorInvites: '/api/vendor-invites',
+      tenantPortal: '/api/tenant-portal',
       demo: '/api/demo',
       system: '/api/system',
       checkout: '/api/checkout',
@@ -135,6 +149,9 @@ app.use('/api/showings', showingsRoutes);
 app.use('/api/payments', paymentsRoutes);
 app.use('/api/disbursements', disbursementsRoutes);
 app.use('/api/leases', leasesRoutes);
+app.use('/api/tenant-invites', tenantInvitesRoutes);
+app.use('/api/vendor-invites', vendorInvitesRoutes);
+app.use('/api/tenant-portal', tenantPortalRoutes);
 app.use('/api/communications', communicationsRoutes);
 app.use('/api/messages', messagesRoutes);
 app.use('/api/demo', demoRoutes);

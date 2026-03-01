@@ -9,6 +9,9 @@ import {
   logWebhookEvent,
   AuditAction,
 } from '../services/auditLog';
+import { cache } from '../utils/cache';
+import { notifyPaymentPaid } from '../services/paymentService';
+import { notifyVendorPayoutCompleted } from '../services/maintenanceService';
 
 // Idempotency tracking to prevent duplicate processing
 const processedEvents = new Map<string, number>();
@@ -172,6 +175,22 @@ async function handleCheckoutSessionCompleted(
 ) {
   console.log('Processing checkout.session.completed:', session.id);
 
+  if (session.mode === 'payment') {
+    const metadataPaymentType = session.metadata?.payment_type;
+    if (isManagedPaymentCheckoutSession(session)) {
+      await handleRentCheckoutSessionCompleted(session);
+    } else if (metadataPaymentType === 'vendor_maintenance_payout') {
+      await handleVendorMaintenancePayoutCompleted(session);
+    } else {
+      console.log(
+        '[Stripe Webhook] Skipping non-rent checkout payment session:',
+        session.id,
+        metadataPaymentType || 'unknown'
+      );
+    }
+    return;
+  }
+
   const customerId = session.customer as string;
   const subscriptionId = session.subscription as string;
 
@@ -201,6 +220,181 @@ async function handleCheckoutSessionCompleted(
     const subscription = await stripe.subscriptions.retrieve(subscriptionId);
     await updateAccountSubscription(customerId, subscription);
   }
+}
+
+function isManagedPaymentCheckoutSession(session: Stripe.Checkout.Session) {
+  if (session.mode !== 'payment') {
+    return false;
+  }
+
+  const metadataPaymentType = session.metadata?.payment_type;
+  const hasPaymentReference = Boolean(session.metadata?.payment_id && session.metadata?.account_id);
+
+  return metadataPaymentType === 'rent' || hasPaymentReference;
+}
+
+async function handleRentCheckoutSessionCompleted(
+  session: Stripe.Checkout.Session
+) {
+  const paymentId = session.metadata?.payment_id;
+  const accountId = session.metadata?.account_id;
+
+  if (!paymentId || !accountId) {
+    console.warn('[Stripe Webhook] Missing payment metadata for checkout session:', session.id);
+    return;
+  }
+
+  const nowIso = new Date().toISOString();
+  const paymentIntentId =
+    typeof session.payment_intent === 'string'
+      ? session.payment_intent
+      : session.payment_intent?.id || null;
+
+  let chargeId: string | null = null;
+  if (paymentIntentId) {
+    try {
+      const intent = await stripe.paymentIntents.retrieve(paymentIntentId);
+      chargeId =
+        typeof intent.latest_charge === 'string'
+          ? intent.latest_charge
+          : intent.latest_charge?.id || null;
+    } catch (error) {
+      console.warn('[Stripe Webhook] Failed to retrieve payment intent:', error);
+    }
+  }
+
+  const amountPaid =
+    typeof session.amount_total === 'number' ? Number((session.amount_total / 100).toFixed(2)) : null;
+
+  const updates: Record<string, any> = {
+    status: 'paid',
+    paid_at: nowIso,
+    payment_method: 'stripe',
+    transaction_id: session.id,
+    updated_at: nowIso,
+  };
+  if (paymentIntentId) updates.stripe_payment_intent_id = paymentIntentId;
+  if (chargeId) updates.stripe_charge_id = chargeId;
+  if (amountPaid && amountPaid > 0) updates.amount = amountPaid;
+
+  const { error } = await supabaseAdmin
+    .from('payments')
+    .update(updates)
+    .eq('id', paymentId)
+    .eq('account_id', accountId);
+
+  if (error) {
+    console.error('[Stripe Webhook] Failed to update rent payment:', error);
+    throw error;
+  }
+
+  // Bust analytics cache so owner dashboard/analytics reflect new payment quickly.
+  cache.clear();
+
+  await logPaymentEvent(AuditAction.PAYMENT_SUCCEEDED, accountId, paymentId, {
+    checkoutSessionId: session.id,
+    paymentIntentId,
+    chargeId,
+    amount: amountPaid,
+    currency: session.currency,
+  });
+
+  await notifyPaymentPaid({
+    accountId,
+    paymentId,
+  });
+}
+
+async function handleVendorMaintenancePayoutCompleted(
+  session: Stripe.Checkout.Session
+) {
+  const accountId = session.metadata?.account_id;
+  const requestId = session.metadata?.request_id;
+  const vendorUserId = session.metadata?.vendor_user_id;
+
+  if (!accountId || !requestId || !vendorUserId) {
+    console.warn('[Stripe Webhook] Missing vendor payout metadata for checkout session:', session.id);
+    return;
+  }
+
+  const amountPaid =
+    typeof session.amount_total === 'number' ? Number((session.amount_total / 100).toFixed(2)) : null;
+
+  await notifyVendorPayoutCompleted({
+    accountId,
+    requestId,
+    assignmentId: session.metadata?.assignment_id || null,
+    vendorUserId,
+    amount: amountPaid,
+    checkoutSessionId: session.id,
+  });
+}
+
+async function handleRentCheckoutSessionFailed(
+  session: Stripe.Checkout.Session,
+  nextStatus: 'failed' | 'cancelled'
+) {
+  const paymentId = session.metadata?.payment_id;
+  const accountId = session.metadata?.account_id;
+  if (!paymentId || !accountId) {
+    return;
+  }
+
+  const updates: Record<string, any> = {
+    status: nextStatus,
+    transaction_id: session.id,
+    updated_at: new Date().toISOString(),
+  };
+
+  const { error } = await supabaseAdmin
+    .from('payments')
+    .update(updates)
+    .eq('id', paymentId)
+    .eq('account_id', accountId);
+
+  if (error) {
+    console.warn('[Stripe Webhook] Failed to mark rent payment as failed/cancelled:', error);
+    return;
+  }
+
+  cache.clear();
+
+  await logPaymentEvent(AuditAction.PAYMENT_FAILED, accountId, paymentId, {
+    checkoutSessionId: session.id,
+    status: nextStatus,
+    currency: session.currency,
+  });
+}
+
+async function handlePaymentIntentFailed(paymentIntent: Stripe.PaymentIntent) {
+  const paymentId = paymentIntent.metadata?.payment_id;
+  const accountId = paymentIntent.metadata?.account_id;
+  if (!paymentId || !accountId) {
+    return;
+  }
+
+  const { error } = await supabaseAdmin
+    .from('payments')
+    .update({
+      status: 'failed',
+      stripe_payment_intent_id: paymentIntent.id,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', paymentId)
+    .eq('account_id', accountId);
+
+  if (error) {
+    console.warn('[Stripe Webhook] Failed to mark payment intent as failed:', error);
+    return;
+  }
+
+  cache.clear();
+
+  await logPaymentEvent(AuditAction.PAYMENT_FAILED, accountId, paymentId, {
+    paymentIntentId: paymentIntent.id,
+    amount: typeof paymentIntent.amount === 'number' ? paymentIntent.amount / 100 : null,
+    currency: paymentIntent.currency,
+  });
 }
 
 async function handleInvoicePaymentSucceeded(invoice: Stripe.Invoice) {
@@ -327,12 +521,34 @@ export async function handleStripeWebhook(req: Request, res: Response) {
         );
         break;
 
+      case 'checkout.session.async_payment_failed':
+        if (isManagedPaymentCheckoutSession(event.data.object as Stripe.Checkout.Session)) {
+          await handleRentCheckoutSessionFailed(
+            event.data.object as Stripe.Checkout.Session,
+            'failed'
+          );
+        }
+        break;
+
+      case 'checkout.session.expired':
+        if (isManagedPaymentCheckoutSession(event.data.object as Stripe.Checkout.Session)) {
+          await handleRentCheckoutSessionFailed(
+            event.data.object as Stripe.Checkout.Session,
+            'cancelled'
+          );
+        }
+        break;
+
       case 'invoice.payment_succeeded':
         await handleInvoicePaymentSucceeded(event.data.object as Stripe.Invoice);
         break;
 
       case 'invoice.payment_failed':
         await handleInvoicePaymentFailed(event.data.object as Stripe.Invoice);
+        break;
+
+      case 'payment_intent.payment_failed':
+        await handlePaymentIntentFailed(event.data.object as Stripe.PaymentIntent);
         break;
 
       default:

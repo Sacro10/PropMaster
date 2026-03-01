@@ -1,4 +1,4 @@
-import { TrendingUp, TrendingDown, Users, Wrench, DollarSign, CircleCheck, Activity, Bell, ListFilter, RefreshCw, FileText, Building2, Trash2 } from 'lucide-react';
+import { Users, Wrench, DollarSign, CircleCheck, Activity, Bell, ListFilter, RefreshCw, FileText, Building2, Trash2 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useThemeStyles } from '../hooks/useThemeStyles';
 import { useDashboardData } from '../../lib/hooks/useDashboardData';
@@ -7,17 +7,32 @@ import { ErrorState } from './ErrorBoundary';
 import { formatCurrencyCompact, formatPercentageChange, formatNumber } from '../../lib/utils/currencyHelpers';
 import { formatRelativeTime } from '../../lib/utils/dateHelpers';
 import { AddPropertyModal } from './AddPropertyModal';
+import { InviteTenantsModal } from './InviteTenantsModal';
 import { useState, useEffect, useMemo } from 'react';
 import { supabase } from '../../lib/supabaseClient';
 import { getCurrentAccountId } from '../../lib/api/client';
+
+type UnitStatus = {
+  id: string;
+  unitNumber: string;
+  propertyId: string;
+  propertyName: string;
+  status: 'Active' | 'Invited' | 'Vacant';
+  tenantName?: string;
+  tenantEmail?: string;
+};
 
 export function DashboardOverview() {
   const { isDark, text, border } = useThemeStyles();
   const navigate = useNavigate();
   const { metrics, recentActivity, systemMetrics, loading, error, refetch } = useDashboardData();
   const [isPropertyModalOpen, setIsPropertyModalOpen] = useState(false);
+  const [isInviteModalOpen, setIsInviteModalOpen] = useState(false);
   const [properties, setProperties] = useState<any[]>([]);
   const [loadingProperties, setLoadingProperties] = useState(true);
+  const [unitStatuses, setUnitStatuses] = useState<UnitStatus[]>([]);
+  const [loadingUnitStatuses, setLoadingUnitStatuses] = useState(true);
+  const [unitStatusError, setUnitStatusError] = useState<string | null>(null);
   const [deletingPropertyId, setDeletingPropertyId] = useState<string | null>(null);
   const [showAllActivity, setShowAllActivity] = useState(false);
   const [activityFilter, setActivityFilter] = useState('all');
@@ -53,12 +68,132 @@ export function DashboardOverview() {
     }
   };
 
+  const fetchUnitStatuses = async () => {
+    try {
+      setLoadingUnitStatuses(true);
+      setUnitStatusError(null);
+      const accountId = await getCurrentAccountId();
+      if (!accountId) return;
+
+      const { data: units, error: unitsError } = await (supabase as any)
+        .from('units')
+        .select(`
+          id,
+          unit_number,
+          status,
+          property_id,
+          properties (name)
+        `)
+        .eq('account_id', accountId)
+        .order('unit_number', { ascending: true });
+
+      if (unitsError) throw unitsError;
+
+      const { data: leases } = await (supabase as any)
+        .from('leases')
+        .select('unit_id, tenant_user_id, status')
+        .eq('account_id', accountId)
+        .in('status', ['active', 'pending']);
+
+      const { data: tenantProfiles } = await (supabase as any)
+        .from('tenant_profiles')
+        .select('user_id, full_name, email')
+        .eq('account_id', accountId);
+
+      const { data: invites } = await (supabase as any)
+        .from('tenant_invites')
+        .select('unit_id, email, status, created_at')
+        .eq('account_id', accountId)
+        .in('status', ['pending'])
+        .order('created_at', { ascending: false });
+
+      const tenantMap = new Map(
+        (tenantProfiles || []).map((profile: any) => [profile.user_id, profile])
+      );
+
+      const leaseByUnit = new Map<string, any>();
+      (leases || []).forEach((lease: any) => {
+        const existing = leaseByUnit.get(lease.unit_id);
+        if (!existing || existing.status !== 'active') {
+          leaseByUnit.set(lease.unit_id, lease);
+        }
+      });
+
+      const inviteByUnit = new Map<string, any>();
+      (invites || []).forEach((invite: any) => {
+        if (!invite?.unit_id) return;
+        if (!inviteByUnit.has(invite.unit_id)) {
+          inviteByUnit.set(invite.unit_id, invite);
+        }
+      });
+
+      const mappedUnits: UnitStatus[] = (units || []).map((unit: any) => {
+        const lease = leaseByUnit.get(unit.id);
+        const invite = inviteByUnit.get(unit.id);
+        const tenantProfile = lease?.tenant_user_id ? tenantMap.get(lease.tenant_user_id) : null;
+        const isOccupied = unit.status === 'occupied';
+
+        if (lease?.status === 'active' || isOccupied) {
+          return {
+            id: unit.id,
+            unitNumber: unit.unit_number,
+            propertyId: unit.property_id,
+            propertyName: unit.properties?.name || 'Property',
+            status: 'Active',
+            tenantName: tenantProfile?.full_name,
+            tenantEmail: tenantProfile?.email,
+          };
+        }
+
+        if (lease?.status === 'pending') {
+          return {
+            id: unit.id,
+            unitNumber: unit.unit_number,
+            propertyId: unit.property_id,
+            propertyName: unit.properties?.name || 'Property',
+            status: 'Invited',
+            tenantName: tenantProfile?.full_name,
+            tenantEmail: tenantProfile?.email,
+          };
+        }
+
+        if (invite) {
+          return {
+            id: unit.id,
+            unitNumber: unit.unit_number,
+            propertyId: unit.property_id,
+            propertyName: unit.properties?.name || 'Property',
+            status: 'Invited',
+            tenantEmail: invite.email,
+          };
+        }
+
+        return {
+          id: unit.id,
+          unitNumber: unit.unit_number,
+          propertyId: unit.property_id,
+          propertyName: unit.properties?.name || 'Property',
+          status: 'Vacant',
+        };
+      });
+
+      setUnitStatuses(mappedUnits);
+    } catch (error) {
+      console.error('Error fetching unit statuses:', error);
+      setUnitStatusError('Unable to load units. Please refresh.');
+    } finally {
+      setLoadingUnitStatuses(false);
+    }
+  };
+
   useEffect(() => {
     fetchProperties();
+    fetchUnitStatuses();
   }, []);
 
   const handlePropertySuccess = () => {
     fetchProperties();
+    fetchUnitStatuses();
     refetch(); // Refresh dashboard metrics
   };
 
@@ -107,6 +242,9 @@ export function DashboardOverview() {
     if (value === 'all') return 'All Activity';
     return value.replace(/_/g, ' ').replace(/\b\w/g, (letter) => letter.toUpperCase());
   };
+
+  const hasUnits = unitStatuses.length > 0;
+  const showInvitePrompt = hasUnits && unitStatuses.every((unit) => unit.status === 'Vacant');
 
   // Show loading state
   if (loading) {
@@ -189,9 +327,6 @@ export function DashboardOverview() {
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-6">
         {stats.map((stat, index) => {
           const Icon = stat.icon;
-          const TrendIcon = stat.trend === 'up' ? TrendingUp : TrendingDown;
-          const trendColor = stat.trend === 'up' ? 'text-emerald-400' : 'text-red-400';
-
           return (
             <div
               key={index}
@@ -201,14 +336,6 @@ export function DashboardOverview() {
                 <div className={`p-2 ${isDark ? 'bg-white/5 group-hover:bg-white/10' : 'bg-gray-100 group-hover:bg-gray-200'} rounded-lg transition-colors`}>
                   <Icon className="w-5 h-5 text-[#ff6b35]" />
                 </div>
-                <span
-                  className={`text-sm ${trendColor} flex items-center gap-1`}
-                  style={{ fontFamily: 'Work Sans, sans-serif' }}
-                  title={stat.tooltip}
-                >
-                  <TrendIcon className="w-3 h-3" />
-                  {stat.change}
-                </span>
               </div>
               <div>
                 <p className="text-4xl font-bold mb-1" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
@@ -426,8 +553,14 @@ export function DashboardOverview() {
           <div className="text-center py-12">
             <Building2 className="w-12 h-12 mx-auto mb-4 text-white/20" />
             <p className={text.muted} style={{ fontFamily: 'Work Sans, sans-serif' }}>
-              No properties yet. Click "Add Property" to get started.
+              Create your first property to start managing units and tenants.
             </p>
+            <button
+              onClick={() => setIsPropertyModalOpen(true)}
+              className="mt-5 px-6 py-3 bg-gradient-to-r from-[#ff6b35] to-[#f7931e] rounded-lg font-medium hover:scale-105 transition-transform"
+            >
+              Create your first property
+            </button>
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
@@ -483,11 +616,127 @@ export function DashboardOverview() {
         )}
       </div>
 
+      {/* Tenant Onboarding Prompt */}
+      {showInvitePrompt && (
+        <div className={`${isDark ? 'bg-gradient-to-br from-[#1a1f35] to-[#0f1523]' : 'bg-white shadow-md'} border ${border.default} rounded-xl p-6`}>
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h3 className="text-2xl mb-2" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
+                INVITE TENANTS
+              </h3>
+              <p className={text.muted} style={{ fontFamily: 'Work Sans, sans-serif' }}>
+                Your units are ready. Invite tenants to start onboarding.
+              </p>
+            </div>
+            <button
+              onClick={() => setIsInviteModalOpen(true)}
+              className="px-6 py-3 bg-gradient-to-r from-[#ff6b35] to-[#f7931e] rounded-lg font-medium hover:scale-105 transition-transform"
+            >
+              Invite tenants
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Units and Tenant Status */}
+      <div className={`${isDark ? 'bg-gradient-to-br from-[#1a1f35] to-[#0f1523]' : 'bg-white shadow-md'} border ${border.default} rounded-xl p-6`}>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-6">
+          <div>
+            <h3 className="text-2xl mb-2" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
+              UNITS & TENANTS
+            </h3>
+            <p className={text.muted} style={{ fontFamily: 'Work Sans, sans-serif' }}>
+              Track invite status and occupancy across your portfolio.
+            </p>
+          </div>
+          {hasUnits && (
+            <button
+              onClick={() => setIsInviteModalOpen(true)}
+              className={`px-4 py-2 ${isDark ? 'bg-white/5 hover:bg-white/10' : 'bg-gray-100 hover:bg-gray-200'} rounded-lg transition-colors`}
+            >
+              Invite tenants
+            </button>
+          )}
+        </div>
+
+        {loadingUnitStatuses ? (
+          <div className="text-center py-8">
+            <p className={text.muted} style={{ fontFamily: 'Work Sans, sans-serif' }}>
+              Loading units...
+            </p>
+          </div>
+        ) : unitStatusError ? (
+          <div className="text-center py-8">
+            <p className="text-red-300" style={{ fontFamily: 'Work Sans, sans-serif' }}>
+              {unitStatusError}
+            </p>
+          </div>
+        ) : unitStatuses.length === 0 ? (
+          <div className="text-center py-8">
+            <p className={text.muted} style={{ fontFamily: 'Work Sans, sans-serif' }}>
+              Add a property to see units and tenant status.
+            </p>
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-sm">
+              <thead>
+                <tr className={`border-b ${border.default} ${text.muted}`}>
+                  <th className="py-3 pr-4">Property</th>
+                  <th className="py-3 pr-4">Unit</th>
+                  <th className="py-3 pr-4">Tenant</th>
+                  <th className="py-3">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {unitStatuses.map((unit) => {
+                  const statusStyle =
+                    unit.status === 'Active'
+                      ? 'bg-emerald-500/15 text-emerald-300'
+                      : unit.status === 'Invited'
+                        ? 'bg-amber-500/15 text-amber-300'
+                        : 'bg-gray-500/15 text-gray-300';
+
+                  return (
+                    <tr key={unit.id} className={`border-b ${border.default}`}>
+                      <td className="py-3 pr-4">{unit.propertyName}</td>
+                      <td className="py-3 pr-4">{unit.unitNumber}</td>
+                      <td className="py-3 pr-4">
+                        {unit.tenantName ? (
+                          <div>
+                            <p className="font-medium">{unit.tenantName}</p>
+                            <p className={`text-xs ${text.muted}`}>{unit.tenantEmail || '—'}</p>
+                          </div>
+                        ) : (
+                          <span className={text.muted}>—</span>
+                        )}
+                      </td>
+                      <td className="py-3">
+                        <span className={`px-3 py-1 rounded-full text-xs font-semibold uppercase tracking-wide ${statusStyle}`}>
+                          {unit.status}
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
       {/* Add Property Modal */}
       <AddPropertyModal
         isOpen={isPropertyModalOpen}
         onClose={() => setIsPropertyModalOpen(false)}
         onSuccess={handlePropertySuccess}
+      />
+
+      {/* Invite Tenants Modal */}
+      <InviteTenantsModal
+        isOpen={isInviteModalOpen}
+        onClose={() => setIsInviteModalOpen(false)}
+        onSuccess={fetchUnitStatuses}
       />
     </div>
   );

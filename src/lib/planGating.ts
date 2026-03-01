@@ -7,6 +7,7 @@
  */
 
 import { supabase } from './supabaseClient';
+import { getCurrentAccountId } from './api/client';
 
 // =====================================================
 // TYPES & CONSTANTS
@@ -63,81 +64,172 @@ export interface PlanDetails {
   features: string[];
 }
 
+let planGatingRpcCheckEnabled = true;
+
+const UNLIMITED_CAP = 999999;
+
 // Plan configuration for UI display
 export const PLAN_DETAILS: Record<PlanTier, PlanDetails> = {
   basic: {
     name: 'basic',
     displayName: 'Basic',
     price: 0,
-    maxUnits: 3,
+    maxUnits: 10,
     features: [
-      'Up to 3 units',
-      'Tenant portal',
-      'Basic maintenance requests',
-      'Limited rent collection',
+      'Up to 10 properties',
+      'Basic tenant screening',
+      'Maintenance tracking',
+      'Email support',
     ],
   },
   pro: {
     name: 'pro',
     displayName: 'Pro',
     price: 10,
-    maxUnits: 100,
+    maxUnits: 50,
     features: [
-      'Up to 100 units',
-      'Tenant screening',
-      'Maintenance routing',
-      'Marketing tools',
-      'Standard reporting',
-      'Lease renewals',
-      'Communication hub',
+      'Up to 50 properties',
+      'AI tenant screening',
+      'Advanced analytics',
+      'Automated rent collection',
+      'Priority support',
     ],
   },
   premium: {
     name: 'premium',
     displayName: 'Premium',
     price: 20,
-    maxUnits: 999999,
+    maxUnits: UNLIMITED_CAP,
     features: [
-      'Unlimited units',
-      'AI risk scoring',
-      'Integrated accounting',
-      'HVAC filter program',
-      'Electronic showings',
-      '24/7 emergency support',
-      'Advanced analytics & exports',
+      'Unlimited properties',
+      'Full AI automation',
       'Custom reports',
       'API access',
+      'Dedicated account manager',
+      '24/7 phone support',
     ],
   },
 };
+
+function normalizePlanTier(plan: string | null | undefined): PlanTier {
+  if (plan === 'pro' || plan === 'premium') {
+    return plan;
+  }
+  return 'basic';
+}
+
+async function getAccountPlanFromTables(accountId: string): Promise<PlanInfo | null> {
+  const [{ data: account, error: accountError }, propertiesResult, unitsResult] = await Promise.all([
+    supabase
+      .from('accounts')
+      .select('plan, max_units, max_properties, subscription_status')
+      .eq('id', accountId)
+      .maybeSingle(),
+    supabase
+      .from('properties')
+      .select('id', { count: 'exact', head: true })
+      .eq('account_id', accountId),
+    supabase
+      .from('units')
+      .select('id', { count: 'exact', head: true })
+      .eq('account_id', accountId),
+  ]);
+
+  if (accountError || !account) {
+    console.error('[Plan Gating] Account lookup failed:', accountError);
+    return null;
+  }
+
+  const normalizedPlan = normalizePlanTier(account.plan as string | null | undefined);
+  const fallbackMaxProperties =
+    normalizedPlan === 'premium'
+      ? UNLIMITED_CAP
+      : normalizedPlan === 'pro'
+        ? 50
+        : 10;
+  const fallbackMaxUnits =
+    normalizedPlan === 'premium'
+      ? UNLIMITED_CAP
+      : normalizedPlan === 'pro'
+        ? 50
+        : 10;
+
+  return {
+    plan: normalizedPlan,
+    max_units: Number(account.max_units ?? fallbackMaxUnits),
+    current_units: unitsResult.count || 0,
+    max_properties: Number(account.max_properties ?? fallbackMaxProperties),
+    current_properties: propertiesResult.count || 0,
+    subscription_status: account.subscription_status || 'active',
+  };
+}
 
 // Feature to plan mapping for quick lookups
 export const FEATURE_REQUIREMENTS: Record<FeatureKey, PlanTier> = {
   // Basic features
   tenant_portal: 'basic',
   basic_maintenance_requests: 'basic',
-  basic_rent_collection: 'basic',
   property_management: 'basic',
 
   // Pro features
-  tenant_screening: 'pro',
+  tenant_screening: 'basic',
+  basic_rent_collection: 'pro',
   maintenance_routing: 'pro',
   marketing_tools: 'pro',
   standard_reporting: 'pro',
   lease_renewals: 'pro',
   communication_hub: 'pro',
+  ai_risk_scoring: 'pro',
+  integrated_accounting: 'pro',
+  advanced_analytics: 'pro',
 
   // Premium features
-  ai_risk_scoring: 'premium',
-  integrated_accounting: 'premium',
   hvac_filter_program: 'premium',
   electronic_showings: 'premium',
   emergency_support_24_7: 'premium',
-  advanced_analytics: 'premium',
   advanced_exports: 'premium',
   custom_reports: 'premium',
   api_access: 'premium',
 };
+
+const ALL_FEATURES = Object.keys(FEATURE_REQUIREMENTS) as FeatureKey[];
+
+async function getFeatureOverride(featureKey: FeatureKey): Promise<boolean | null> {
+  try {
+    const accountId = await getCurrentAccountId();
+    if (!accountId) {
+      return null;
+    }
+
+    const { data, error } = await supabase
+      .from('account_features')
+      .select('enabled')
+      .eq('account_id', accountId)
+      .eq('feature_key', featureKey)
+      .maybeSingle();
+
+    if (error || !data) {
+      return null;
+    }
+
+    return data.enabled === true;
+  } catch (error) {
+    console.warn('[Plan Gating] Feature override lookup failed:', error);
+    return null;
+  }
+}
+
+function getFeaturesForPlan(plan: PlanTier): FeatureKey[] {
+  const planRank: Record<PlanTier, number> = {
+    basic: 1,
+    pro: 2,
+    premium: 3,
+  };
+
+  return ALL_FEATURES.filter((featureKey) => {
+    return planRank[plan] >= planRank[FEATURE_REQUIREMENTS[featureKey]];
+  });
+}
 
 // =====================================================
 // CORE GATING FUNCTIONS
@@ -152,18 +244,13 @@ export const FEATURE_REQUIREMENTS: Record<FeatureKey, PlanTier> = {
  */
 export async function hasFeature(featureKey: FeatureKey): Promise<boolean> {
   try {
-    const { data, error } = await supabase.rpc('rpc_check_feature', {
-      p_feature_key: featureKey,
-    });
-
-    if (error) {
-      console.warn('[Plan Gating] RPC error, falling back to plan check:', error.message);
-      // Fallback: Check plan directly from accounts table
-      const requiredPlan = FEATURE_REQUIREMENTS[featureKey];
-      return await hasPlanFallback(requiredPlan);
+    const override = await getFeatureOverride(featureKey);
+    if (override !== null) {
+      return override;
     }
 
-    return data === true;
+    const requiredPlan = FEATURE_REQUIREMENTS[featureKey];
+    return await hasPlanFallback(requiredPlan);
   } catch (err) {
     console.warn('[Plan Gating] Exception, falling back to plan check:', err);
     // Fallback: Check plan directly from accounts table
@@ -202,26 +289,24 @@ export async function hasPlan(requiredPlan: PlanTier): Promise<boolean> {
  */
 async function hasPlanFallback(requiredPlan: PlanTier): Promise<boolean> {
   try {
-    // Get current user
-    const { data: { user }, error: userError } = await supabase.auth.getUser();
-    if (userError || !user) {
-      console.error('[Plan Gating] Cannot get user:', userError);
+    const accountId = await getCurrentAccountId();
+    if (!accountId) {
+      console.error('[Plan Gating] Cannot resolve account for plan fallback');
       return false;
     }
 
-    // Get user's account via account_members
-    const { data: member, error: memberError } = await supabase
-      .from('account_members')
-      .select('account_id, accounts(plan)')
-      .eq('user_id', user.id)
-      .single();
+    const { data: account, error: accountError } = await supabase
+      .from('accounts')
+      .select('plan')
+      .eq('id', accountId)
+      .maybeSingle();
 
-    if (memberError || !member) {
-      console.error('[Plan Gating] Cannot get account member:', memberError);
+    if (accountError || !account) {
+      console.error('[Plan Gating] Cannot fetch account plan:', accountError);
       return false;
     }
 
-    const userPlan = (member.accounts as any)?.plan as string;
+    const userPlan = account.plan as string;
     if (!userPlan) {
       console.error('[Plan Gating] No plan found for user');
       return false;
@@ -286,14 +371,55 @@ export async function requirePlan(requiredPlan: PlanTier): Promise<void> {
  */
 export async function getAccountFeatures(): Promise<FeatureInfo[]> {
   try {
-    const { data, error } = await supabase.rpc('rpc_get_account_features');
-
-    if (error) {
-      console.error('[Plan Gating] Error fetching features:', error);
+    const planInfo = await getAccountPlan();
+    if (!planInfo) {
       return [];
     }
 
-    return data || [];
+    const baseFeatures = getFeaturesForPlan(planInfo.plan);
+    const accountId = await getCurrentAccountId();
+
+    if (!accountId) {
+      return baseFeatures.map((feature_key) => ({
+        feature_key,
+        enabled: true,
+        source: 'plan' as const,
+      }));
+    }
+
+    const { data: overrides, error } = await supabase
+      .from('account_features')
+      .select('feature_key, enabled')
+      .eq('account_id', accountId);
+
+    if (error) {
+      console.error('[Plan Gating] Error fetching feature overrides:', error);
+    }
+
+    const overrideMap = new Map(
+      (overrides || []).map((override: any) => [override.feature_key as FeatureKey, override.enabled === true])
+    );
+
+    const mergedFeatures = new Set<FeatureKey>([
+      ...baseFeatures,
+      ...(Array.from(overrideMap.keys()) as FeatureKey[]),
+    ]);
+
+    return Array.from(mergedFeatures).map((feature_key) => {
+      if (overrideMap.has(feature_key)) {
+        return {
+          feature_key,
+          enabled: overrideMap.get(feature_key) === true,
+          source: 'override' as const,
+        };
+      }
+
+      return {
+        feature_key,
+        enabled: true,
+        source: 'plan' as const,
+      };
+    });
   } catch (err) {
     console.error('[Plan Gating] Exception fetching features:', err);
     return [];
@@ -307,10 +433,21 @@ export async function getAccountFeatures(): Promise<FeatureInfo[]> {
  */
 export async function getAccountPlan(): Promise<PlanInfo | null> {
   try {
-    const { data, error } = await supabase.rpc('rpc_get_account_plan');
+    const accountId = await getCurrentAccountId();
+    if (accountId) {
+      const directPlan = await getAccountPlanFromTables(accountId);
+      if (directPlan) {
+        return directPlan;
+      }
+    }
 
+    if (!planGatingRpcCheckEnabled) {
+      return null;
+    }
+
+    const { data, error } = await supabase.rpc('rpc_get_account_plan');
     if (error) {
-      console.error('[Plan Gating] Error fetching plan:', error);
+      console.warn('[Plan Gating] rpc_get_account_plan failed:', error.message);
       return null;
     }
 
@@ -318,7 +455,14 @@ export async function getAccountPlan(): Promise<PlanInfo | null> {
       return null;
     }
 
-    return data[0];
+    return {
+      plan: normalizePlanTier(data[0].plan),
+      max_units: Number(data[0].max_units ?? 0),
+      current_units: Number(data[0].current_units ?? 0),
+      max_properties: Number(data[0].max_properties ?? 0),
+      current_properties: Number(data[0].current_properties ?? 0),
+      subscription_status: data[0].subscription_status || 'active',
+    };
   } catch (err) {
     console.error('[Plan Gating] Exception fetching plan:', err);
     return null;

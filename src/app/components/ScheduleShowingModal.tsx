@@ -34,6 +34,7 @@ export function ScheduleShowingModal({
     visitor_phone: '',
     showing_date: '',
     showing_type: 'agent_assisted' as 'self_guided' | 'agent_assisted' | 'virtual',
+    access_code: '',
     notes: '',
   });
 
@@ -88,6 +89,7 @@ export function ScheduleShowingModal({
     const result = await create({
       ...formData,
       showing_date: new Date(formData.showing_date).toISOString(),
+      access_code: formData.access_code.trim() || undefined,
     });
 
     if (result.success) {
@@ -99,6 +101,7 @@ export function ScheduleShowingModal({
         visitor_phone: '',
         showing_date: '',
         showing_type: 'agent_assisted',
+        access_code: '',
         notes: '',
       });
       setErrors({});
@@ -127,6 +130,7 @@ export function ScheduleShowingModal({
       visitor_phone: '',
       showing_date: '',
       showing_type: 'agent_assisted',
+      access_code: '',
       notes: '',
     });
     setErrors({});
@@ -202,7 +206,7 @@ export function ScheduleShowingModal({
             >
               Showing Type *
             </label>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               {[
                 { value: 'self_guided', label: 'Self-Guided' },
                 { value: 'agent_assisted', label: 'Agent-Assisted' },
@@ -230,6 +234,25 @@ export function ScheduleShowingModal({
                 </button>
               ))}
             </div>
+          </div>
+
+          <div>
+            <label
+              className={`block text-sm font-medium mb-2 ${text.primary}`}
+              style={{ fontFamily: 'Work Sans, sans-serif' }}
+            >
+              Access Code (Optional)
+            </label>
+            <input
+              type="text"
+              value={formData.access_code}
+              onChange={(e) => setFormData({ ...formData, access_code: e.target.value })}
+              className={`w-full px-4 py-3 ${
+                isDark ? 'bg-white/5 border-white/10' : 'bg-gray-50 border-gray-300'
+              } border rounded-lg ${text.primary} focus:outline-none focus:border-[#ff6b35] transition-colors`}
+              style={{ fontFamily: 'Work Sans, sans-serif' }}
+              placeholder="Enter lockbox/smart-lock code (leave blank to auto-generate)"
+            />
           </div>
 
           {/* Visitor Information */}

@@ -113,7 +113,7 @@ export async function getMaintenanceMetrics(): Promise<MaintenanceMetrics> {
     const last24Hours = new Date(now.getTime() - 24 * 60 * 60 * 1000);
 
     // Fetch metrics in parallel
-    const [activeRequestsData, responseTimeData, completionData, accountData, emergencyData] = await Promise.all([
+    const [activeRequestsData, responseTimeData, assignmentsData, completionData, accountData, emergencyData] = await Promise.all([
       // Active requests count
       supabase
         .from('maintenance_requests')
@@ -121,12 +121,18 @@ export async function getMaintenanceMetrics(): Promise<MaintenanceMetrics> {
         .eq('account_id', accountId)
         .in('status', activeStatuses),
 
-      // Response time calculation
+      // Response time calculation (request-level timestamps)
       supabase
         .from('maintenance_requests')
-        .select('requested_at, reviewed_at, assigned_at, created_at')
+        .select('id, requested_at, reviewed_at, assigned_at, started_at, completed_at, created_at, updated_at, status')
         .eq('account_id', accountId)
-        .or('reviewed_at.not.is.null,assigned_at.not.is.null'),
+        .in('status', ['open', 'reviewed', 'assigned', 'scheduled', 'in_progress', 'completed', 'closed']),
+
+      // Response time calculation (assignment-level timestamps)
+      supabase
+        .from('maintenance_assignments')
+        .select('request_id, assigned_at, accepted_at')
+        .eq('account_id', accountId),
 
       // Completion rate
       supabase
@@ -157,17 +163,58 @@ export async function getMaintenanceMetrics(): Promise<MaintenanceMetrics> {
     // Calculate average response time
     let avgResponseTime = 0;
     if (responseTimeData.data && responseTimeData.data.length > 0) {
+      const parseTimestamp = (value: string | null | undefined) => {
+        if (!value) return null;
+        const ms = new Date(value).getTime();
+        return Number.isNaN(ms) ? null : ms;
+      };
+
+      const assignmentFirstResponseByRequest = new Map<string, number>();
+      (assignmentsData.data || []).forEach((assignment) => {
+        const assignmentCandidates = [
+          parseTimestamp(assignment.assigned_at),
+          parseTimestamp(assignment.accepted_at),
+        ].filter((candidate): candidate is number => candidate !== null);
+
+        if (assignmentCandidates.length === 0) return;
+        const earliestAssignmentResponse = Math.min(...assignmentCandidates);
+        const current = assignmentFirstResponseByRequest.get(assignment.request_id);
+        if (!current || earliestAssignmentResponse < current) {
+          assignmentFirstResponseByRequest.set(assignment.request_id, earliestAssignmentResponse);
+        }
+      });
+
       let totalHours = 0;
       let count = 0;
 
       responseTimeData.data.forEach((req) => {
-        const requestedAt = req.requested_at ?? req.created_at;
-        const responseAt = req.reviewed_at ?? req.assigned_at;
-        if (!requestedAt || !responseAt) return;
-        const requested = new Date(requestedAt).getTime();
-        const responded = new Date(responseAt).getTime();
-        if (Number.isNaN(requested) || Number.isNaN(responded)) return;
+        const requested = parseTimestamp(req.requested_at ?? req.created_at);
+        if (!requested) return;
+
+        const responseCandidates = [
+          parseTimestamp(req.reviewed_at),
+          parseTimestamp(req.assigned_at),
+          parseTimestamp(req.started_at),
+          parseTimestamp(req.completed_at),
+          assignmentFirstResponseByRequest.get(req.id) ?? null,
+        ].filter((candidate): candidate is number => candidate !== null && candidate >= requested);
+
+        // Fallback for progressed requests missing explicit first-response timestamps.
+        if (
+          responseCandidates.length === 0 &&
+          !['submitted', 'open', 'cancelled'].includes(req.status || '') &&
+          req.updated_at
+        ) {
+          const updated = parseTimestamp(req.updated_at);
+          if (updated && updated >= requested) {
+            responseCandidates.push(updated);
+          }
+        }
+
+        if (responseCandidates.length === 0) return;
+        const responded = Math.min(...responseCandidates);
         const hours = (responded - requested) / (1000 * 60 * 60);
+        if (hours < 0) return;
         totalHours += hours;
         count += 1;
       });
@@ -194,7 +241,10 @@ export async function getMaintenanceMetrics(): Promise<MaintenanceMetrics> {
 
     return {
       active_requests: activeRequests,
-      avg_response_time_hours: Math.round(avgResponseTime * 10) / 10,
+      avg_response_time_hours:
+        avgResponseTime > 0 && Math.round(avgResponseTime * 10) / 10 === 0
+          ? 0.1
+          : Math.round(avgResponseTime * 10) / 10,
       completion_rate: Math.round(completionRate * 10) / 10,
       emergency_support_status: emergencySupport,
       recent_emergency_count: recentEmergencyCount,
@@ -558,9 +608,30 @@ export async function getAvailableVendors(requestId: string): Promise<Array<{
       throw new Error('No account ID found');
     }
 
+    const { data: vendorMembers, error: membersError } = await supabase
+      .from('account_members')
+      .select('user_id, role, is_active')
+      .eq('account_id', accountId)
+      .eq('role', 'vendor')
+      .eq('is_active', true);
+
+    if (membersError) {
+      throw handleSupabaseError(membersError, 'fetch vendor members');
+    }
+
+    const vendorUserIds = new Set(
+      (vendorMembers || [])
+        .map((member: any) => member.user_id)
+        .filter(Boolean)
+    );
+
+    if (vendorUserIds.size === 0) {
+      return [];
+    }
+
     const { data, error } = await supabase
       .from('vendor_profiles')
-      .select('id, business_name, avg_rating, total_jobs_completed, is_active')
+      .select('id, business_name, email, avg_rating, total_jobs_completed, is_active, user_id')
       .eq('account_id', accountId)
       .eq('is_active', true);
 
@@ -568,13 +639,16 @@ export async function getAvailableVendors(requestId: string): Promise<Array<{
       throw handleSupabaseError(error, 'fetch available vendors');
     }
 
-    return (data || []).map((vendor: any) => ({
-      id: vendor.id,
-      businessName: vendor.business_name || 'Vendor',
-      rating: vendor.avg_rating ?? 0,
-      jobsCompleted: vendor.total_jobs_completed ?? 0,
-      hourlyRate: 85,
-    }));
+    return (data || [])
+      .filter((vendor: any) => vendorUserIds.has(vendor.user_id))
+      .map((vendor: any) => ({
+        id: vendor.id,
+        businessName: vendor.business_name || 'Vendor',
+        rating: vendor.avg_rating ?? 0,
+        jobsCompleted: vendor.total_jobs_completed ?? 0,
+        hourlyRate: 85,
+        email: vendor.email || null,
+      }));
   } catch (error) {
     console.error('[Maintenance Metrics API] Error fetching vendors:', error);
     return [];

@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import { Permissions } from '../middleware/rbac';
+import { requireFeatureAccess } from '../middleware/planAccess';
 import {
   getApplications,
   getApplicationById,
@@ -10,6 +11,7 @@ import {
   runScreening,
   CreateApplicationData,
 } from '../services/applicationsService';
+import { supabaseAdmin as supabase } from '../supabase';
 
 const router = Router();
 
@@ -107,6 +109,7 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
       incomeVerificationStatus: req.body.incomeVerificationStatus,
       evictionHistory: req.body.evictionHistory ?? null,
       criminalHistory: req.body.criminalHistory ?? null,
+      applicantUserId: req.user?.role === 'tenant' ? req.user.id : null,
     };
 
     // Validate required fields
@@ -135,6 +138,30 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
     }
 
     const application = await createApplication(req.user.accountId, applicationData);
+
+    if (req.user.role === 'tenant') {
+      const { error: deactivateError } = await supabase
+        .from('account_members')
+        .update({ is_active: false })
+        .eq('account_id', req.user.accountId)
+        .eq('user_id', req.user.id);
+
+      if (deactivateError) {
+        console.error('Failed to deactivate tenant after application:', deactivateError);
+      }
+
+      const { error: metadataError } = await supabase.auth.admin.updateUserById(req.user.id, {
+        user_metadata: {
+          role: req.user.role,
+          membership_status: 'pending',
+        },
+      });
+
+      if (metadataError) {
+        console.error('Failed to update tenant metadata after application:', metadataError);
+      }
+    }
+
     res.status(201).json(application);
   } catch (error) {
     console.error('Create application error:', error);
@@ -222,6 +249,7 @@ router.post(
 router.post(
   '/:id/screen',
   authenticate,
+  requireFeatureAccess('ai_risk_scoring'),
   Permissions.updateApplications,
   async (req: AuthRequest, res) => {
     try {

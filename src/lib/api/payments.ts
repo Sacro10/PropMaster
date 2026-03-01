@@ -3,11 +3,20 @@
  * Handles rent collection, payment tracking, and owner disbursements
  */
 
-import { supabase } from '../supabaseClient';
-import { getCurrentAccountId } from './client';
+import { fetchWithAuthRetry } from './client';
 
 // API base URL
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+
+async function paymentsApiRequest(path: string, options: RequestInit = {}) {
+  return fetchWithAuthRetry(`${API_BASE}/api${path}`, {
+    ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      ...(options.headers || {}),
+    },
+  });
+}
 
 export interface Payment {
   id: string;
@@ -93,15 +102,7 @@ export interface DisbursementCalculation {
  */
 export async function getRecentPayments(limit = 50): Promise<Payment[]> {
   try {
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session) throw new Error('No active session');
-
-    const response = await fetch(`${API_BASE}/api/payments/recent?limit=${limit}`, {
-      headers: {
-        'Authorization': `Bearer ${session.access_token}`,
-        'Content-Type': 'application/json',
-      },
-    });
+    const response = await paymentsApiRequest(`/payments/recent?limit=${limit}`);
 
     if (!response.ok) {
       const contentType = response.headers.get('content-type');
@@ -154,15 +155,7 @@ export async function getRecentPayments(limit = 50): Promise<Payment[]> {
  */
 export async function getOverduePayments(): Promise<Payment[]> {
   try {
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session) throw new Error('No active session');
-
-    const response = await fetch(`${API_BASE}/api/payments/overdue`, {
-      headers: {
-        'Authorization': `Bearer ${session.access_token}`,
-        'Content-Type': 'application/json',
-      },
-    });
+    const response = await paymentsApiRequest('/payments/overdue');
 
     if (!response.ok) {
       const contentType = response.headers.get('content-type');
@@ -245,15 +238,7 @@ export async function getPendingPayments() {
  */
 export async function getCollectionStats() {
   try {
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session) throw new Error('No active session');
-
-    const response = await fetch(`${API_BASE}/api/payments/stats?live=true`, {
-      headers: {
-        'Authorization': `Bearer ${session.access_token}`,
-        'Content-Type': 'application/json',
-      },
-    });
+    const response = await paymentsApiRequest('/payments/stats?live=true');
 
     if (!response.ok) {
       const contentType = response.headers.get('content-type');
@@ -295,15 +280,8 @@ export async function getCollectionStats() {
  * Send payment reminder
  */
 export async function sendPaymentReminder(paymentId: string): Promise<void> {
-  const { data: { session } } = await supabase.auth.getSession();
-  if (!session) throw new Error('No active session');
-
-  const response = await fetch(`${API_BASE}/api/payments/${paymentId}/send-reminder`, {
+  const response = await paymentsApiRequest(`/payments/${paymentId}/send-reminder`, {
     method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${session.access_token}`,
-      'Content-Type': 'application/json',
-    },
   });
 
   if (!response.ok) throw new Error('Failed to send reminder');
@@ -321,15 +299,8 @@ export async function recordPayment(data: {
   paymentMethod: string;
   notes?: string;
 }): Promise<Payment> {
-  const { data: { session } } = await supabase.auth.getSession();
-  if (!session) throw new Error('No active session');
-
-  const response = await fetch(`${API_BASE}/api/payments`, {
+  const response = await paymentsApiRequest('/payments', {
     method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${session.access_token}`,
-      'Content-Type': 'application/json',
-    },
     body: JSON.stringify({
       lease_id: data.leaseId,
       tenant_id: data.tenantId,
@@ -349,15 +320,7 @@ export async function recordPayment(data: {
  * Get owner entities
  */
 export async function getOwnerEntities(): Promise<OwnerEntity[]> {
-  const { data: { session } } = await supabase.auth.getSession();
-  if (!session) throw new Error('No active session');
-
-  const response = await fetch(`${API_BASE}/api/disbursements/owners`, {
-    headers: {
-      'Authorization': `Bearer ${session.access_token}`,
-      'Content-Type': 'application/json',
-    },
-  });
+  const response = await paymentsApiRequest('/disbursements/owners');
 
   if (!response.ok) throw new Error('Failed to fetch owners');
   return await response.json();
@@ -368,15 +331,7 @@ export async function getOwnerEntities(): Promise<OwnerEntity[]> {
  */
 export async function getOwnerDisbursements(): Promise<Disbursement[]> {
   try {
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session) throw new Error('No active session');
-
-    const response = await fetch(`${API_BASE}/api/disbursements/pending`, {
-      headers: {
-        'Authorization': `Bearer ${session.access_token}`,
-        'Content-Type': 'application/json',
-      },
-    });
+    const response = await paymentsApiRequest('/disbursements/pending');
 
     if (!response.ok) throw new Error('Failed to fetch disbursements');
     const result = await response.json();
@@ -425,15 +380,8 @@ export async function calculateDisbursement(
   periodStart: string,
   periodEnd: string
 ): Promise<DisbursementCalculation> {
-  const { data: { session } } = await supabase.auth.getSession();
-  if (!session) throw new Error('No active session');
-
-  const response = await fetch(`${API_BASE}/api/disbursements/calculate`, {
+  const response = await paymentsApiRequest('/disbursements/calculate', {
     method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${session.access_token}`,
-      'Content-Type': 'application/json',
-    },
     body: JSON.stringify({ ownerId, periodStart, periodEnd }),
   });
 
@@ -451,15 +399,8 @@ export async function createDisbursement(data: {
   periodEnd: string;
   paymentMethod: 'ach' | 'check' | 'wire';
 }): Promise<Disbursement> {
-  const { data: { session } } = await supabase.auth.getSession();
-  if (!session) throw new Error('No active session');
-
-  const response = await fetch(`${API_BASE}/api/disbursements`, {
+  const response = await paymentsApiRequest('/disbursements', {
     method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${session.access_token}`,
-      'Content-Type': 'application/json',
-    },
     body: JSON.stringify({
       ownerId: data.ownerId,
       propertyId: data.propertyId,
@@ -480,11 +421,7 @@ export async function processDisbursement(
   disbursementId: string,
   idempotencyKey?: string
 ): Promise<Disbursement> {
-  const { data: { session } } = await supabase.auth.getSession();
-  if (!session) throw new Error('No active session');
-
   const headers: Record<string, string> = {
-    'Authorization': `Bearer ${session.access_token}`,
     'Content-Type': 'application/json',
   };
 
@@ -492,7 +429,7 @@ export async function processDisbursement(
     headers['idempotency-key'] = idempotencyKey;
   }
 
-  const response = await fetch(`${API_BASE}/api/disbursements/${disbursementId}/process`, {
+  const response = await paymentsApiRequest(`/disbursements/${disbursementId}/process`, {
     method: 'POST',
     headers,
     body: JSON.stringify({ idempotencyKey }),

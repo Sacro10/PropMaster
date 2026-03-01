@@ -4,6 +4,22 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import * as api from '../api/communicationsClient';
+import { supabase } from '../supabaseClient';
+
+export interface CommunicationNotification {
+  id: string;
+  type: string;
+  title: string;
+  message: string;
+  action_url?: string | null;
+  payload?: {
+    conversationId?: string;
+    maintenanceRequestId?: string;
+    senderId?: string;
+  } | null;
+  is_read: boolean;
+  created_at: string;
+}
 
 export function useRecentMessages() {
   const [data, setData] = useState<any[]>([]);
@@ -69,6 +85,72 @@ export function useRecentMessages() {
   };
 }
 
+export function useCommunicationNotifications() {
+  const [data, setData] = useState<CommunicationNotification[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<Error | null>(null);
+
+  const fetchData = useCallback(async () => {
+    try {
+      setLoading(true);
+      setError(null);
+
+      const { data: userResult } = await supabase.auth.getUser();
+      const userId = userResult.user?.id;
+      if (!userId) {
+        setData([]);
+        return;
+      }
+
+      const { data: notifications, error: notificationsError } = await supabase
+        .from('notifications')
+        .select('id, type, title, message, action_url, payload, is_read, created_at')
+        .eq('user_id', userId)
+        .order('created_at', { ascending: false })
+        .limit(8);
+
+      if (notificationsError) {
+        throw notificationsError;
+      }
+
+      setData((notifications || []) as CommunicationNotification[]);
+    } catch (err) {
+      console.error('[useCommunicationNotifications] Error fetching notifications:', err);
+      setError(err as Error);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  const markRead = useCallback(async (notificationId: string) => {
+    try {
+      await supabase
+        .from('notifications')
+        .update({
+          is_read: true,
+          read_at: new Date().toISOString(),
+        })
+        .eq('id', notificationId);
+
+      setData((prev) =>
+        prev.map((notification) =>
+          notification.id === notificationId
+            ? { ...notification, is_read: true }
+            : notification
+        )
+      );
+    } catch (err) {
+      console.error('[useCommunicationNotifications] Error marking notification as read:', err);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchData();
+  }, [fetchData]);
+
+  return { data, loading, error, refetch: fetchData, markRead };
+}
+
 export function useMessageTemplates() {
   const [data, setData] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -87,6 +169,38 @@ export function useMessageTemplates() {
       setLoading(false);
     }
   }, []);
+
+  useEffect(() => {
+    fetchData();
+  }, [fetchData]);
+
+  return { data, loading, error, refetch: fetchData };
+}
+
+export function useConversationMessages(conversationId?: string | null) {
+  const [data, setData] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<Error | null>(null);
+
+  const fetchData = useCallback(async () => {
+    if (!conversationId) {
+      setData([]);
+      setError(null);
+      return;
+    }
+
+    try {
+      setLoading(true);
+      setError(null);
+      const result = await api.getConversationMessages(conversationId, 100);
+      setData(result || []);
+    } catch (err) {
+      console.error('[useConversationMessages] Error fetching conversation messages:', err);
+      setError(err as Error);
+    } finally {
+      setLoading(false);
+    }
+  }, [conversationId]);
 
   useEffect(() => {
     fetchData();
@@ -184,6 +298,13 @@ export function useSendMessage() {
     conversationId?: string;
     propertyId?: string;
     unitId?: string;
+    maintenanceRequestId?: string;
+    attachments?: Array<{
+      url: string;
+      fileName: string;
+      contentType?: string | null;
+      size?: number | null;
+    }>;
   }) => {
     try {
       setLoading(true);
@@ -235,12 +356,20 @@ export function useMessageSuggestion() {
       setLoading(true);
       setError(null);
       const result = await api.generateMessageSuggestion({ conversationId, intent });
+      if (result.error) {
+        throw new Error(result.error);
+      }
+      if (!result.suggestion?.trim()) {
+        throw new Error('AI did not return a suggestion.');
+      }
       setSuggestion(result.suggestion || '');
       setProvider(result.provider);
       return { success: true, data: result };
     } catch (err) {
       console.error('[useMessageSuggestion] Error generating suggestion:', err);
       setError(err as Error);
+      setSuggestion('');
+      setProvider(null);
       return { success: false, error: err as Error };
     } finally {
       setLoading(false);
@@ -250,6 +379,7 @@ export function useMessageSuggestion() {
   const clear = useCallback(() => {
     setSuggestion('');
     setProvider(null);
+    setError(null);
   }, []);
 
   return {

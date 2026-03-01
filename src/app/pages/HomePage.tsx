@@ -1,15 +1,44 @@
+import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Building, Check, TrendingUp, Users, Wrench, Shield, Zap, BarChart3 } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import { useThemeContext } from '../context/ThemeContext'
 import { ThemeToggle } from '../components/ThemeToggle'
 import { SupabaseConfigBanner } from '../components/SupabaseConfigBanner'
+import { getPlanCtaLabel, getPlanSelectionPath } from '../../lib/subscriptionRouting'
+import { getAccountPlan } from '../../lib/planGating'
+import type { SubscriptionPlan } from '../../lib/stripe'
 
 export function HomePage() {
-  const { user } = useAuth()
+  const { user, profile } = useAuth()
   const navigate = useNavigate()
   const { theme, toggleTheme } = useThemeContext()
   const isDark = theme === 'dark'
+  const [currentPlan, setCurrentPlan] = useState<SubscriptionPlan>((profile?.subscription_tier || 'basic') as SubscriptionPlan)
+
+  useEffect(() => {
+    let cancelled = false
+
+    const loadCurrentPlan = async () => {
+      if (!user) {
+        setCurrentPlan((profile?.subscription_tier || 'basic') as SubscriptionPlan)
+        return
+      }
+
+      const planInfo = await getAccountPlan()
+      if (cancelled) {
+        return
+      }
+
+      setCurrentPlan((planInfo?.plan || profile?.subscription_tier || 'basic') as SubscriptionPlan)
+    }
+
+    void loadCurrentPlan()
+
+    return () => {
+      cancelled = true
+    }
+  }, [user, profile?.subscription_tier])
 
   const features = [
     {
@@ -46,6 +75,7 @@ export function HomePage() {
 
   const plans = [
     {
+      id: 'basic' as const,
       name: 'Basic',
       price: 'Free',
       description: 'Perfect for getting started',
@@ -57,6 +87,7 @@ export function HomePage() {
       ]
     },
     {
+      id: 'pro' as const,
       name: 'Pro',
       price: '$10',
       period: '/month',
@@ -71,6 +102,7 @@ export function HomePage() {
       popular: true
     },
     {
+      id: 'premium' as const,
       name: 'Premium',
       price: '$20',
       period: '/month',
@@ -285,17 +317,18 @@ export function HomePage() {
                   ))}
                 </ul>
                 <button
-                  onClick={() => navigate(user ? '/app/dashboard' : '/auth')}
+                  onClick={() => navigate(getPlanSelectionPath(plan.id, Boolean(user), currentPlan))}
+                  disabled={Boolean(user) && plan.id === currentPlan}
                   className={`w-full py-3 rounded-lg font-medium transition-all ${
                     plan.popular
                       ? 'bg-gradient-to-r from-[#ff6b35] to-[#f7931e] hover:scale-105'
                       : isDark
                       ? 'bg-white/5 hover:bg-white/10'
                       : 'bg-gray-100 hover:bg-gray-200'
-                  }`}
+                  } disabled:cursor-not-allowed disabled:hover:scale-100 disabled:opacity-70`}
                   style={{ fontFamily: 'Work Sans, sans-serif' }}
                 >
-                  {plan.price === 'Free' ? 'Get Started' : 'Start Free Trial'}
+                  {getPlanCtaLabel(plan.id, Boolean(user), currentPlan)}
                 </button>
               </div>
             ))}

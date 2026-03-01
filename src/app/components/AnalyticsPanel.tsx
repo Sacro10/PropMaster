@@ -1,14 +1,11 @@
-import { useState } from 'react';
-import { TrendingUp, TrendingDown, Activity, FileText, RefreshCw, Download, Plus } from 'lucide-react';
+import { Activity, FileText, RefreshCw, Download } from 'lucide-react';
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
-import { useHasFeature } from '../hooks/usePlanGating';
+import { useHasFeature, useHasPlan } from '../hooks/usePlanGating';
 import { useThemeStyles } from '../hooks/useThemeStyles';
 import { FeatureGate } from './UpgradeCTA';
 import { LoadingPage } from './LoadingSpinner';
 import { ErrorState } from './ErrorBoundary';
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from './ui/dialog';
 import { formatCurrencyCompact, formatPercentageChange, formatCurrency } from '../../lib/utils/currencyHelpers';
-import { createExpense } from '../../lib/api/expenses';
 import type { TimeframeOption } from '../../lib/hooks/useAnalytics';
 import {
   useAnalyticsMetrics,
@@ -22,9 +19,10 @@ import {
 
 export function AnalyticsPanel() {
   const { isDark, text, border } = useThemeStyles();
-  const [timeframe, setTimeframe] = useState<TimeframeOption>('7m');
+  const timeframe: TimeframeOption = '7m';
 
   // Feature checks for plan gating
+  const analyticsAccess = useHasPlan('pro');
   const standardReporting = useHasFeature('standard_reporting');
   const advancedAnalytics = useHasFeature('advanced_analytics');
   const advancedExports = useHasFeature('advanced_exports');
@@ -34,19 +32,9 @@ export function AnalyticsPanel() {
   const { data: revenueTrend, loading: revenueLoading } = useRevenueTrend(timeframe);
   const { data: occupancyTrend, loading: occupancyLoading } = useOccupancyTrend(timeframe);
   const { data: propertyPerformance, loading: propertyLoading } = usePropertyPerformance(timeframe);
-  const { data: expenseBreakdown, loading: expenseLoading, refetch: refetchExpenseBreakdown } = useExpenseBreakdown(timeframe);
+  const { data: expenseBreakdown, loading: expenseLoading } = useExpenseBreakdown(timeframe);
   const { exportData, loading: exportLoading } = useExportAnalytics();
   const { data: insights, loading: insightsLoading } = useAnalyticsInsights(timeframe);
-  const [expenseOpen, setExpenseOpen] = useState(false);
-  const [expenseSubmitting, setExpenseSubmitting] = useState(false);
-  const [expenseError, setExpenseError] = useState<string | null>(null);
-  const [expenseForm, setExpenseForm] = useState({
-    amount: '',
-    expenseDate: new Date().toISOString().split('T')[0],
-    categoryName: '',
-    description: '',
-    paymentMethod: 'manual',
-  });
 
   // Show loading state
   if (metricsLoading) {
@@ -95,48 +83,13 @@ export function AnalyticsPanel() {
     },
   ];
 
-  const handleCreateExpense = async () => {
-    setExpenseError(null);
-    const amountValue = Number(expenseForm.amount);
-    if (!Number.isFinite(amountValue) || amountValue <= 0) {
-      setExpenseError('Enter a valid amount.');
-      return;
-    }
-    if (!expenseForm.expenseDate) {
-      setExpenseError('Select an expense date.');
-      return;
-    }
-    if (!expenseForm.categoryName.trim()) {
-      setExpenseError('Enter a category.');
-      return;
-    }
-
-    try {
-      setExpenseSubmitting(true);
-      await createExpense({
-        amount: amountValue,
-        expenseDate: expenseForm.expenseDate,
-        categoryName: expenseForm.categoryName.trim(),
-        description: expenseForm.description?.trim() || undefined,
-        paymentMethod: expenseForm.paymentMethod,
-      });
-      setExpenseOpen(false);
-      setExpenseForm((prev) => ({
-        ...prev,
-        amount: '',
-        categoryName: '',
-        description: '',
-      }));
-      refetchExpenseBreakdown();
-      refetchMetrics();
-    } catch (error) {
-      setExpenseError(error instanceof Error ? error.message : 'Failed to create expense.');
-    } finally {
-      setExpenseSubmitting(false);
-    }
-  };
-
   return (
+    <FeatureGate
+      requiredPlan="pro"
+      hasAccess={analyticsAccess.hasAccess}
+      loading={analyticsAccess.loading}
+      variant="inline"
+    >
     <div className="space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
@@ -149,21 +102,6 @@ export function AnalyticsPanel() {
           </p>
         </div>
         <div className="flex items-center gap-3">
-          {/* Timeframe selector */}
-          <select
-            value={timeframe}
-            onChange={(e) => setTimeframe(e.target.value as TimeframeOption)}
-            className={`px-4 py-2 ${isDark ? 'bg-white/5 hover:bg-white/10' : 'bg-gray-100 hover:bg-gray-200'} border ${border.default} rounded-lg text-sm focus:outline-none focus:border-[#ff6b35]/50 transition-colors`}
-            style={{ fontFamily: 'Work Sans, sans-serif' }}
-          >
-            <option value="7d">Last 7 days</option>
-            <option value="7m">Last 7 months</option>
-            <option value="30d">Last 30 days</option>
-            <option value="90d">Last 90 days</option>
-            <option value="1y">Last year</option>
-            <option value="all">All time</option>
-          </select>
-
           {/* Refresh button */}
           <button
             onClick={refetchMetrics}
@@ -195,7 +133,7 @@ export function AnalyticsPanel() {
             </button>
           ) : (
             <button
-              onClick={() => window.location.href = '/billing?upgrade=premium'}
+              onClick={() => window.location.href = '/app/billing?plan=premium&checkout=1'}
               className={`px-6 py-3 ${isDark ? 'bg-white/10 hover:bg-white/20' : 'bg-gray-200 hover:bg-gray-300'} border ${border.default} rounded-lg font-medium transition-colors flex items-center gap-2`}
               title="Upgrade to Premium for advanced exports"
               style={{ fontFamily: 'Work Sans, sans-serif' }}
@@ -209,32 +147,21 @@ export function AnalyticsPanel() {
 
       {/* KPIs */}
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-6">
-        {kpis.map((kpi, index) => {
-          const TrendIcon = kpi.trend === 'up' ? TrendingUp : TrendingDown;
-          const trendColor = kpi.trend === 'up' ? 'text-emerald-400' : 'text-red-400';
-
-          return (
-            <div
-              key={index}
-              className={`${isDark ? 'bg-gradient-to-br from-[#1a1f35] to-[#0f1523]' : 'bg-white shadow-md'} border ${border.default} rounded-xl p-6 hover:border-[#ff6b35]/50 transition-all`}
-            >
-              <p className={`text-sm ${text.muted} mb-2`} style={{ fontFamily: 'Work Sans, sans-serif' }}>
-                {kpi.label}
+        {kpis.map((kpi, index) => (
+          <div
+            key={index}
+            className={`${isDark ? 'bg-gradient-to-br from-[#1a1f35] to-[#0f1523]' : 'bg-white shadow-md'} border ${border.default} rounded-xl p-6 hover:border-[#ff6b35]/50 transition-all`}
+          >
+            <p className={`text-sm ${text.muted} mb-2`} style={{ fontFamily: 'Work Sans, sans-serif' }}>
+              {kpi.label}
+            </p>
+            <div className="flex items-end justify-between">
+              <p className="text-3xl font-bold" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
+                {kpi.value}
               </p>
-              <div className="flex items-end justify-between">
-                <p className="text-3xl font-bold" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
-                  {kpi.value}
-                </p>
-                {kpi.change !== '+0.0%' && (
-                  <span className={`text-sm ${trendColor} flex items-center gap-1`} style={{ fontFamily: 'Work Sans, sans-serif' }}>
-                    <TrendIcon className="w-3 h-3" />
-                    {kpi.change}
-                  </span>
-                )}
-              </div>
             </div>
-          );
-        })}
+          </div>
+        ))}
       </div>
 
       {/* Charts Grid - Gated by Pro (standard_reporting) */}
@@ -423,97 +350,10 @@ export function AnalyticsPanel() {
 
           {/* Expense Breakdown */}
           <div className={`${isDark ? 'bg-gradient-to-br from-[#1a1f35] to-[#0f1523]' : 'bg-white shadow-md'} border ${border.default} rounded-xl p-6`}>
-            <div className="flex items-center justify-between mb-6">
+            <div className="mb-6">
               <h3 className="text-2xl" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
                 EXPENSE BREAKDOWN
               </h3>
-              <Dialog open={expenseOpen} onOpenChange={setExpenseOpen}>
-                <DialogTrigger asChild>
-                  <button
-                    className={`px-3 py-2 text-xs font-semibold ${isDark ? 'bg-white/10 hover:bg-white/20' : 'bg-gray-200 hover:bg-gray-300'} border ${border.default} rounded-lg transition-colors flex items-center gap-2`}
-                    style={{ fontFamily: 'Work Sans, sans-serif' }}
-                  >
-                    <Plus className="w-3.5 h-3.5" />
-                    Add Expense
-                  </button>
-                </DialogTrigger>
-                <DialogContent className={`${isDark ? 'bg-[#0f1523]' : 'bg-white'} border ${border.default} text-left`}>
-                  <DialogHeader>
-                    <DialogTitle style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
-                      Add Expense
-                    </DialogTitle>
-                    <DialogDescription className={text.muted} style={{ fontFamily: 'Work Sans, sans-serif' }}>
-                      Log a new expense to keep analytics up to date.
-                    </DialogDescription>
-                  </DialogHeader>
-                  <div className="space-y-4">
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                      <div>
-                        <label className={`text-xs ${text.muted}`} style={{ fontFamily: 'Work Sans, sans-serif' }}>
-                          Amount
-                        </label>
-                        <input
-                          type="number"
-                          min="0"
-                          step="0.01"
-                          value={expenseForm.amount}
-                          onChange={(e) => setExpenseForm((prev) => ({ ...prev, amount: e.target.value }))}
-                          className={`mt-1 w-full px-3 py-2 ${isDark ? 'bg-white/5' : 'bg-gray-100'} border ${border.default} rounded-lg text-sm focus:outline-none focus:border-[#ff6b35]/50`}
-                          placeholder="0.00"
-                        />
-                      </div>
-                      <div>
-                        <label className={`text-xs ${text.muted}`} style={{ fontFamily: 'Work Sans, sans-serif' }}>
-                          Expense Date
-                        </label>
-                        <input
-                          type="date"
-                          value={expenseForm.expenseDate}
-                          onChange={(e) => setExpenseForm((prev) => ({ ...prev, expenseDate: e.target.value }))}
-                          className={`mt-1 w-full px-3 py-2 ${isDark ? 'bg-white/5' : 'bg-gray-100'} border ${border.default} rounded-lg text-sm focus:outline-none focus:border-[#ff6b35]/50`}
-                        />
-                      </div>
-                    </div>
-                    <div>
-                      <label className={`text-xs ${text.muted}`} style={{ fontFamily: 'Work Sans, sans-serif' }}>
-                        Category
-                      </label>
-                      <input
-                        type="text"
-                        value={expenseForm.categoryName}
-                        onChange={(e) => setExpenseForm((prev) => ({ ...prev, categoryName: e.target.value }))}
-                        className={`mt-1 w-full px-3 py-2 ${isDark ? 'bg-white/5' : 'bg-gray-100'} border ${border.default} rounded-lg text-sm focus:outline-none focus:border-[#ff6b35]/50`}
-                        placeholder="Plumbing, HVAC, General..."
-                      />
-                    </div>
-                    <div>
-                      <label className={`text-xs ${text.muted}`} style={{ fontFamily: 'Work Sans, sans-serif' }}>
-                        Description
-                      </label>
-                      <textarea
-                        rows={3}
-                        value={expenseForm.description}
-                        onChange={(e) => setExpenseForm((prev) => ({ ...prev, description: e.target.value }))}
-                        className={`mt-1 w-full px-3 py-2 ${isDark ? 'bg-white/5' : 'bg-gray-100'} border ${border.default} rounded-lg text-sm focus:outline-none focus:border-[#ff6b35]/50`}
-                        placeholder="Optional notes about this expense"
-                      />
-                    </div>
-                    {expenseError ? (
-                      <p className="text-sm text-red-400">{expenseError}</p>
-                    ) : null}
-                  </div>
-                  <DialogFooter className="mt-6">
-                    <button
-                      onClick={handleCreateExpense}
-                      disabled={expenseSubmitting}
-                      className="px-5 py-2 bg-gradient-to-r from-[#ff6b35] to-[#f7931e] rounded-lg font-medium text-sm hover:scale-105 transition-transform disabled:opacity-60 disabled:cursor-not-allowed"
-                      style={{ fontFamily: 'Work Sans, sans-serif' }}
-                    >
-                      {expenseSubmitting ? 'Saving...' : 'Save Expense'}
-                    </button>
-                  </DialogFooter>
-                </DialogContent>
-              </Dialog>
             </div>
             {expenseLoading ? (
               <div className="flex items-center justify-center h-[200px]">
@@ -608,9 +448,18 @@ export function AnalyticsPanel() {
                 {insightsLoading ? (
                   <p className={`text-sm ${text.muted}`}>Generating insight...</p>
                 ) : insights?.summary ? (
-                  <p className={`text-sm ${text.secondary}`}>{insights.summary}</p>
+                  <div className="space-y-2">
+                    <p className={`text-sm ${text.secondary}`}>{insights.summary}</p>
+                    {insights.error && (
+                      <p className="text-xs text-amber-500">
+                        AI fallback in use: {insights.error}
+                      </p>
+                    )}
+                  </div>
                 ) : (
-                  <p className={`text-sm ${text.muted}`}>AI insights unavailable.</p>
+                  <p className={`text-sm ${text.muted}`}>
+                    {insights?.error || 'AI insights unavailable.'}
+                  </p>
                 )}
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
@@ -650,5 +499,6 @@ export function AnalyticsPanel() {
         </div>
       </FeatureGate>
     </div>
+    </FeatureGate>
   );
 }

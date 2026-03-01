@@ -4,7 +4,7 @@ import type { Database } from './database.types'
 
 // Get environment variables
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY
+const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY?.trim()
 
 const missingEnvVars: string[] = []
 if (!supabaseUrl) missingEnvVars.push('VITE_SUPABASE_URL')

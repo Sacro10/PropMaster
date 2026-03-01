@@ -13,6 +13,33 @@ export interface AuthRequest extends Request {
   };
 }
 
+async function resolvePrimaryMembership(userId: string) {
+  const { data, error } = await supabase
+    .from('account_members')
+    .select('account_id, role, is_active, joined_at, created_at')
+    .eq('user_id', userId);
+
+  if (error) {
+    return { membership: null, error };
+  }
+
+  const rows = Array.isArray(data) ? data : data ? [data] : [];
+  if (rows.length === 0) {
+    return { membership: null, error: null };
+  }
+
+  const activeRows = rows.filter((row) => row.is_active !== false);
+  const candidates = activeRows.length > 0 ? activeRows : rows;
+
+  const sorted = [...candidates].sort((a, b) => {
+    const dateA = new Date(a.joined_at || a.created_at || 0).getTime();
+    const dateB = new Date(b.joined_at || b.created_at || 0).getTime();
+    return dateB - dateA;
+  });
+
+  return { membership: sorted[0], error: null };
+}
+
 /**
  * Authentication middleware - verifies Supabase JWT token
  * Extracts user info and account membership from the token
@@ -41,15 +68,18 @@ export async function authenticate(
     }
 
     // Get the user's account membership
-    const { data: membership, error: membershipError } = await supabase
-      .from('account_members')
-      .select('account_id, role')
-      .eq('user_id', user.id)
-      .single();
+    const { membership, error: membershipError } = await resolvePrimaryMembership(user.id);
 
     if (membershipError || !membership) {
       res.status(403).json({
         error: 'User not associated with any account'
+      });
+      return;
+    }
+
+    if (membership.is_active === false) {
+      res.status(403).json({
+        error: 'Account pending approval',
       });
       return;
     }
@@ -89,13 +119,9 @@ export async function optionalAuthenticate(
     const { data: { user }, error } = await supabase.auth.getUser(token);
 
     if (!error && user) {
-      const { data: membership } = await supabase
-        .from('account_members')
-        .select('account_id, role')
-        .eq('user_id', user.id)
-        .single();
+      const { membership } = await resolvePrimaryMembership(user.id);
 
-      if (membership) {
+      if (membership && membership.is_active !== false) {
         req.user = {
           id: user.id,
           email: user.email,

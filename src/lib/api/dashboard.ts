@@ -4,7 +4,7 @@
  */
 
 import { supabase } from '../supabaseClient';
-import { fetchJsonWithRetry } from './client';
+import { fetchJsonWithRetry, getCurrentAccountId as resolveCurrentAccountId } from './client';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
 
@@ -191,22 +191,7 @@ export async function getDashboardSummary(): Promise<DashboardSummary> {
  * Get current account ID from user session
  */
 async function getCurrentAccountId(): Promise<string | null> {
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return null;
-
-  const { data, error } = await supabase
-    .from('account_members')
-    .select('account_id')
-    .eq('user_id', user.id)
-    .eq('is_active', true)
-    .single();
-
-  if (error) {
-    console.error('[Dashboard API] Error fetching account ID:', error);
-    return null;
-  }
-
-  return data?.account_id || null;
+  return await resolveCurrentAccountId();
 }
 
 /**

@@ -21,6 +21,7 @@ export interface PlanInfo {
   name: string;
   price: number;
   priceLabel: string;
+  description: string;
   features: string[];
   maxUnits: number;
   recommended?: boolean;
@@ -31,49 +32,43 @@ export const PLAN_INFO: Record<SubscriptionPlan, PlanInfo> = {
     name: 'Basic',
     price: 0,
     priceLabel: 'Free',
-    maxUnits: 3,
+    description: 'Perfect for getting started',
+    maxUnits: 10,
     features: [
-      'Up to 3 units',
-      'Tenant portal',
-      'Basic maintenance requests',
-      'Basic rent collection',
-      'Property management',
+      'Up to 10 properties',
+      'Basic tenant screening',
+      'Maintenance tracking',
+      'Email support',
     ],
   },
   pro: {
     name: 'Pro',
     price: 10,
     priceLabel: '$10/month',
-    maxUnits: 100,
+    description: 'For growing property managers',
+    maxUnits: 50,
     recommended: true,
     features: [
-      'Up to 100 units',
-      'Everything in Basic',
-      'Tenant screening',
-      'Maintenance routing',
-      'Marketing tools',
-      'Standard reporting',
-      'Lease renewals',
-      'Communication hub',
+      'Up to 50 properties',
+      'AI tenant screening',
+      'Advanced analytics',
+      'Automated rent collection',
+      'Priority support',
     ],
   },
   premium: {
     name: 'Premium',
     price: 20,
     priceLabel: '$20/month',
+    description: 'For professionals',
     maxUnits: 999999,
     features: [
-      'Unlimited units',
-      'Everything in Pro',
-      'AI risk scoring',
-      'Integrated accounting',
-      'HVAC filter program',
-      'Electronic showings',
-      '24/7 emergency support',
-      'Advanced analytics',
-      'Advanced exports',
+      'Unlimited properties',
+      'Full AI automation',
       'Custom reports',
       'API access',
+      'Dedicated account manager',
+      '24/7 phone support',
     ],
   },
 };

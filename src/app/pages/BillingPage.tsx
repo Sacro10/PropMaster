@@ -1,31 +1,43 @@
-import { useState } from 'react'
-import { Check, Zap, ArrowRight, CreditCard, Calendar, AlertCircle } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
+import { Check, Zap, ArrowRight, CreditCard, Calendar, AlertCircle, CheckCircle2 } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import { useThemeContext } from '../context/ThemeContext'
 import { createCheckoutSession, createPortalSession } from '../../lib/api/subscription'
+import { getCurrentAccountId } from '../../lib/api/client'
+import { getAccountPlan } from '../../lib/planGating'
+import { isPaidSubscriptionPlan } from '../../lib/subscriptionRouting'
+import type { SubscriptionPlan } from '../../lib/stripe'
 
 export function BillingPage() {
-  const { user, profile } = useAuth()
+  const { user, profile, refreshProfile } = useAuth()
   const { theme } = useThemeContext()
   const isDark = theme === 'dark'
+  const [searchParams, setSearchParams] = useSearchParams()
   const [loading, setLoading] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [accountId, setAccountId] = useState<string | null>(null)
+  const [currentPlan, setCurrentPlan] = useState<SubscriptionPlan>((profile?.subscription_tier || 'basic') as SubscriptionPlan)
+  const [subscriptionStatus, setSubscriptionStatus] = useState<string | null>(null)
+  const [billingReady, setBillingReady] = useState(false)
+  const autoCheckoutStartedRef = useRef(false)
 
-  const currentPlan = profile?.plan || 'basic'
-  const subscriptionStatus = profile?.subscription_status
+  const checkoutPlan = searchParams.get('plan')
+  const shouldAutoCheckout = searchParams.get('checkout') === '1'
+  const checkoutSuccess = searchParams.get('success') === 'true'
+  const checkoutCanceled = searchParams.get('canceled') === 'true'
 
   const plans = [
     {
       id: 'basic',
       name: 'BASIC',
       price: 'FREE',
-      description: 'Up to 3 units',
+      description: 'Perfect for getting started',
       features: [
-        'Up to 3 units',
-        'Tenant portal',
-        'Basic maintenance requests',
-        'Basic rent collection',
-        'Property management'
+        'Up to 10 properties',
+        'Basic tenant screening',
+        'Maintenance tracking',
+        'Email support'
       ],
       isCurrent: currentPlan === 'basic'
     },
@@ -35,16 +47,13 @@ export function BillingPage() {
       price: '$10',
       period: '/MO',
       badge: 'Recommended',
-      description: 'Up to 100 units',
+      description: 'For growing property managers',
       features: [
-        'Up to 100 units',
-        'Everything in Basic',
-        'Tenant screening',
-        'Maintenance routing',
-        'Marketing tools',
-        'Standard reporting',
-        'Lease renewals',
-        'Communication hub'
+        'Up to 50 properties',
+        'AI tenant screening',
+        'Advanced analytics',
+        'Automated rent collection',
+        'Priority support'
       ],
       isCurrent: currentPlan === 'pro',
       highlighted: true
@@ -54,36 +63,84 @@ export function BillingPage() {
       name: 'PREMIUM',
       price: '$20',
       period: '/MO',
-      description: 'Up to unlimited units',
+      description: 'For professionals',
       features: [
-        'Unlimited units',
-        'Everything in Pro',
-        'AI risk scoring',
-        'Integrated accounting',
-        'HVAC filter program',
-        'Electronic showings',
-        '24/7 emergency support',
-        'Advanced analytics',
-        'Advanced exports',
+        'Unlimited properties',
+        'Full AI automation',
         'Custom reports',
-        'API access'
+        'API access',
+        'Dedicated account manager',
+        '24/7 phone support'
       ],
       isCurrent: currentPlan === 'premium'
     }
   ]
 
-  const handleUpgrade = async (planId: string) => {
-    if (!user || !profile) return
+  const clearBillingQueryState = (keys: string[]) => {
+    const next = new URLSearchParams(searchParams)
+    keys.forEach((key) => next.delete(key))
+    setSearchParams(next, { replace: true })
+  }
+
+  useEffect(() => {
+    let cancelled = false
+
+    const loadBillingContext = async () => {
+      setBillingReady(false)
+
+      const [resolvedAccountId, planInfo] = await Promise.all([
+        getCurrentAccountId(),
+        getAccountPlan()
+      ])
+
+      if (cancelled) {
+        return
+      }
+
+      setAccountId(resolvedAccountId)
+
+      if (planInfo) {
+        setCurrentPlan(planInfo.plan)
+        setSubscriptionStatus(planInfo.subscription_status || null)
+      } else {
+        setCurrentPlan((profile?.subscription_tier || 'basic') as SubscriptionPlan)
+        setSubscriptionStatus(null)
+      }
+
+      setBillingReady(true)
+    }
+
+    void loadBillingContext()
+
+    return () => {
+      cancelled = true
+    }
+  }, [profile?.subscription_tier])
+
+  useEffect(() => {
+    if (!checkoutSuccess) {
+      return
+    }
+
+    void refreshProfile()
+  }, [checkoutSuccess, refreshProfile])
+
+  const handleUpgrade = async (planId: Exclude<SubscriptionPlan, 'basic'>) => {
+    if (!user) {
+      setError('Please sign in to manage billing.')
+      return
+    }
+
+    if (!accountId) {
+      setError('Unable to resolve your account. Refresh the page and try again.')
+      return
+    }
 
     setLoading(planId)
     setError(null)
 
     try {
-      const { url } = await createCheckoutSession({
-        accountId: profile.id,
-        plan: planId as 'pro' | 'premium',
-        userId: user.id
-      })
+      const url = await createCheckoutSession(accountId, planId, user.id)
 
       // Redirect to Stripe Checkout
       window.location.href = url
@@ -94,15 +151,16 @@ export function BillingPage() {
   }
 
   const handleManageSubscription = async () => {
-    if (!profile) return
+    if (!accountId) {
+      setError('Unable to resolve your account. Refresh the page and try again.')
+      return
+    }
 
     setLoading('portal')
     setError(null)
 
     try {
-      const { url } = await createPortalSession({
-        accountId: profile.id
-      })
+      const url = await createPortalSession(accountId)
 
       // Redirect to Stripe Customer Portal
       window.location.href = url
@@ -111,6 +169,26 @@ export function BillingPage() {
       setLoading(null)
     }
   }
+
+  useEffect(() => {
+    if (!billingReady || !shouldAutoCheckout || autoCheckoutStartedRef.current) {
+      return
+    }
+
+    if (!isPaidSubscriptionPlan(checkoutPlan)) {
+      clearBillingQueryState(['plan', 'checkout'])
+      return
+    }
+
+    if (checkoutPlan === currentPlan) {
+      autoCheckoutStartedRef.current = true
+      clearBillingQueryState(['plan', 'checkout'])
+      return
+    }
+
+    autoCheckoutStartedRef.current = true
+    void handleUpgrade(checkoutPlan)
+  }, [billingReady, checkoutPlan, currentPlan, shouldAutoCheckout])
 
   return (
     <div className="space-y-8">
@@ -123,6 +201,34 @@ export function BillingPage() {
           Manage your subscription and billing information
         </p>
       </div>
+
+      {checkoutSuccess && (
+        <div className={`p-4 rounded-lg border ${isDark ? 'bg-emerald-900/20 border-emerald-800' : 'bg-emerald-50 border-emerald-200'} flex items-start gap-3`}>
+          <CheckCircle2 className="w-5 h-5 text-emerald-500 flex-shrink-0 mt-0.5" />
+          <div>
+            <p className={`font-medium ${isDark ? 'text-emerald-300' : 'text-emerald-800'}`}>
+              Checkout complete
+            </p>
+            <p className={`text-sm ${isDark ? 'text-emerald-400' : 'text-emerald-700'}`}>
+              Your subscription has been updated.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {checkoutCanceled && (
+        <div className={`p-4 rounded-lg border ${isDark ? 'bg-amber-900/20 border-amber-800' : 'bg-amber-50 border-amber-200'} flex items-start gap-3`}>
+          <AlertCircle className="w-5 h-5 text-amber-500 flex-shrink-0 mt-0.5" />
+          <div>
+            <p className={`font-medium ${isDark ? 'text-amber-300' : 'text-amber-800'}`}>
+              Checkout canceled
+            </p>
+            <p className={`text-sm ${isDark ? 'text-amber-400' : 'text-amber-700'}`}>
+              No billing changes were made.
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Error Message */}
       {error && (
@@ -158,13 +264,13 @@ export function BillingPage() {
                   </span>
                 </div>
                 <div className={`px-3 py-1 rounded-full text-xs font-medium ${
-                  subscriptionStatus === 'active'
+                  (subscriptionStatus || 'active') === 'active'
                     ? 'bg-green-500/20 text-green-400'
                     : subscriptionStatus === 'past_due'
                     ? 'bg-yellow-500/20 text-yellow-400'
                     : 'bg-gray-500/20 text-gray-400'
                 }`}>
-                  {subscriptionStatus || 'Active'}
+                  {subscriptionStatus || 'active'}
                 </div>
               </div>
             </div>
@@ -284,9 +390,22 @@ export function BillingPage() {
                 >
                   Downgrade to Basic
                 </button>
+              ) : getPlanLevel(plan.id as SubscriptionPlan) < getPlanLevel(currentPlan) ? (
+                <button
+                  onClick={handleManageSubscription}
+                  disabled={loading !== null}
+                  className={`w-full py-2 rounded-lg font-medium transition-colors text-sm ${
+                    isDark
+                      ? 'bg-white/10 hover:bg-white/20 border border-white/20'
+                      : 'bg-gray-100 hover:bg-gray-200 border border-gray-200'
+                  } disabled:opacity-50 disabled:cursor-not-allowed`}
+                  style={{ fontFamily: 'Work Sans, sans-serif' }}
+                >
+                  {loading === 'portal' ? 'Loading...' : 'Downgrade via Portal'}
+                </button>
               ) : (
                 <button
-                  onClick={() => handleUpgrade(plan.id)}
+                  onClick={() => handleUpgrade(plan.id as Exclude<SubscriptionPlan, 'basic'>)}
                   disabled={loading !== null}
                   className={`w-full py-2 rounded-lg font-medium transition-all text-sm flex items-center justify-center gap-2 ${
                     plan.highlighted
@@ -333,4 +452,8 @@ export function BillingPage() {
       </div>
     </div>
   )
+}
+
+function getPlanLevel(plan: SubscriptionPlan): number {
+  return { basic: 0, pro: 1, premium: 2 }[plan]
 }

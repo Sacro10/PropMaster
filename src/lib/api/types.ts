@@ -300,6 +300,9 @@ export interface ExpenseBreakdown {
 export interface AnalyticsInsight {
   summary: string;
   provider: string | null;
+  error?: string | null;
+  source?: 'ai' | 'template';
+  enabled?: boolean;
 }
 
 // HVAC Filter Program types

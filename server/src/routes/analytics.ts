@@ -2,7 +2,9 @@ import express, { Request, Response } from 'express';
 import { supabaseAdmin as supabase } from '../supabase';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import { rateLimiters } from '../middleware/rateLimiter';
+import { requirePlanAccess, requireFeatureAccess } from '../middleware/planAccess';
 import { cache } from '../utils/cache';
+import { stripe } from '../stripe';
 import { AiDisabledError, generateText, getAiStatus } from '../services/aiClient';
 
 // Extend Request interface to include user property
@@ -13,6 +15,7 @@ const router = express.Router();
 router.use(authenticate);
 // Apply rate limiting to all analytics routes after auth for per-account keys
 router.use(rateLimiters.analytics);
+router.use(requirePlanAccess('pro'));
 
 interface TimeframeQuery {
   range: '7d' | '7m' | '30d' | '90d' | '1y' | 'all';
@@ -62,16 +65,39 @@ function getDateRange(timeframe: string): { start: Date; end: Date } {
 async function getUserAccountId(userId: string): Promise<string> {
   const { data, error } = await supabase
     .from('account_members')
-    .select('account_id')
+    .select('account_id, joined_at, created_at, is_active')
     .eq('user_id', userId)
-    .eq('is_active', true)
-    .single();
+    .eq('is_active', true);
 
-  if (error || !data) {
+  if (error) {
     throw new Error('Account not found');
   }
 
-  return data.account_id;
+  const rows = Array.isArray(data) ? data : data ? [data] : [];
+  if (rows.length === 0) {
+    throw new Error('Account not found');
+  }
+
+  const sorted = [...rows].sort((a: any, b: any) => {
+    const dateA = new Date(a.joined_at || a.created_at || 0).getTime();
+    const dateB = new Date(b.joined_at || b.created_at || 0).getTime();
+    return dateB - dateA;
+  });
+
+  return sorted[0].account_id;
+}
+
+async function resolveAnalyticsAccountId(req: AnalyticsRequest): Promise<string> {
+  if (req.user?.accountId) {
+    return req.user.accountId;
+  }
+
+  const userId = req.user?.id;
+  if (!userId) {
+    throw new Error('Authentication required');
+  }
+
+  return getUserAccountId(userId);
 }
 
 const paymentStatusValues = ['paid', 'completed'];
@@ -84,8 +110,40 @@ function getDateFilterValue(dateField: string, date: Date) {
 }
 
 function isMissingFieldError(error: any, field: string) {
-  const message = String(error?.message || '');
-  return message.includes(`column "${field}"`) || message.includes('does not exist');
+  const message = String(error?.message || '').toLowerCase();
+  const fieldLower = field.toLowerCase();
+
+  if (
+    message.includes(`column "${fieldLower}"`) ||
+    message.includes(`column '${fieldLower}'`) ||
+    message.includes(`'${fieldLower}' column`) ||
+    message.includes(`"${fieldLower}" column`) ||
+    message.includes(`.${fieldLower}`) ||
+    message.includes('does not exist')
+  ) {
+    return true;
+  }
+
+  const code = String(error?.code || '');
+  return code === '42703' || code === 'PGRST204';
+}
+
+function addColumnToSelect(select: string, column: string) {
+  if (select.includes('*')) {
+    return select;
+  }
+
+  const selectedColumns = select
+    .split(',')
+    .map((value) => value.trim())
+    .filter(Boolean);
+
+  const alreadySelected = selectedColumns.some((value) => value === column || value.startsWith(`${column}:`));
+  if (alreadySelected) {
+    return select;
+  }
+
+  return `${select}, ${column}`;
 }
 
 async function fetchPaymentsInRange({
@@ -94,36 +152,60 @@ async function fetchPaymentsInRange({
   end,
   select,
   statusValues = paymentStatusValues,
-  dateFields = ['payment_date', 'paid_at', 'created_at'],
+  statusFields = ['status', 'payment_status'],
+  dateFields = ['payment_date', 'paid_at', 'due_date', 'created_at'],
+  selectDateField = false,
 }: {
   accountId: string;
   start: Date;
   end: Date;
   select: string;
   statusValues?: string[];
+  statusFields?: string[];
   dateFields?: string[];
+  selectDateField?: boolean;
 }) {
   let lastError: any = null;
 
-  for (const dateField of dateFields) {
-    const { data, error } = await supabase
-      .from('payments')
-      .select(select)
-      .eq('account_id', accountId)
-      .in('status', statusValues)
-      .gte(dateField, getDateFilterValue(dateField, start))
-      .lte(dateField, getDateFilterValue(dateField, end));
+  for (const statusField of [...statusFields, null]) {
+    let shouldTryNextStatusField = false;
 
-    if (!error) {
-      return { data: data || [], dateField };
+    for (const dateField of dateFields) {
+      const querySelect = selectDateField ? addColumnToSelect(select, dateField) : select;
+
+      let query = supabase
+        .from('payments')
+        .select(querySelect)
+        .eq('account_id', accountId)
+        .gte(dateField, getDateFilterValue(dateField, start))
+        .lte(dateField, getDateFilterValue(dateField, end));
+
+      if (statusField) {
+        query = query.in(statusField, statusValues);
+      }
+
+      const { data, error } = await query;
+
+      if (!error) {
+        return { data: data || [], dateField };
+      }
+
+      lastError = error;
+      if (isMissingFieldError(error, dateField)) {
+        continue;
+      }
+
+      if (statusField && isMissingFieldError(error, statusField)) {
+        shouldTryNextStatusField = true;
+        break;
+      }
+
+      return { data: [], dateField: null, error };
     }
 
-    lastError = error;
-    if (isMissingFieldError(error, dateField)) {
-      continue;
+    if (!shouldTryNextStatusField) {
+      break;
     }
-
-    return { data: [], dateField: null, error };
   }
 
   return { data: [], dateField: null, error: lastError };
@@ -166,57 +248,280 @@ async function fetchMaintenanceCostsInRange({
   return { data: [], dateField: null, error: lastError };
 }
 
-async function fetchExpensesInRange({
-  accountId,
-  start,
-  end,
-  dateFields = ['expense_date', 'created_at'],
-}: {
-  accountId: string;
-  start: Date;
-  end: Date;
-  dateFields?: string[];
-}) {
-  let lastError: any = null;
-
-  for (const dateField of dateFields) {
-    const { data, error } = await supabase
-      .from('expenses')
-      .select('amount, expense_categories(name)')
+async function reconcileStripeProcessingPayments(accountId: string): Promise<number> {
+  try {
+    const { data: pendingPayments, error: pendingError } = await supabase
+      .from('payments')
+      .select('id, created_at, amount, tenant_user_id')
       .eq('account_id', accountId)
-      .gte(dateField, getDateFilterValue(dateField, start))
-      .lte(dateField, getDateFilterValue(dateField, end));
+      .eq('payment_method', 'stripe')
+      .eq('status', 'processing')
+      .order('created_at', { ascending: false })
+      .limit(75);
 
-    if (!error) {
-      return { data: data || [], dateField };
+    if (pendingError) {
+      console.warn('[Analytics] Failed to load pending Stripe payments:', pendingError);
+      return 0;
     }
 
-    lastError = error;
-    if (isMissingFieldError(error, dateField)) {
-      continue;
+    const pendingRows = Array.isArray(pendingPayments) ? pendingPayments : [];
+    if (pendingRows.length === 0) {
+      return 0;
     }
 
-    return { data: [], dateField: null, error };
+    const pendingIds = new Set(pendingRows.map((row: any) => row.id).filter(Boolean));
+    const earliestCreatedAt = pendingRows[pendingRows.length - 1]?.created_at
+      ? new Date(pendingRows[pendingRows.length - 1].created_at).getTime()
+      : Date.now();
+    const createdGte = Math.max(0, Math.floor((earliestCreatedAt - (24 * 60 * 60 * 1000)) / 1000));
+
+    const resolveFallbackPendingPaymentId = ({
+      tenantUserId,
+      amountCents,
+      eventCreatedSeconds,
+    }: {
+      tenantUserId?: string | null;
+      amountCents?: number | null;
+      eventCreatedSeconds?: number | null;
+    }): string | null => {
+      if (!tenantUserId || !Number.isFinite(amountCents || NaN) || !Number.isFinite(eventCreatedSeconds || NaN)) {
+        return null;
+      }
+
+      const eventMs = Number(eventCreatedSeconds) * 1000;
+      const maxWindowMs = 6 * 60 * 60 * 1000; // 6 hours
+      let bestMatchId: string | null = null;
+      let bestDistance = Number.POSITIVE_INFINITY;
+
+      for (const row of pendingRows as any[]) {
+        if (!row?.id || matchedByPaymentId.has(row.id)) continue;
+        if (row.tenant_user_id !== tenantUserId) continue;
+
+        const rowAmountCents = Math.round(Number(row.amount || 0) * 100);
+        if (rowAmountCents !== Math.round(Number(amountCents))) continue;
+
+        const rowCreatedMs = new Date(row.created_at || 0).getTime();
+        if (!Number.isFinite(rowCreatedMs)) continue;
+
+        const distance = Math.abs(rowCreatedMs - eventMs);
+        if (distance > maxWindowMs) continue;
+
+        if (distance < bestDistance) {
+          bestDistance = distance;
+          bestMatchId = row.id;
+        }
+      }
+
+      return bestMatchId;
+    };
+
+    const matchedByPaymentId = new Map<string, {
+      paidAt: string;
+      transactionId?: string | null;
+      paymentIntentId?: string | null;
+      chargeId?: string | null;
+    }>();
+
+    const registerMatch = (paymentId: string, payload: {
+      paidAt: string;
+      transactionId?: string | null;
+      paymentIntentId?: string | null;
+      chargeId?: string | null;
+    }) => {
+      if (!pendingIds.has(paymentId)) {
+        return;
+      }
+
+      const existing = matchedByPaymentId.get(paymentId);
+      if (!existing) {
+        matchedByPaymentId.set(paymentId, payload);
+        return;
+      }
+
+      const existingTs = new Date(existing.paidAt).getTime();
+      const nextTs = new Date(payload.paidAt).getTime();
+      if (Number.isFinite(nextTs) && (!Number.isFinite(existingTs) || nextTs > existingTs)) {
+        matchedByPaymentId.set(paymentId, {
+          ...existing,
+          ...payload,
+        });
+      }
+    };
+
+    const collectEvents = async (eventType: string) => {
+      let hasMore = true;
+      let startingAfter: string | undefined;
+      let pages = 0;
+
+      while (hasMore && pages < 10) {
+        const events = await stripe.events.list({
+          type: eventType,
+          limit: 100,
+          created: { gte: createdGte },
+          ...(startingAfter ? { starting_after: startingAfter } : {}),
+        });
+
+        for (const evt of events.data) {
+          if (evt.type === 'checkout.session.completed') {
+            const session = evt.data.object as any;
+            if (session?.mode !== 'payment' && session?.metadata?.payment_type !== 'rent') {
+              continue;
+            }
+            if (session?.payment_status !== 'paid') {
+              continue;
+            }
+
+            const metadataAccountId = session?.metadata?.account_id;
+            const metadataPaymentId = session?.metadata?.payment_id;
+            const metadataTenantId = session?.metadata?.tenant_user_id || null;
+            if (metadataAccountId && metadataAccountId !== accountId) {
+              continue;
+            }
+
+            const paymentIntentId =
+              typeof session.payment_intent === 'string'
+                ? session.payment_intent
+                : session.payment_intent?.id || null;
+
+            const paymentId =
+              (metadataPaymentId && pendingIds.has(metadataPaymentId) ? metadataPaymentId : null) ||
+              resolveFallbackPendingPaymentId({
+                tenantUserId: metadataTenantId,
+                amountCents:
+                  typeof session.amount_total === 'number' ? session.amount_total : null,
+                eventCreatedSeconds: evt.created || null,
+              });
+
+            if (!paymentId) {
+              continue;
+            }
+
+            registerMatch(paymentId, {
+              paidAt: new Date((evt.created || Math.floor(Date.now() / 1000)) * 1000).toISOString(),
+              transactionId: session.id || null,
+              paymentIntentId,
+            });
+          }
+
+          if (evt.type === 'payment_intent.succeeded') {
+            const paymentIntent = evt.data.object as any;
+            const paymentId = paymentIntent?.metadata?.payment_id;
+            const metadataAccountId = paymentIntent?.metadata?.account_id;
+            if (!paymentId || (metadataAccountId && metadataAccountId !== accountId)) {
+              continue;
+            }
+
+            const chargeId =
+              typeof paymentIntent.latest_charge === 'string'
+                ? paymentIntent.latest_charge
+                : paymentIntent.latest_charge?.id || null;
+
+            registerMatch(paymentId, {
+              paidAt: new Date((evt.created || Math.floor(Date.now() / 1000)) * 1000).toISOString(),
+              paymentIntentId: paymentIntent.id || null,
+              chargeId,
+            });
+          }
+        }
+
+        hasMore = events.has_more;
+        startingAfter = events.data[events.data.length - 1]?.id;
+        pages += 1;
+      }
+    };
+
+    await collectEvents('checkout.session.completed');
+    await collectEvents('payment_intent.succeeded');
+
+    let updatedCount = 0;
+    for (const pending of pendingRows) {
+      const matched = matchedByPaymentId.get(pending.id);
+      if (!matched) {
+        continue;
+      }
+
+      const updatePayload: Record<string, any> = {
+        status: 'paid',
+        paid_at: matched.paidAt,
+        payment_method: 'stripe',
+        updated_at: new Date().toISOString(),
+      };
+
+      if (matched.transactionId) updatePayload.transaction_id = matched.transactionId;
+      if (matched.paymentIntentId) updatePayload.stripe_payment_intent_id = matched.paymentIntentId;
+      if (matched.chargeId) updatePayload.stripe_charge_id = matched.chargeId;
+
+      const { error: updateError } = await supabase
+        .from('payments')
+        .update(updatePayload)
+        .eq('account_id', accountId)
+        .eq('id', pending.id)
+        .eq('status', 'processing');
+
+      if (updateError) {
+        console.warn('[Analytics] Failed to reconcile Stripe payment row:', {
+          paymentId: pending.id,
+          error: updateError,
+        });
+        continue;
+      }
+
+      updatedCount += 1;
+    }
+
+    if (updatedCount > 0) {
+      console.log(`[Analytics] Reconciled ${updatedCount} Stripe payment(s) for account ${accountId}`);
+      cache.clear();
+    }
+
+    return updatedCount;
+  } catch (error) {
+    console.warn('[Analytics] Stripe reconciliation skipped:', error);
+    return 0;
   }
-
-  return { data: [], dateField: null, error: lastError };
 }
 
 async function fetchOccupiedUnitCount(accountId: string, date: Date) {
-  const dateIso = date.toISOString();
+  const dateValue = date.toISOString().split('T')[0];
   const { data, error } = await supabase
     .from('leases')
     .select('unit_id')
     .eq('account_id', accountId)
-    .lte('lease_start', dateIso)
-    .or(`lease_end.is.null,lease_end.gte.${dateIso}`);
+    .lte('lease_start', dateValue)
+    .or(`lease_end.is.null,lease_end.gte.${dateValue}`);
 
   if (error) {
     throw error;
   }
 
   const uniqueUnitIds = new Set((data || []).map((lease: any) => lease.unit_id));
-  return uniqueUnitIds.size;
+  if (uniqueUnitIds.size > 0) {
+    return uniqueUnitIds.size;
+  }
+
+  // Fallback: if no active leases are found, use unit status.
+  // Some accounts currently manage occupancy directly on units.status.
+  // Make this date-aware so historical occupancy does not appear flat across all months.
+  const cutoffMs = date.getTime();
+  const { data: units, error: unitsError } = await supabase
+    .from('units')
+    .select('status, updated_at')
+    .eq('account_id', accountId);
+
+  if (unitsError) {
+    throw unitsError;
+  }
+
+  return (units || []).filter((unit: any) => {
+    if (unit.status !== 'occupied') {
+      return false;
+    }
+    const updatedAtMs = unit.updated_at ? new Date(unit.updated_at).getTime() : Number.NaN;
+    if (!Number.isFinite(updatedAtMs)) {
+      return true;
+    }
+    return updatedAtMs <= cutoffMs;
+  }).length;
 }
 
 function buildMonthlyRevenueSeries(payments: any[], dateField: string, start: Date, end: Date) {
@@ -412,6 +717,61 @@ async function buildSummaryMetrics(accountId: string, range: TimeframeQuery['ran
   };
 }
 
+function buildFallbackInsight(context: {
+  timeframe: string;
+  currentRevenue: number;
+  comparisonRevenue: number;
+  occupancyRate: number;
+  noiMargin: number;
+  daysToLease: number;
+  renewalRate: number;
+}): string {
+  const revenueTrend =
+    context.currentRevenue > context.comparisonRevenue
+      ? 'Revenue is trending up versus the previous period.'
+      : context.currentRevenue < context.comparisonRevenue
+        ? 'Revenue is softer than the previous period.'
+        : 'Revenue is stable versus the previous period.';
+
+  const occupancyLine =
+    context.occupancyRate >= 95
+      ? 'Occupancy is very strong, so prioritize renewal execution and rent optimization.'
+      : context.occupancyRate >= 90
+        ? 'Occupancy is healthy, with room to improve renewal consistency.'
+        : 'Occupancy is below target, so focus on lead volume and faster turn times.';
+
+  const operatingLine =
+    context.noiMargin >= 30
+      ? 'NOI margin is strong; protect it by controlling maintenance spend.'
+      : context.noiMargin >= 15
+        ? 'NOI margin is moderate and can improve with tighter expense controls.'
+        : 'NOI margin is under pressure and needs expense and vacancy intervention.';
+
+  const leasingLine =
+    context.daysToLease > 0
+      ? `Average days to lease is ${context.daysToLease.toFixed(1)}, and renewal rate is ${context.renewalRate.toFixed(1)}%.`
+      : `Renewal rate is ${context.renewalRate.toFixed(1)}%; continue monitoring cycle-time data for new leases.`;
+
+  return `${revenueTrend} ${occupancyLine} ${operatingLine} ${leasingLine}`;
+}
+
+function describeAiFailure(error: unknown): string {
+  if (error instanceof AiDisabledError) {
+    if (error.missingEnvVars?.length) {
+      return `AI disabled. Missing: ${error.missingEnvVars.join(', ')}`;
+    }
+    return 'AI disabled.';
+  }
+
+  if (error instanceof Error) {
+    return error.message
+      .replace(/sk-[A-Za-z0-9-_]+/g, '[redacted]')
+      .replace(/Bearer\s+[A-Za-z0-9\-._~+/=]+/gi, 'Bearer [redacted]');
+  }
+
+  return 'AI request failed.';
+}
+
 /**
  * GET /api/analytics/summary
  * Returns KPI summary metrics for the given timeframe
@@ -425,14 +785,16 @@ router.get('/summary', async (req: AnalyticsRequest, res: Response) => {
       return res.status(401).json({ error: 'Authentication required' });
     }
 
+    const accountId = await resolveAnalyticsAccountId(req);
+    const reconciled = await reconcileStripeProcessingPayments(accountId);
+
     // Check cache first
-    const cacheKey = cache.generateAnalyticsKey(userId, 'summary', { range });
-    const cachedData = cache.get(cacheKey);
-    if (cachedData) {
+    const cacheKey = cache.generateAnalyticsKey(userId, 'summary', { range, accountId });
+    const cachedData = reconciled === 0 ? cache.get(cacheKey) : null;
+    if (cachedData && reconciled === 0) {
       return res.json(cachedData);
     }
 
-    const accountId = await getUserAccountId(userId);
     const { summary } = await buildSummaryMetrics(accountId, range);
     const result = summary;
 
@@ -460,9 +822,10 @@ router.get('/insights', async (req: AnalyticsRequest, res: Response) => {
       return res.status(401).json({ error: 'Authentication required' });
     }
 
-    const accountId = await getUserAccountId(userId);
+    const accountId = await resolveAnalyticsAccountId(req);
     const { summary, context } = await buildSummaryMetrics(accountId, range);
     const aiStatus = getAiStatus();
+    const fallbackInsight = buildFallbackInsight(context);
 
     try {
       const insight = await generateText(
@@ -470,12 +833,25 @@ router.get('/insights', async (req: AnalyticsRequest, res: Response) => {
         { summary, context }
       );
 
-      res.json({ summary: insight, provider: aiStatus.provider });
+      res.json({
+        summary: insight || fallbackInsight,
+        provider: aiStatus.provider || (insight ? 'openai' : 'template'),
+        error: null,
+        source: insight ? 'ai' : 'template',
+        enabled: aiStatus.enabled,
+      });
     } catch (error) {
+      const failure = describeAiFailure(error);
       if (!(error instanceof AiDisabledError)) {
-        console.warn('[Analytics] AI insights failed:', error);
+        console.warn('[Analytics] AI insights failed:', failure);
       }
-      res.json({ summary: '', provider: aiStatus.provider });
+      res.json({
+        summary: fallbackInsight,
+        provider: aiStatus.provider || 'template',
+        error: failure,
+        source: 'template',
+        enabled: aiStatus.enabled,
+      });
     }
   } catch (error) {
     console.error('Analytics insights error:', error);
@@ -500,7 +876,8 @@ router.get('/timeseries', async (req: AnalyticsRequest, res: Response) => {
       return res.status(400).json({ error: 'Valid metric parameter required (revenue|occupancy)' });
     }
 
-    const accountId = await getUserAccountId(userId);
+    const accountId = await resolveAnalyticsAccountId(req);
+    await reconcileStripeProcessingPayments(accountId);
     const { start, end } = getDateRange(range);
 
     if (metric === 'revenue') {
@@ -513,11 +890,18 @@ router.get('/timeseries', async (req: AnalyticsRequest, res: Response) => {
         });
 
       if (!error && data && data.length > 0) {
-        const timeSeriesData = data.map((item: any) => ({
-          month: item.month,
-          value: Number(item.revenue),
-          label: new Date(item.month).toLocaleDateString('en-US', { month: 'short' })
+        // Normalize RPC output into a continuous monthly series so zero-revenue
+        // months still appear on the chart.
+        const normalizedPayments = (data || []).map((item: any) => ({
+          amount: Number(item.revenue || 0),
+          paid_at: item.month,
         }));
+        const timeSeriesData = buildMonthlyRevenueSeries(
+          normalizedPayments,
+          'paid_at',
+          start,
+          end
+        );
 
         return res.json(timeSeriesData);
       }
@@ -530,7 +914,8 @@ router.get('/timeseries', async (req: AnalyticsRequest, res: Response) => {
         accountId,
         start,
         end,
-        select: 'amount, payment_date, paid_at, created_at',
+        select: 'amount',
+        selectDateField: true,
       });
 
       if (paymentsResult.error) {
@@ -553,12 +938,14 @@ router.get('/timeseries', async (req: AnalyticsRequest, res: Response) => {
       }
 
       const totalUnits = units?.length || 0;
+      const rangeStartDate = start.toISOString().split('T')[0];
+      const rangeEndDate = end.toISOString().split('T')[0];
       const { data: leases, error: leasesError } = await supabase
         .from('leases')
         .select('unit_id, lease_start, lease_end')
         .eq('account_id', accountId)
-        .lte('lease_start', end.toISOString())
-        .gte('lease_end', start.toISOString());
+        .lte('lease_start', rangeEndDate)
+        .or(`lease_end.is.null,lease_end.gte.${rangeStartDate}`);
 
       if (leasesError) {
         throw leasesError;
@@ -568,6 +955,45 @@ router.get('/timeseries', async (req: AnalyticsRequest, res: Response) => {
       const current = new Date(start.getFullYear(), start.getMonth(), 1);
       const endMonth = new Date(end.getFullYear(), end.getMonth(), 1);
 
+      // Fallback: if no lease timeline is available, use current unit status
+      // and derive a date-aware approximation using units.updated_at.
+      if (!leases || leases.length === 0) {
+        const { data: unitStatuses, error: unitStatusesError } = await supabase
+          .from('units')
+          .select('status, updated_at')
+          .eq('account_id', accountId);
+
+        if (unitStatusesError) {
+          throw unitStatusesError;
+        }
+
+        while (current <= endMonth) {
+          const monthStart = new Date(current.getFullYear(), current.getMonth(), 1);
+          const monthEnd = new Date(current.getFullYear(), current.getMonth() + 1, 0, 23, 59, 59, 999);
+          const cutoffMs = monthEnd.getTime();
+          const occupiedCount = (unitStatuses || []).filter((unit: any) => {
+            if (unit.status !== 'occupied') {
+              return false;
+            }
+            const updatedAtMs = unit.updated_at ? new Date(unit.updated_at).getTime() : Number.NaN;
+            if (!Number.isFinite(updatedAtMs)) {
+              return true;
+            }
+            return updatedAtMs <= cutoffMs;
+          }).length;
+          const fallbackRate = totalUnits > 0 ? (occupiedCount / totalUnits) * 100 : 0;
+
+          months.push({
+            month: monthStart.toISOString(),
+            value: Number(fallbackRate.toFixed(1)),
+            label: monthStart.toLocaleDateString('en-US', { month: 'short' })
+          });
+          current.setMonth(current.getMonth() + 1);
+        }
+
+        return res.json(months);
+      }
+
       while (current <= endMonth) {
         const monthStart = new Date(current.getFullYear(), current.getMonth(), 1);
         const monthEnd = new Date(current.getFullYear(), current.getMonth() + 1, 0, 23, 59, 59, 999);
@@ -576,7 +1002,7 @@ router.get('/timeseries', async (req: AnalyticsRequest, res: Response) => {
           (leases || [])
             .filter((lease: any) => {
               const leaseStart = new Date(lease.lease_start);
-              const leaseEnd = new Date(lease.lease_end);
+              const leaseEnd = lease.lease_end ? new Date(lease.lease_end) : new Date('9999-12-31T23:59:59.999Z');
               return leaseStart <= monthEnd && leaseEnd >= monthStart;
             })
             .map((lease: any) => lease.unit_id)
@@ -614,7 +1040,8 @@ router.get('/properties', async (req: AnalyticsRequest, res: Response) => {
       return res.status(401).json({ error: 'Authentication required' });
     }
 
-    const accountId = await getUserAccountId(userId);
+    const accountId = await resolveAnalyticsAccountId(req);
+    await reconcileStripeProcessingPayments(accountId);
     const { start, end } = getDateRange(range);
 
     const { data: properties, error: propertiesError } = await supabase
@@ -704,38 +1131,56 @@ router.get('/expenses/breakdown', async (req: AnalyticsRequest, res: Response) =
       return res.status(401).json({ error: 'Authentication required' });
     }
 
-    const accountId = await getUserAccountId(userId);
+    const accountId = await resolveAnalyticsAccountId(req);
+    await reconcileStripeProcessingPayments(accountId);
     const { start, end } = getDateRange(range);
 
-    let categoryTotals: Record<string, number> = {};
+    const maintenanceResult = await fetchMaintenanceCostsInRange({ accountId, start, end });
+    if (maintenanceResult.error) {
+      throw maintenanceResult.error;
+    }
 
-    const expenseResult = await fetchExpensesInRange({ accountId, start, end });
-    if (!expenseResult.error && expenseResult.data.length > 0) {
-      categoryTotals = expenseResult.data.reduce((acc: Record<string, number>, item: any) => {
-        const category = item.expense_categories?.name || 'Other';
-        acc[category] = (acc[category] || 0) + Number(item.amount || 0);
-        return acc;
-      }, {});
-    } else {
-      if (expenseResult.error) {
-        const message = String(expenseResult.error.message || '');
-        if (!message.includes('does not exist')) {
-          throw expenseResult.error;
-        }
-      }
-
-      const maintenanceResult = await fetchMaintenanceCostsInRange({ accountId, start, end });
-
-      if (maintenanceResult.error) {
-        throw maintenanceResult.error;
-      }
-
-      categoryTotals = maintenanceResult.data.reduce((acc: Record<string, number>, item: any) => {
+    let categoryTotals: Record<string, number> = maintenanceResult.data.reduce(
+      (acc: Record<string, number>, item: any) => {
         const category = item.category || 'Other';
         const value = item.actual_cost ?? item.estimated_cost ?? 0;
         acc[category] = (acc[category] || 0) + Number(value);
         return acc;
-      }, {});
+      },
+      {},
+    );
+
+    // Include rent collected from payment activity as requested.
+    const rentPaymentsResult = await fetchPaymentsInRange({
+      accountId,
+      start,
+      end,
+      select: '*',
+    });
+
+    if (rentPaymentsResult.error) {
+      throw rentPaymentsResult.error;
+    }
+
+    const rentCollected = (rentPaymentsResult.data || []).reduce((sum: number, payment: any) => {
+      const paymentType = String(payment.payment_type || payment.type || '').toLowerCase();
+      const paymentMethod = String(payment.payment_method || '').toLowerCase();
+      const description = String(payment.description || '').toLowerCase();
+
+      const isRentPayment =
+        paymentType === 'rent' ||
+        (paymentType.length === 0 &&
+          (paymentMethod === 'stripe' || paymentMethod === 'card' || description.includes('rent')));
+
+      if (!isRentPayment) {
+        return sum;
+      }
+
+      return sum + Number(payment.amount || 0);
+    }, 0);
+
+    if (rentCollected > 0) {
+      categoryTotals.Rent = (categoryTotals.Rent || 0) + rentCollected;
     }
 
     // Format for donut chart
@@ -763,7 +1208,7 @@ router.get('/expenses/breakdown', async (req: AnalyticsRequest, res: Response) =
  * GET /api/analytics/export
  * Exports analytics data as CSV for the given timeframe
  */
-router.get('/export', async (req: AnalyticsRequest, res: Response) => {
+router.get('/export', requireFeatureAccess('advanced_exports'), async (req: AnalyticsRequest, res: Response) => {
   try {
     const { range = '30d', format = 'csv' } = req.query;
     const userId = req.user?.id;
@@ -772,7 +1217,8 @@ router.get('/export', async (req: AnalyticsRequest, res: Response) => {
       return res.status(401).json({ error: 'Authentication required' });
     }
 
-    const accountId = await getUserAccountId(userId);
+    const accountId = await resolveAnalyticsAccountId(req);
+    await reconcileStripeProcessingPayments(accountId);
     const { start, end } = getDateRange(range as string);
 
     // Fetch comprehensive data for export

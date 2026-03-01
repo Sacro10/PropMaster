@@ -6,6 +6,7 @@ import { supabase } from '@/lib/supabase';
 interface NewApplicationFormProps {
   onClose: () => void;
   onSubmit: (data: ApplicationFormData) => Promise<void>;
+  initialValues?: Partial<ApplicationFormData>;
 }
 
 export interface ApplicationFormData {
@@ -25,7 +26,7 @@ export interface ApplicationFormData {
   criminalHistory: boolean | null;
 }
 
-export function NewApplicationForm({ onClose, onSubmit }: NewApplicationFormProps) {
+export function NewApplicationForm({ onClose, onSubmit, initialValues }: NewApplicationFormProps) {
   const { isDark, bg, text, border } = useThemeStyles();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [units, setUnits] = useState<any[]>([]);
@@ -47,6 +48,14 @@ export function NewApplicationForm({ onClose, onSubmit }: NewApplicationFormProp
     evictionHistory: null,
     criminalHistory: null,
   });
+
+  useEffect(() => {
+    if (!initialValues) return;
+    setFormData((prev) => ({
+      ...prev,
+      ...initialValues,
+    }));
+  }, [initialValues]);
 
   // Load available units
   useEffect(() => {

@@ -168,7 +168,7 @@ export const rateLimiters = {
   // General API rate limit
   api: rateLimit({
     windowMs: 15 * 60 * 1000, // 15 minutes
-    max: 100, // 100 requests per 15 min
+    max: 600, // 600 requests per 15 min
     keyGenerator: (req) => rateLimitKey(req, 'api'),
     message: 'Too many requests, please slow down',
   }),
@@ -176,8 +176,8 @@ export const rateLimiters = {
   // Analytics endpoints - allow reasonable query frequency
   analytics: rateLimit({
     windowMs: 5 * 60 * 1000, // 5 minutes
-    max: 30, // 30 analytics requests per 5 min
-    keyGenerator: (req) => rateLimitKey(req, 'analytics'),
+    max: 240, // 240 analytics requests per 5 min
+    keyGenerator: (req) => `${rateLimitKey(req, 'analytics')}:${req.path}`,
     message: 'Too many analytics requests, please try again later',
   }),
 };

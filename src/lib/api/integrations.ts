@@ -1,21 +1,9 @@
-import { supabase } from '../supabaseClient';
+import { fetchWithAuthRetry } from './client';
 
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3001';
 
-async function getAuthHeaders() {
-  const { data: { session } } = await supabase.auth.getSession();
-  if (!session) {
-    throw new Error('No active session');
-  }
-  return {
-    'Authorization': `Bearer ${session.access_token}`,
-    'Content-Type': 'application/json',
-  };
-}
-
 export async function getGmailStatus() {
-  const headers = await getAuthHeaders();
-  const response = await fetch(`${API_BASE}/api/integrations/gmail/status`, { headers });
+  const response = await fetchWithAuthRetry(`${API_BASE}/api/integrations/gmail/status`);
   if (!response.ok) {
     throw new Error('Failed to fetch Gmail status');
   }
@@ -23,10 +11,8 @@ export async function getGmailStatus() {
 }
 
 export async function getGmailConnectUrl() {
-  const headers = await getAuthHeaders();
-  const response = await fetch(`${API_BASE}/api/integrations/gmail/connect`, {
+  const response = await fetchWithAuthRetry(`${API_BASE}/api/integrations/gmail/connect`, {
     method: 'POST',
-    headers,
   });
   if (!response.ok) {
     throw new Error('Failed to start Gmail OAuth');
@@ -36,10 +22,8 @@ export async function getGmailConnectUrl() {
 }
 
 export async function syncGmailInbox(params?: { maxResults?: number; query?: string }) {
-  const headers = await getAuthHeaders();
-  const response = await fetch(`${API_BASE}/api/integrations/gmail/sync`, {
+  const response = await fetchWithAuthRetry(`${API_BASE}/api/integrations/gmail/sync`, {
     method: 'POST',
-    headers,
     body: JSON.stringify({
       maxResults: params?.maxResults,
       query: params?.query,

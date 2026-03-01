@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import { Permissions } from '../middleware/rbac';
+import { requirePlanAccess } from '../middleware/planAccess';
 import {
   getShowings,
   createShowing,
@@ -17,11 +18,13 @@ import {
 
 const router = Router();
 
+router.use(authenticate, requirePlanAccess('premium'));
+
 /**
  * GET /api/showings
  * List all showings
  */
-router.get('/', authenticate, Permissions.readShowings, async (req: AuthRequest, res) => {
+router.get('/', Permissions.readShowings, async (req: AuthRequest, res) => {
   try {
     if (!req.user?.accountId) {
       res.status(400).json({ error: 'Account ID required' });
@@ -53,7 +56,7 @@ router.get('/', authenticate, Permissions.readShowings, async (req: AuthRequest,
  * POST /api/showings
  * Create a new showing
  */
-router.post('/', authenticate, Permissions.createShowings, async (req: AuthRequest, res) => {
+router.post('/', Permissions.createShowings, async (req: AuthRequest, res) => {
   try {
     if (!req.user?.accountId) {
       res.status(400).json({ error: 'Account ID required' });
@@ -68,6 +71,7 @@ router.post('/', authenticate, Permissions.createShowings, async (req: AuthReque
       visitorName: req.body.visitorName,
       visitorEmail: req.body.visitorEmail,
       visitorPhone: req.body.visitorPhone,
+      accessCode: req.body.accessCode,
       agentName: req.body.agentName,
       notes: req.body.notes,
     };
@@ -107,7 +111,6 @@ router.post('/', authenticate, Permissions.createShowings, async (req: AuthReque
  */
 router.patch(
   '/:id/status',
-  authenticate,
   Permissions.updateShowings,
   async (req: AuthRequest, res) => {
     try {
@@ -141,7 +144,6 @@ router.patch(
  */
 router.post(
   '/:id/outcome',
-  authenticate,
   Permissions.updateShowings,
   async (req: AuthRequest, res) => {
     try {
@@ -186,7 +188,6 @@ router.post(
  */
 router.delete(
   '/:id',
-  authenticate,
   Permissions.updateShowings,
   async (req: AuthRequest, res) => {
     try {
@@ -212,7 +213,7 @@ router.delete(
  * GET /api/showings/stats
  * Get showing statistics for dashboard KPIs
  */
-router.get('/stats', authenticate, Permissions.readShowings, async (req: AuthRequest, res) => {
+router.get('/stats', Permissions.readShowings, async (req: AuthRequest, res) => {
   try {
     if (!req.user?.accountId) {
       res.status(400).json({ error: 'Account ID required' });
@@ -234,7 +235,7 @@ router.get('/stats', authenticate, Permissions.readShowings, async (req: AuthReq
  * GET /api/showings/available-units
  * Get available units for scheduling showings
  */
-router.get('/available-units', authenticate, Permissions.readShowings, async (req: AuthRequest, res) => {
+router.get('/available-units', Permissions.readShowings, async (req: AuthRequest, res) => {
   try {
     if (!req.user?.accountId) {
       res.status(400).json({ error: 'Account ID required' });
@@ -302,13 +303,6 @@ router.post(
       res.json({ success: true, message: 'Reminder sent successfully' });
     } catch (error) {
       console.error('Send reminder error:', error);
-      if (error instanceof Error && error.message === 'GMAIL_NOT_CONNECTED') {
-        res.status(400).json({
-          error: 'Gmail not connected',
-          code: 'GMAIL_NOT_CONNECTED',
-        });
-        return;
-      }
       res.status(500).json({
         error: 'Failed to send reminder',
         details: error instanceof Error ? error.message : 'Unknown error',

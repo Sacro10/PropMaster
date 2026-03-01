@@ -80,8 +80,8 @@ router.post(
           quantity: 1,
         },
       ],
-      success_url: `${config.frontendUrl}/app/settings?success=true&session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${config.frontendUrl}/app/settings?canceled=true`,
+      success_url: `${config.frontendUrl}/app/billing?success=true&session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${config.frontendUrl}/app/billing?canceled=true`,
       metadata: {
         account_id: accountId,
         user_id: userId,
@@ -133,7 +133,7 @@ router.post(
     // Create portal session
     const session = await stripe.billingPortal.sessions.create({
       customer: account.stripe_customer_id,
-      return_url: `${config.frontendUrl}/app/settings`,
+      return_url: `${config.frontendUrl}/app/billing`,
     });
 
     // Audit log

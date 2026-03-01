@@ -1,5 +1,6 @@
 import { X, User, DollarSign, Briefcase, MapPin, Calendar, CheckCircle2, XCircle, AlertCircle } from 'lucide-react';
 import { useThemeStyles } from '../hooks/useThemeStyles';
+import { useHasFeature } from '../hooks/usePlanGating';
 import { formatCurrency } from '../../lib/utils/currencyHelpers';
 import { formatDisplayDate } from '../../lib/utils/dateHelpers';
 
@@ -19,6 +20,7 @@ export function ApplicationDetailModal({
   isProcessing = false,
 }: ApplicationDetailModalProps) {
   const { isDark, bg, text, border } = useThemeStyles();
+  const aiScreeningAccess = useHasFeature('ai_risk_scoring');
 
   if (!application) return null;
 
@@ -219,7 +221,7 @@ export function ApplicationDetailModal({
           </div>
 
           {/* Screening Results */}
-          {screening && (
+          {screening && aiScreeningAccess.hasAccess && (
             <div>
               <h3 className="text-xl font-bold mb-4" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
                 SCREENING RESULTS

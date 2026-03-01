@@ -1,5 +1,5 @@
 import { Key, Clock, CircleCheck, Calendar, RefreshCw, Trash2 } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useHasFeature } from '../hooks/usePlanGating';
 import { useThemeStyles } from '../hooks/useThemeStyles';
 import { FeatureGate } from './UpgradeCTA';
@@ -11,9 +11,11 @@ import {
 } from '../../lib/hooks/useShowings';
 import { ScheduleShowingModal } from './ScheduleShowingModal';
 import { markShowingReminderSent, deleteShowing } from '../../lib/api/showings';
+import { useLocation } from 'react-router-dom';
 
 export function PropertyShowings() {
   const { isDark, text, border } = useThemeStyles();
+  const location = useLocation();
   const [sendingReminder, setSendingReminder] = useState<string | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedUnitId, setSelectedUnitId] = useState<string | undefined>(undefined);
@@ -102,6 +104,14 @@ export function PropertyShowings() {
   const hasExtraShowings = showings.length > 5;
   const visibleProperties = showAllProperties ? availableProperties : availableProperties.slice(0, 5);
   const hasExtraProperties = availableProperties.length > 5;
+  const highlightedShowingId = new URLSearchParams(location.search).get('showing');
+
+  useEffect(() => {
+    if (!highlightedShowingId) return;
+    const element = document.getElementById(`showing-${highlightedShowingId}`);
+    if (!element) return;
+    element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }, [highlightedShowingId, showings]);
 
   // Transform available properties for modal
   const modalUnits = availableProperties.map((prop) => ({
@@ -242,7 +252,8 @@ export function PropertyShowings() {
                   return (
                     <div
                       key={showing.id}
-                      className={`p-5 ${isDark ? 'bg-white/5 hover:bg-white/10' : 'bg-gray-50 hover:bg-gray-100'} rounded-lg border ${border.default} hover:border-[#ff6b35]/50 transition-all`}
+                      id={`showing-${showing.id}`}
+                      className={`p-5 ${isDark ? 'bg-white/5 hover:bg-white/10' : 'bg-gray-50 hover:bg-gray-100'} rounded-lg border ${highlightedShowingId === showing.id ? 'border-[#ff6b35] shadow-[0_0_0_1px_rgba(255,107,53,0.4)]' : border.default} hover:border-[#ff6b35]/50 transition-all`}
                     >
                       <div className="flex items-start justify-between mb-4">
                         <div className="flex-1">

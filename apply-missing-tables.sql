@@ -290,9 +290,9 @@ BEGIN
 END;
 $$;
 
-CREATE INDEX IF NOT EXISTS idx_maintenance_assignments_account ON maintenance_assignments(account_id);
-CREATE INDEX IF NOT EXISTS idx_maintenance_assignments_request ON maintenance_assignments(request_id);
-CREATE INDEX IF NOT EXISTS idx_maintenance_assignments_vendor ON maintenance_assignments(vendor_profile_id);
+CREATE INDEX IF NOT EXISTS idx_maintenance_assignments_account_id ON maintenance_assignments(account_id);
+CREATE INDEX IF NOT EXISTS idx_maintenance_assignments_request_id ON maintenance_assignments(request_id);
+CREATE INDEX IF NOT EXISTS idx_maintenance_assignments_vendor_id ON maintenance_assignments(vendor_profile_id);
 
 -- 3. Message Templates (from 003_complete_schema.sql)
 CREATE TABLE IF NOT EXISTS message_templates (
@@ -856,11 +856,11 @@ CREATE TABLE IF NOT EXISTS expenses (
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_expense_categories_account_name ON expense_categories(account_id, name);
-CREATE INDEX IF NOT EXISTS idx_expenses_account ON expenses(account_id);
-CREATE INDEX IF NOT EXISTS idx_expenses_date ON expenses(expense_date);
-CREATE INDEX IF NOT EXISTS idx_expenses_property ON expenses(property_id);
-CREATE INDEX IF NOT EXISTS idx_expenses_category ON expenses(category_id);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_expenses_maintenance_request ON expenses(maintenance_request_id);
+CREATE INDEX IF NOT EXISTS idx_expenses_account_id ON expenses(account_id);
+CREATE INDEX IF NOT EXISTS idx_expenses_expense_date ON expenses(expense_date);
+CREATE INDEX IF NOT EXISTS idx_expenses_property_id ON expenses(property_id);
+CREATE INDEX IF NOT EXISTS idx_expenses_category_id ON expenses(category_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_expenses_maintenance_request_id ON expenses(maintenance_request_id);
 
 -- Enable RLS + policies (account scoped)
 ALTER TABLE expense_categories ENABLE ROW LEVEL SECURITY;

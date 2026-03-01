@@ -4,29 +4,74 @@ import { Building, Mail, Lock, AlertCircle } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import { useThemeContext } from '../context/ThemeContext'
 import { SupabaseConfigBanner } from '../components/SupabaseConfigBanner'
+import {
+  clearSessionRoleIntent,
+  getSessionRoleIntent,
+  roleMatchesPortalIntent,
+  setActivePortalRoleIntent,
+  setSessionRoleIntent,
+} from '@/lib/portalRole'
 
 export function AuthPage() {
   const [isSignUp, setIsSignUp] = useState(false)
+  const [selectedRole, setSelectedRole] = useState<'owner' | 'tenant' | 'vendor'>('owner')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const [success, setSuccess] = useState('')
+  const [pendingRedirect, setPendingRedirect] = useState(false)
 
-  const { signIn, signUp, user } = useAuth()
+  const { signIn, signUp, signOut, user, role, isActive, loading: authLoading } = useAuth()
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const { theme } = useThemeContext()
   const isDark = theme === 'dark'
 
-  const returnTo = searchParams.get('returnTo') || '/'
+  const returnToParam = searchParams.get('returnTo')
+  const returnTo = returnToParam && returnToParam.startsWith('/') ? returnToParam : '/'
 
   // Redirect if already logged in
   useEffect(() => {
-    if (user) {
-      navigate(returnTo, { replace: true })
+    if (!user || authLoading) {
+      return
     }
-  }, [user, navigate, returnTo])
+
+    const roleIntent = getSessionRoleIntent()
+
+    if (roleIntent && !roleMatchesPortalIntent(roleIntent, role)) {
+      setPendingRedirect(false)
+      setError('That account does not have the selected role. Please choose the correct portal and sign in again.')
+      clearSessionRoleIntent()
+      void signOut()
+      return
+    }
+
+    if (pendingRedirect) {
+      setPendingRedirect(false)
+    }
+
+    if (!role) {
+      setError('We could not verify your account role. Please try again.')
+      return
+    }
+
+    const destination = role === 'tenant'
+      ? (isActive ? '/portal/tenant' : '/tenant/pending')
+      : role === 'vendor'
+        ? '/vendor/dashboard'
+        : returnTo !== '/'
+          ? returnTo
+          : '/app/dashboard'
+
+    if (role === 'tenant' || role === 'vendor') {
+      setActivePortalRoleIntent(role)
+    } else if (role) {
+      setActivePortalRoleIntent('owner')
+    }
+
+    navigate(destination, { replace: true })
+  }, [user, role, isActive, authLoading, navigate, pendingRedirect])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -54,19 +99,17 @@ export function AuthPage() {
           setError(signUpError.message)
         } else {
           setSuccess('Account created! Please check your email to verify your account.')
-          // Some Supabase setups auto-confirm, some require email verification
-          // If auto-confirm is enabled, user will be logged in automatically
-          setTimeout(() => {
-            navigate(returnTo, { replace: true })
-          }, 2000)
         }
       } else {
+        setSessionRoleIntent(selectedRole)
+        setActivePortalRoleIntent(selectedRole)
         const { error: signInError } = await signIn(email, password)
         if (signInError) {
           setError(signInError.message)
         } else {
-          // Successful login - AuthContext will update user state
-          // and the useEffect above will handle navigation
+          // Successful login - AuthContext will update user state,
+          // useEffect above will handle role-based navigation.
+          setPendingRedirect(true)
         }
       }
     } catch (err: any) {
@@ -129,6 +172,43 @@ export function AuthPage() {
           </p>
 
           <form onSubmit={handleSubmit} className="space-y-4">
+            {!isSignUp && (
+              <div>
+                <label className={`block text-sm mb-2 ${isDark ? 'text-white/70' : 'text-gray-700'}`} style={{ fontFamily: 'Work Sans, sans-serif' }}>
+                  I am a
+                </label>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  {[
+                    { value: 'owner', label: 'Property Owner' },
+                    { value: 'tenant', label: 'Tenant' },
+                    { value: 'vendor', label: 'Vendor' },
+                  ].map((option) => {
+                    const isSelected = selectedRole === option.value
+                    return (
+                      <button
+                        key={option.value}
+                        type="button"
+                        onClick={() => setSelectedRole(option.value as typeof selectedRole)}
+                        className={`px-3 py-2 rounded-lg border text-sm font-medium transition-colors ${
+                          isSelected
+                            ? 'border-[#ff6b35] bg-[#ff6b35]/10 text-[#ff6b35]'
+                            : isDark
+                              ? 'border-white/10 text-white/70 hover:border-white/30'
+                              : 'border-gray-200 text-gray-700 hover:border-gray-300'
+                        }`}
+                        style={{ fontFamily: 'Work Sans, sans-serif' }}
+                      >
+                        {option.label}
+                      </button>
+                    )
+                  })}
+                </div>
+                <p className={`text-xs mt-2 ${isDark ? 'text-white/40' : 'text-gray-400'}`} style={{ fontFamily: 'Work Sans, sans-serif' }}>
+                  We’ll verify your role from the database after you sign in.
+                </p>
+              </div>
+            )}
+
             {/* Email Input */}
             <div>
               <label className={`block text-sm mb-2 ${isDark ? 'text-white/70' : 'text-gray-700'}`} style={{ fontFamily: 'Work Sans, sans-serif' }}>

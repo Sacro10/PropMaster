@@ -1,5 +1,5 @@
 import { X } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useThemeStyles } from '../hooks/useThemeStyles';
 import { useCreateReminder, useUpdateReminder } from '../../lib/hooks/useCommunications';
 import type { AutomatedReminder } from '../../lib/api/communicationsClient';
@@ -114,6 +114,25 @@ export function NewReminderModal({
     { value: 'quarterly', label: 'Quarterly' },
     { value: 'custom', label: 'Custom Schedule' },
   ];
+
+  const filteredTenants = useMemo(() => {
+    const term = tenantSearch.trim().toLowerCase();
+    if (!term) return tenants || [];
+
+    return (tenants || []).filter((tenant) => {
+      const searchable = [
+        tenant.full_name || '',
+        tenant.email || '',
+        tenant.phone || '',
+        tenant.unit?.unit_number || '',
+        tenant.property?.name || '',
+      ]
+        .join(' ')
+        .toLowerCase();
+
+      return searchable.includes(term);
+    });
+  }, [tenantSearch, tenants]);
 
   const validateForm = () => {
     const newErrors: Record<string, string> = {};
@@ -398,6 +417,11 @@ export function NewReminderModal({
                     type="text"
                     value={tenantSearch}
                     onChange={(e) => setTenantSearch(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                      }
+                    }}
                     placeholder="Search tenants by name or email"
                     className={`w-full px-3 py-2 ${
                       isDark ? 'bg-white/5 border-white/10' : 'bg-gray-50 border-gray-300'
@@ -405,14 +429,7 @@ export function NewReminderModal({
                     style={{ fontFamily: 'Work Sans, sans-serif' }}
                   />
                   <div className="max-h-48 overflow-y-auto space-y-2">
-                    {(tenants || [])
-                      .filter((tenant) => {
-                        const term = tenantSearch.trim().toLowerCase();
-                        if (!term) return true;
-                        const name = (tenant.full_name || '').toLowerCase();
-                        const email = (tenant.email || '').toLowerCase();
-                        return name.includes(term) || email.includes(term);
-                      })
+                    {filteredTenants
                       .map((tenant) => {
                         const isChecked = formData.recipientIds.includes(tenant.user_id);
                         const emailMissing = !tenant.email;
@@ -437,6 +454,9 @@ export function NewReminderModal({
                           </label>
                         );
                       })}
+                    {filteredTenants.length === 0 && tenantSearch.trim().length > 0 && (
+                      <p className={`text-xs ${text.muted}`}>No tenants match that search.</p>
+                    )}
                     {(tenants || []).length === 0 && (
                       <p className={`text-xs ${text.muted}`}>No tenants available.</p>
                     )}

@@ -7,6 +7,69 @@ import { supabase } from '../supabaseClient';
 import { getCurrentAccountId, handleSupabaseError, getPaginationRange, calculatePaginationMeta, type PaginationParams } from './client';
 import type { PaginatedResponse } from './types';
 
+const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+const MANAGEMENT_ROLES = ['owner', 'admin', 'manager'];
+
+function pickPreferredManagerRecipient(records: Array<any>): string | null {
+  if (records.length === 0) return null;
+
+  const rolePriority = ['owner', 'admin', 'manager'];
+  const sorted = [...records].sort((a, b) => {
+    const roleScore = (role: string | null | undefined) => {
+      const index = rolePriority.indexOf(role || '');
+      return index === -1 ? rolePriority.length : index;
+    };
+    const roleDiff = roleScore(a.role) - roleScore(b.role);
+    if (roleDiff !== 0) return roleDiff;
+
+    const dateA = new Date(a.joined_at || a.created_at || 0).getTime();
+    const dateB = new Date(b.joined_at || b.created_at || 0).getTime();
+    return dateB - dateA;
+  });
+
+  const active = sorted.find((record) => record.is_active !== false) || sorted[0];
+  return active?.user_id || null;
+}
+
+function mapBackendMessageToRow(
+  raw: any,
+  fallback: {
+    accountId: string;
+    fromUserId: string;
+    toUserId: string;
+    subject?: string;
+    propertyId?: string;
+    unitId?: string;
+    maintenanceRequestId?: string;
+  }
+) {
+  if (!raw || typeof raw !== 'object') {
+    return null;
+  }
+
+  if (!('fromUserId' in raw) && !('toUserId' in raw) && !('createdAt' in raw)) {
+    return raw;
+  }
+
+  return {
+    id: raw.id,
+    account_id: raw.accountId || fallback.accountId,
+    from_user_id: raw.fromUserId || fallback.fromUserId,
+    to_user_id: raw.toUserId || fallback.toUserId,
+    unit_id: fallback.unitId || null,
+    property_id: fallback.propertyId || null,
+    maintenance_request_id: raw.maintenanceRequestId || fallback.maintenanceRequestId || null,
+    subject: raw.subject ?? fallback.subject ?? null,
+    body: raw.body || '',
+    attachments: [],
+    is_read: Boolean(raw.isRead),
+    read_at: raw.readAt || null,
+    parent_message_id: null,
+    thread_id: null,
+    created_at: raw.createdAt || new Date().toISOString(),
+  };
+}
+
 /**
  * Message with full details including sender/recipient info
  */
@@ -449,11 +512,111 @@ export async function sendMessage(messageData: {
       throw new Error('No user found');
     }
 
+    const { data: { session } } = await supabase.auth.getSession();
+    if (session) {
+      try {
+        const response = await fetch(`${API_BASE}/api/communications/messages`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${session.access_token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            recipientId: messageData.to_user_id,
+            subject: messageData.subject,
+            body: messageData.body,
+            propertyId: messageData.property_id,
+            unitId: messageData.unit_id,
+            maintenanceRequestId: messageData.maintenance_request_id,
+          }),
+        });
+
+        if (!response.ok) {
+          const contentType = response.headers.get('content-type');
+          if (contentType && contentType.includes('text/html')) {
+            throw new Error('API server is not available');
+          }
+          const payload = await response.json().catch(() => null);
+          throw new Error(payload?.details || payload?.error || `Failed to send message (${response.status})`);
+        }
+
+        const payload = await response.json().catch(() => null);
+        const mapped = mapBackendMessageToRow(payload, {
+          accountId,
+          fromUserId: user.id,
+          toUserId: messageData.to_user_id,
+          subject: messageData.subject,
+          propertyId: messageData.property_id,
+          unitId: messageData.unit_id,
+          maintenanceRequestId: messageData.maintenance_request_id,
+        });
+        if (mapped) {
+          return mapped;
+        }
+      } catch (apiError: any) {
+        const message = String(apiError?.message || '');
+        const isMaintenanceScoped = Boolean(messageData.maintenance_request_id);
+        const isPermissionDenied = message.toLowerCase().includes('insufficient permissions');
+        const shouldFallback =
+          message.includes('API server is not available') ||
+          message.includes('Failed to fetch') ||
+          message.includes('NetworkError') ||
+          (isMaintenanceScoped && isPermissionDenied);
+        if (!shouldFallback) {
+          throw apiError;
+        }
+        console.warn('[Communications API] Falling back to direct insert:', message);
+      }
+    }
+
+    let conversationId: string | null = null
+    try {
+      let conversationQuery = supabase
+        .from('conversations')
+        .select('id')
+        .eq('account_id', accountId)
+        .contains('participants', [user.id, messageData.to_user_id])
+        .eq('status', 'active')
+
+      if (messageData.maintenance_request_id) {
+        conversationQuery = conversationQuery
+          .eq('related_type', 'maintenance')
+          .eq('related_id', messageData.maintenance_request_id)
+      }
+
+      const { data: existingConversation } = await conversationQuery.limit(1).maybeSingle()
+      if (existingConversation?.id) {
+        conversationId = existingConversation.id
+      } else {
+        const { data: createdConversation, error: conversationError } = await supabase
+          .from('conversations')
+          .insert({
+            account_id: accountId,
+            participants: [user.id, messageData.to_user_id],
+            subject: messageData.subject || null,
+            property_id: messageData.property_id || null,
+            unit_id: messageData.unit_id || null,
+            related_type: messageData.maintenance_request_id ? 'maintenance' : null,
+            related_id: messageData.maintenance_request_id || null,
+            status: 'active',
+          })
+          .select('id')
+          .single()
+
+        if (!conversationError && createdConversation?.id) {
+          conversationId = createdConversation.id
+        }
+      }
+    } catch (conversationError) {
+      console.warn('[Communications API] Unable to resolve fallback conversation:', conversationError)
+    }
+
     const { data, error } = await supabase
       .from('messages')
       .insert({
         account_id: accountId,
         from_user_id: user.id,
+        conversation_id: conversationId,
         ...messageData,
       })
       .select()
@@ -463,10 +626,187 @@ export async function sendMessage(messageData: {
       throw handleSupabaseError(error, 'send message');
     }
 
+    if (conversationId && data?.created_at) {
+      await supabase
+        .from('conversations')
+        .update({
+          last_message_at: data.created_at,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', conversationId)
+        .eq('account_id', accountId)
+    }
+
     return data;
   } catch (error) {
     console.error('[Communications API] Error sending message:', error);
     throw error;
+  }
+}
+
+export async function getMessagesForRequest(maintenanceRequestId: string, limit = 50) {
+  try {
+    const accountId = await getCurrentAccountId();
+    if (!accountId) {
+      throw new Error('No account ID found');
+    }
+
+    const fetchLimit = Math.max(limit * 4, 100);
+
+    const { data: directMessages, error: directError } = await supabase
+      .from('messages')
+      .select('*')
+      .eq('account_id', accountId)
+      .eq('maintenance_request_id', maintenanceRequestId)
+      .order('created_at', { ascending: true })
+      .limit(fetchLimit);
+
+    if (directError) {
+      throw handleSupabaseError(directError, 'fetch request messages');
+    }
+
+    const conversationIds = Array.from(
+      new Set(
+        (directMessages || [])
+          .map((message: any) => (typeof message?.conversation_id === 'string' ? message.conversation_id : null))
+          .filter((id: string | null): id is string => Boolean(id))
+      )
+    );
+
+    let conversationMessages: any[] = [];
+    if (conversationIds.length > 0) {
+      const { data, error } = await supabase
+        .from('messages')
+        .select('*')
+        .eq('account_id', accountId)
+        .in('conversation_id', conversationIds)
+        .order('created_at', { ascending: true })
+        .limit(fetchLimit);
+
+      if (error) {
+        throw handleSupabaseError(error, 'fetch conversation request messages');
+      }
+
+      conversationMessages = data || [];
+    } else {
+      // Backward-compatible fallback for environments where conversation linkage is present
+      // but message.maintenance_request_id is not consistently populated.
+      const { data: maintenanceConversations, error: conversationError } = await supabase
+        .from('conversations')
+        .select('id')
+        .eq('account_id', accountId)
+        .eq('related_type', 'maintenance')
+        .eq('related_id', maintenanceRequestId)
+        .limit(10);
+
+      if (!conversationError && Array.isArray(maintenanceConversations) && maintenanceConversations.length > 0) {
+        const fallbackConversationIds = maintenanceConversations
+          .map((conversation: any) => String(conversation?.id || '').trim())
+          .filter((id: string) => Boolean(id));
+
+        if (fallbackConversationIds.length > 0) {
+          const { data, error } = await supabase
+            .from('messages')
+            .select('*')
+            .eq('account_id', accountId)
+            .in('conversation_id', fallbackConversationIds)
+            .order('created_at', { ascending: true })
+            .limit(fetchLimit);
+
+          if (error) {
+            throw handleSupabaseError(error, 'fetch fallback maintenance conversation messages');
+          }
+
+          conversationMessages = data || [];
+        }
+      }
+    }
+
+    const mergedMap = new Map<string, any>();
+    [...(directMessages || []), ...conversationMessages].forEach((message: any) => {
+      const id = String(message?.id || '').trim();
+      if (!id) return;
+      mergedMap.set(id, message);
+    });
+
+    const merged = Array.from(mergedMap.values()).sort(
+      (a: any, b: any) =>
+        new Date(String(a?.created_at || 0)).getTime() -
+        new Date(String(b?.created_at || 0)).getTime()
+    );
+
+    return merged.slice(-limit);
+  } catch (error) {
+    console.error('[Communications API] Error fetching request messages:', error);
+    throw error;
+  }
+}
+
+export async function getDefaultManagerRecipient(): Promise<string | null> {
+  try {
+    const accountId = await getCurrentAccountId();
+    if (!accountId) {
+      throw new Error('No account ID found');
+    }
+
+    const { data, error } = await supabase
+      .from('account_members')
+      .select('user_id, role, joined_at, created_at, is_active')
+      .eq('account_id', accountId)
+      .in('role', ['owner', 'admin', 'manager']);
+
+    if (error) {
+      throw handleSupabaseError(error, 'fetch account members');
+    }
+
+    const records = Array.isArray(data) ? data : data ? [data] : [];
+    return pickPreferredManagerRecipient(records);
+  } catch (error) {
+    console.error('[Communications API] Error resolving manager recipient:', error);
+    return null;
+  }
+}
+
+export async function getManagerRecipientForRequest(
+  maintenanceRequestId: string
+): Promise<string | null> {
+  try {
+    const accountId = await getCurrentAccountId();
+    if (!accountId) {
+      throw new Error('No account ID found');
+    }
+
+    const { data: requestData, error: requestError } = await supabase
+      .from('maintenance_requests')
+      .select('created_by_user_id')
+      .eq('id', maintenanceRequestId)
+      .eq('account_id', accountId)
+      .maybeSingle();
+
+    if (requestError) {
+      throw handleSupabaseError(requestError, 'fetch maintenance request recipient');
+    }
+
+    const candidateUserId = requestData?.created_by_user_id || null;
+    if (candidateUserId) {
+      const { data: candidateMember, error: candidateError } = await supabase
+        .from('account_members')
+        .select('user_id, role, is_active')
+        .eq('account_id', accountId)
+        .eq('user_id', candidateUserId)
+        .maybeSingle();
+
+      if (!candidateError && candidateMember?.is_active !== false) {
+        if (MANAGEMENT_ROLES.includes(candidateMember.role || '')) {
+          return candidateUserId;
+        }
+      }
+    }
+
+    return getDefaultManagerRecipient();
+  } catch (error) {
+    console.error('[Communications API] Error resolving request manager recipient:', error);
+    return getDefaultManagerRecipient();
   }
 }
 

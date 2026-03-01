@@ -2,6 +2,7 @@ import { randomBytes } from 'crypto';
 import { supabaseAdmin as supabase } from '../supabase';
 import { logActivityEvent } from './activityService';
 import { AiDisabledError, generateStructuredJson, getAiStatus } from './aiClient';
+import { buildTenantActionUrl, createNotifications, getAccountUsersByRoles } from './notificationService';
 
 function formatPropertyAddress(property: any) {
   if (!property) return '';
@@ -170,6 +171,7 @@ export interface CreateApplicationData {
   incomeVerificationStatus?: string;
   evictionHistory?: boolean | null;
   criminalHistory?: boolean | null;
+  applicantUserId?: string | null;
 }
 
 function isMissingScreeningRelationship(error: unknown): boolean {
@@ -375,6 +377,7 @@ export async function createApplication(
       account_id: accountId,
       unit_id: applicationData.unitId,
       property_id: unit.property_id,
+      applicant_user_id: applicationData.applicantUserId || null,
       full_name: fullName,
       email: applicationData.email,
       phone: applicationData.phone,
@@ -535,6 +538,19 @@ export async function approveApplication(
     if (profileError) throw profileError;
   }
 
+  await supabase
+    .from('account_members')
+    .update({ is_active: true })
+    .eq('account_id', accountId)
+    .eq('user_id', tenantUserId);
+
+  await supabase.auth.admin.updateUserById(tenantUserId, {
+    user_metadata: {
+      role: 'tenant',
+      membership_status: 'active',
+    },
+  });
+
   // 4. Create lease
   const leaseStart = new Date(application.moveInDate);
   const leaseEnd = new Date(leaseStart);
@@ -615,6 +631,36 @@ export async function approveApplication(
       },
     }
   );
+
+  try {
+    const ownerRecipients = await getAccountUsersByRoles(accountId, ['owner', 'manager', 'admin'], {
+      excludeUserIds: [userId],
+    });
+    if (ownerRecipients.length > 0) {
+      await createNotifications(
+        ownerRecipients.map((recipientId) => ({
+          accountId,
+          userId: recipientId,
+          type: 'system',
+          title: 'New tenant is active',
+          message: [
+            `${application.firstName} ${application.lastName} is now active.`,
+            `Property: ${data.property?.name || 'Property'}${data.unit?.unitNumber ? ` #${data.unit.unitNumber}` : ''}`,
+          ].join('\n'),
+          actionUrl: buildTenantActionUrl(tenantUserId),
+          relatedEntityType: 'tenant',
+          relatedEntityId: tenantUserId,
+          payload: {
+            tenantUserId,
+            applicationId,
+            leaseId: lease.id,
+          },
+        }))
+      );
+    }
+  } catch (notificationError) {
+    console.warn('[Applications] Failed to create tenant activation notifications:', notificationError);
+  }
 
   return mapApplicationRow(data);
 }

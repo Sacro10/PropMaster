@@ -5,8 +5,15 @@
 
 import { supabaseAdmin as supabase } from '../supabase';
 import { logActivityEvent } from './activityService';
-import { sendGmailMessage, listGmailInboxMessages } from './gmailService';
+import { listGmailInboxMessages } from './gmailService';
+import { sendResendEmail } from './emailService';
 import { AiDisabledError, generateText, getAiStatus } from './aiClient';
+import {
+  buildCommunicationActionUrl,
+  createNotifications,
+  getAccountRoleMap,
+  getUserDisplayName,
+} from './notificationService';
 
 // =========================================
 // TYPES
@@ -26,7 +33,9 @@ export interface Conversation {
   createdAt: string;
   updatedAt: string;
   lastMessage?: string;
+  lastMessageAttachments?: any[];
   unreadCount?: number;
+  otherParticipantId?: string | null;
 }
 
 export interface Message {
@@ -35,6 +44,7 @@ export interface Message {
   conversationId: string | null;
   fromUserId: string;
   toUserId: string | null;
+  maintenanceRequestId?: string | null;
   subject: string | null;
   body: string;
   isRead: boolean;
@@ -120,6 +130,7 @@ export interface CommunicationStats {
 }
 
 export interface PortalActivity {
+  activeConversations: number;
   messagesToday: number;
   unreadMessages: number;
   avgResponseTimeMinutes: number;
@@ -143,22 +154,104 @@ export async function getConversations(
   }
 ): Promise<{ conversations: Conversation[]; total: number }> {
   const { status, limit = 50, offset = 0 } = filters || {};
+  const managementRoles = new Set(['owner', 'manager', 'admin']);
+
+  const { data: currentMembership } = await supabase
+    .from('account_members')
+    .select('role')
+    .eq('account_id', accountId)
+    .eq('user_id', userId)
+    .maybeSingle();
+
+  const isManagementUser = managementRoles.has(String(currentMembership?.role || '').toLowerCase());
 
   let query = supabase
     .from('conversations')
     .select('*, properties(name), units(unit_number)', { count: 'exact' })
-    .eq('account_id', accountId)
-    .contains('participants', [userId]);
+    .eq('account_id', accountId);
+
+  if (!isManagementUser) {
+    query = query.contains('participants', [userId]);
+  }
 
   if (status) query = query.eq('status', status);
 
-  query = query
-    .order('last_message_at', { ascending: false, nullsFirst: false })
-    .range(offset, offset + limit - 1);
+  query = query.order('last_message_at', { ascending: false, nullsFirst: false });
 
   const { data, error, count } = await query;
 
   if (error) throw error;
+
+  const { data: orphanMessages, error: orphanMessagesError } = await supabase
+    .from('messages')
+    .select('id, subject, body, from_user_id, to_user_id, attachments, is_read, created_at')
+    .eq('account_id', accountId)
+    .is('conversation_id', null)
+    .order('created_at', { ascending: false })
+    .limit(100);
+
+  if (!isManagementUser) {
+    const { data: scopedOrphanMessages, error: scopedOrphanMessagesError } = await supabase
+      .from('messages')
+      .select('id, subject, body, from_user_id, to_user_id, attachments, is_read, created_at')
+      .eq('account_id', accountId)
+      .is('conversation_id', null)
+      .or(`from_user_id.eq.${userId},to_user_id.eq.${userId}`)
+      .order('created_at', { ascending: false })
+      .limit(100);
+
+    if (scopedOrphanMessagesError) {
+      console.warn('[Communications] Failed to load scoped orphan messages:', scopedOrphanMessagesError);
+    }
+
+    return getConversationsFromData({
+      accountId,
+      userId,
+      isManagementUser,
+      data,
+      count,
+      orphanMessages: scopedOrphanMessages || [],
+      limit,
+      offset,
+    });
+  }
+
+  if (orphanMessagesError) {
+    console.warn('[Communications] Failed to load orphan messages:', orphanMessagesError);
+  }
+
+  return getConversationsFromData({
+    accountId,
+    userId,
+    isManagementUser,
+    data,
+    count,
+    orphanMessages: orphanMessages || [],
+    limit,
+    offset,
+  });
+}
+
+async function getConversationsFromData({
+  accountId,
+  userId,
+  isManagementUser,
+  data,
+  count,
+  orphanMessages,
+  limit,
+  offset,
+}: {
+  accountId: string;
+  userId: string;
+  isManagementUser: boolean;
+  data: any[] | null;
+  count: number | null;
+  orphanMessages: any[];
+  limit: number;
+  offset: number;
+}): Promise<{ conversations: Conversation[]; total: number }> {
+  const managementRoles = new Set(['owner', 'manager', 'admin']);
 
   const participantIds = new Set<string>();
   (data || []).forEach((conv: any) => {
@@ -168,26 +261,142 @@ export async function getConversations(
       }
     });
   });
+  (orphanMessages || []).forEach((message: any) => {
+    const otherParticipantId =
+      message.from_user_id === userId ? message.to_user_id : message.from_user_id;
+    if (otherParticipantId && otherParticipantId !== userId) {
+      participantIds.add(otherParticipantId);
+    }
+  });
 
-  const participantMap = new Map<string, { fullName: string | null; email: string | null }>();
+  const participantMap = new Map<
+    string,
+    { fullName: string | null; email: string | null; role: string | null }
+  >();
+  const participantRoleMap = new Map<string, string | null>();
+  const normalizeRole = (role: string | null | undefined) => String(role || '').toLowerCase();
+  const isManagementRole = (role: string | null | undefined) => managementRoles.has(normalizeRole(role));
   if (participantIds.size > 0) {
-    const { data: participants, error: participantsError } = await supabase
-      .from('tenant_profiles')
-      .select('user_id, full_name, email')
-      .eq('account_id', accountId)
-      .in('user_id', Array.from(participantIds));
+    const participantIdList = Array.from(participantIds);
+    const [
+      { data: tenantParticipants, error: tenantParticipantsError },
+      { data: vendorParticipants, error: vendorParticipantsError },
+      { data: participantMemberships, error: participantMembershipsError },
+    ] = await Promise.all([
+      supabase
+        .from('tenant_profiles')
+        .select('user_id, full_name, email')
+        .eq('account_id', accountId)
+        .in('user_id', participantIdList),
+      supabase
+        .from('vendor_profiles')
+        .select('user_id, business_name, email')
+        .eq('account_id', accountId)
+        .in('user_id', participantIdList),
+      supabase
+        .from('account_members')
+        .select('user_id, role')
+        .eq('account_id', accountId)
+        .in('user_id', participantIdList),
+    ]);
 
-    if (participantsError) {
-      console.warn('[Communications] Failed to load participant profiles:', participantsError);
+    if (tenantParticipantsError) {
+      console.warn('[Communications] Failed to load tenant participant profiles:', tenantParticipantsError);
     } else {
-      (participants || []).forEach((participant: any) => {
+      (tenantParticipants || []).forEach((participant: any) => {
         participantMap.set(participant.user_id, {
           fullName: participant.full_name || null,
           email: participant.email || null,
+          role: 'tenant',
         });
       });
     }
+
+    if (vendorParticipantsError) {
+      console.warn('[Communications] Failed to load vendor participant profiles:', vendorParticipantsError);
+    } else {
+      (vendorParticipants || []).forEach((participant: any) => {
+        const existing = participantMap.get(participant.user_id);
+        participantMap.set(participant.user_id, {
+          fullName: participant.business_name || existing?.fullName || null,
+          email: participant.email || existing?.email || null,
+          role: existing?.role || 'vendor',
+        });
+      });
+    }
+
+    if (participantMembershipsError) {
+      console.warn('[Communications] Failed to load participant membership roles:', participantMembershipsError);
+    } else {
+      (participantMemberships || []).forEach((membership: any) => {
+        participantRoleMap.set(membership.user_id, membership.role || null);
+      });
+    }
   }
+
+  const resolveParticipantPresentation = (
+    displayParticipantId: string | null,
+    lastMessageBody?: string | null
+  ) => {
+    const participantProfile = displayParticipantId
+      ? participantMap.get(displayParticipantId)
+      : undefined;
+    const participantRole =
+      participantProfile?.role || (displayParticipantId ? participantRoleMap.get(displayParticipantId) : null) || null;
+    let participantName =
+      participantProfile?.fullName ||
+      participantProfile?.email ||
+      (participantRole === 'vendor'
+        ? 'Vendor'
+        : participantRole === 'tenant'
+          ? 'Tenant'
+          : participantRole === 'owner' || participantRole === 'manager' || participantRole === 'admin'
+            ? 'Management'
+            : 'Contact');
+    if (
+      participantRole === 'vendor' &&
+      (!participantProfile?.fullName || participantName === 'Vendor' || participantName === 'Contact') &&
+      typeof lastMessageBody === 'string'
+    ) {
+      const inferredVendorName = lastMessageBody.match(/^(.+?)\s+uploaded new work photos/i)?.[1]?.trim();
+      if (inferredVendorName) {
+        participantName = inferredVendorName;
+      }
+    }
+
+    return {
+      participantRole,
+      participantName,
+      participantEmail: participantProfile?.email || null,
+    };
+  };
+
+  const resolveDisplayParticipantId = (
+    participants: string[],
+    lastMessageSenderId?: string | null
+  ) => {
+    if (!Array.isArray(participants) || participants.length === 0) {
+      return null;
+    }
+
+    if (!isManagementUser) {
+      if (lastMessageSenderId && lastMessageSenderId !== userId) {
+        return lastMessageSenderId;
+      }
+      return participants.find((participantId) => participantId && participantId !== userId) || null;
+    }
+
+    if (lastMessageSenderId && !isManagementRole(participantRoleMap.get(lastMessageSenderId))) {
+      return lastMessageSenderId;
+    }
+
+    return (
+      participants.find((participantId) => participantId && !isManagementRole(participantRoleMap.get(participantId))) ||
+      participants.find((participantId) => participantId && participantId !== userId) ||
+      participants[0] ||
+      null
+    );
+  };
 
   // Get last message and unread count for each conversation
   const conversationsWithDetails = await Promise.all(
@@ -195,7 +404,7 @@ export async function getConversations(
       // Get last message
       const { data: lastMsg } = await supabase
         .from('messages')
-        .select('body')
+        .select('body, from_user_id, attachments')
         .eq('conversation_id', conv.id)
         .order('created_at', { ascending: false })
         .limit(1)
@@ -209,15 +418,15 @@ export async function getConversations(
         .eq('to_user_id', userId)
         .eq('is_read', false);
 
-      const otherParticipantId = (conv.participants || []).find(
-        (participantId: string) => participantId && participantId !== userId
-      );
-      const participantProfile = otherParticipantId
-        ? participantMap.get(otherParticipantId)
-        : undefined;
-      const tenantName =
-        participantProfile?.fullName || participantProfile?.email || 'Tenant';
-      const tenantEmail = participantProfile?.email || null;
+      const lastMessageSenderId = lastMsg?.from_user_id || null;
+      const displayParticipantId = resolveDisplayParticipantId(conv.participants || [], lastMessageSenderId);
+
+      const {
+        participantRole,
+        participantName,
+        participantEmail,
+      } = resolveParticipantPresentation(displayParticipantId, lastMsg?.body || null);
+      const resolvedOtherParticipantId = displayParticipantId;
 
       return {
         id: conv.id,
@@ -233,18 +442,70 @@ export async function getConversations(
         createdAt: conv.created_at,
         updatedAt: conv.updated_at,
         lastMessage: lastMsg?.body || null,
+        lastMessageAttachments: Array.isArray(lastMsg?.attachments) ? lastMsg.attachments : [],
         unreadCount: unreadCount || 0,
-        tenant_name: tenantName,
-        tenant_email: tenantEmail,
+        otherParticipantId: resolvedOtherParticipantId,
+        other_participant_id: resolvedOtherParticipantId,
+        sender_name: participantName,
+        participant_name: participantName,
+        participant_role: participantRole,
+        tenant_name: participantName,
+        tenant_email: participantEmail,
         property_name: conv.properties?.name || null,
         unit_number: conv.units?.unit_number || null,
       };
     })
   );
 
+  const orphanConversationDetails = (orphanMessages || []).map((message: any) => {
+    const otherParticipantId = resolveDisplayParticipantId(
+      [message.from_user_id, message.to_user_id].filter(Boolean),
+      message.from_user_id || null
+    );
+    const {
+      participantRole,
+      participantName,
+      participantEmail,
+    } = resolveParticipantPresentation(otherParticipantId || null, message.body || null);
+
+    return {
+      id: `legacy-${message.id}`,
+      accountId,
+      subject: message.subject || null,
+      participants: [message.from_user_id, message.to_user_id].filter(Boolean),
+      propertyId: null,
+      unitId: null,
+      relatedType: null,
+      relatedId: null,
+      status: 'active' as const,
+      lastMessageAt: message.created_at,
+      createdAt: message.created_at,
+      updatedAt: message.created_at,
+      lastMessage: message.body || null,
+      lastMessageAttachments: Array.isArray(message.attachments) ? message.attachments : [],
+      unreadCount: message.to_user_id === userId && message.is_read === false ? 1 : 0,
+      otherParticipantId: otherParticipantId || null,
+      other_participant_id: otherParticipantId || null,
+      sender_name: participantName,
+      participant_name: participantName,
+      participant_role: participantRole,
+      tenant_name: participantName,
+      tenant_email: participantEmail,
+      property_name: null,
+      unit_number: null,
+    };
+  });
+
+  const mergedConversations = [...conversationsWithDetails, ...orphanConversationDetails]
+    .sort(
+      (a, b) =>
+        new Date(b.lastMessageAt || b.createdAt).getTime() -
+        new Date(a.lastMessageAt || a.createdAt).getTime()
+    );
+
   return {
-    conversations: conversationsWithDetails,
-    total: count || 0,
+    conversations: mergedConversations.slice(offset, offset + limit),
+    total: (count || 0) + orphanConversationDetails.length,
   };
 }
 
@@ -376,6 +637,7 @@ export async function getConversationMessages(
       conversationId: m.conversation_id,
       fromUserId: m.from_user_id,
       toUserId: m.to_user_id,
+      maintenanceRequestId: m.maintenance_request_id ?? null,
       subject: m.subject,
       body: m.body,
       isRead: m.is_read,
@@ -402,6 +664,18 @@ export async function sendMessage(
     conversationId?: string;
     propertyId?: string;
     unitId?: string;
+    maintenanceRequestId?: string;
+    attachments?: Array<{
+      url?: string;
+      publicUrl?: string;
+      fileName?: string;
+      file_name?: string;
+      name?: string;
+      contentType?: string | null;
+      content_type?: string | null;
+      size?: number | null;
+      file_size?: number | null;
+    }>;
   }
 ): Promise<Message> {
   // Get or create conversation
@@ -412,8 +686,53 @@ export async function sendMessage(
       subject: data.subject,
       propertyId: data.propertyId,
       unitId: data.unitId,
+      relatedType: data.maintenanceRequestId ? 'maintenance' : undefined,
+      relatedId: data.maintenanceRequestId,
     });
   }
+
+  // If replying in an existing conversation, inherit maintenance linkage when missing.
+  let resolvedMaintenanceRequestId = data.maintenanceRequestId || null;
+  if (!resolvedMaintenanceRequestId && conversationId) {
+    const { data: conversationContext } = await supabase
+      .from('conversations')
+      .select('related_type, related_id')
+      .eq('id', conversationId)
+      .eq('account_id', accountId)
+      .maybeSingle();
+
+    if (
+      conversationContext?.related_type === 'maintenance' &&
+      typeof conversationContext.related_id === 'string' &&
+      conversationContext.related_id.trim().length > 0
+    ) {
+      resolvedMaintenanceRequestId = conversationContext.related_id.trim();
+    }
+  }
+
+  const normalizedAttachments = Array.isArray(data.attachments)
+    ? data.attachments
+        .map((attachment) => {
+          const url = attachment?.url || attachment?.publicUrl || null;
+          if (!url) return null;
+          return {
+            url,
+            fileName:
+              attachment?.fileName ||
+              attachment?.file_name ||
+              attachment?.name ||
+              'Attachment',
+            contentType: attachment?.contentType || attachment?.content_type || null,
+            size: attachment?.size || attachment?.file_size || null,
+          };
+        })
+        .filter((attachment): attachment is {
+          url: string;
+          fileName: string;
+          contentType: string | null;
+          size: number | null;
+        } => Boolean(attachment))
+    : [];
 
   const { data: message, error } = await supabase
     .from('messages')
@@ -424,6 +743,8 @@ export async function sendMessage(
       to_user_id: data.recipientId,
       subject: data.subject,
       body: data.body,
+      attachments: normalizedAttachments,
+      maintenance_request_id: resolvedMaintenanceRequestId,
       is_read: false,
     })
     .select()
@@ -471,12 +792,11 @@ export async function sendMessage(
   try {
     const recipientEmail = await resolveRecipientEmail();
     if (recipientEmail) {
-      await sendGmailMessage({
-        accountId,
-        userId: senderId,
+      const subject = data.subject || 'New message';
+      await sendResendEmail({
         to: recipientEmail,
-        subject: data.subject || 'New message',
-        body: data.body,
+        subject,
+        text: data.body,
       });
 
       await logOutboundMessage({
@@ -486,11 +806,11 @@ export async function sendMessage(
         recipient_user_id: data.recipientId,
         recipient_id: data.recipientId,
         recipient_email: recipientEmail,
-        subject: data.subject || 'New message',
+        subject,
         body: data.body,
         channel: 'email',
         status: 'sent',
-        provider: 'gmail',
+        provider: 'resend',
         sent_at: new Date().toISOString(),
         retry_count: 0,
         created_at: new Date().toISOString(),
@@ -508,7 +828,7 @@ export async function sendMessage(
       body: data.body,
       channel: 'email',
       status: 'failed',
-      provider: 'gmail',
+      provider: 'resend',
       error_message: error instanceof Error ? error.message : 'Unknown error',
       retry_count: 0,
       created_at: new Date().toISOString(),
@@ -532,12 +852,42 @@ export async function sendMessage(
     }
   );
 
+  try {
+    const roleMap = await getAccountRoleMap(accountId, [data.recipientId]);
+    const recipientRole = roleMap.get(data.recipientId) || null;
+    const senderName = await getUserDisplayName(accountId, senderId);
+    await createNotifications([
+      {
+        accountId,
+        userId: data.recipientId,
+        type: 'message',
+        title: senderName ? `New message from ${senderName}` : 'New message',
+        message: (data.body || '').trim().slice(0, 220) || data.subject || 'Open the conversation to view the message.',
+        actionUrl: buildCommunicationActionUrl(
+          recipientRole,
+          conversationId,
+          resolvedMaintenanceRequestId
+        ),
+        relatedEntityType: 'message',
+        relatedEntityId: message.id,
+        payload: {
+          conversationId,
+          maintenanceRequestId: resolvedMaintenanceRequestId,
+          senderId,
+        },
+      },
+    ]);
+  } catch (notificationError) {
+    console.warn('[Communications] Failed to create in-app message notification:', notificationError);
+  }
+
   return {
     id: message.id,
     accountId: message.account_id,
     conversationId: message.conversation_id,
     fromUserId: message.from_user_id,
     toUserId: message.to_user_id,
+    maintenanceRequestId: message.maintenance_request_id ?? null,
     subject: message.subject,
     body: message.body,
     isRead: message.is_read,
@@ -1148,23 +1498,66 @@ export async function getCommunicationStats(
 /**
  * Get portal activity stats
  */
-export async function getPortalActivity(accountId: string): Promise<PortalActivity> {
+export async function getPortalActivity(accountId: string, userId: string): Promise<PortalActivity> {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
 
-  // Messages today
-  const { count: messagesToday } = await supabase
-    .from('messages')
-    .select('*', { count: 'exact', head: true })
+  const { data: conversations, error: conversationsError } = await supabase
+    .from('conversations')
+    .select('id, status, updated_at')
     .eq('account_id', accountId)
+    .contains('participants', [userId]);
+
+  if (conversationsError) {
+    throw conversationsError;
+  }
+
+  const scopedConversations = conversations || [];
+  const conversationIds = scopedConversations.map((conversation: any) => conversation.id).filter(Boolean);
+  const activeConversations = scopedConversations.filter((conversation: any) => conversation.status === 'active').length;
+  const resolvedToday = scopedConversations.filter((conversation: any) => {
+    if (conversation.status !== 'resolved' || !conversation.updated_at) {
+      return false;
+    }
+    const updatedAt = new Date(conversation.updated_at);
+    return !Number.isNaN(updatedAt.getTime()) && updatedAt >= today;
+  }).length;
+
+  if (conversationIds.length === 0) {
+    return {
+      activeConversations,
+      messagesToday: 0,
+      unreadMessages: 0,
+      avgResponseTimeMinutes: 0,
+      resolvedToday,
+    };
+  }
+
+  // Messages received today, counted as unique senders (not raw message rows)
+  const { data: messagesTodayRows, error: messagesTodayError } = await supabase
+    .from('messages')
+    .select('from_user_id')
+    .eq('account_id', accountId)
+    .eq('to_user_id', userId)
+    .in('conversation_id', conversationIds)
     .gte('created_at', today.toISOString());
 
-  // Unread messages
-  const { count: unreadMessages } = await supabase
+  if (messagesTodayError) {
+    throw messagesTodayError;
+  }
+
+  // Unread messages, counted as unique senders
+  const { data: unreadRows, error: unreadError } = await supabase
     .from('messages')
-    .select('*', { count: 'exact', head: true })
+    .select('from_user_id')
     .eq('account_id', accountId)
+    .eq('to_user_id', userId)
+    .in('conversation_id', conversationIds)
     .eq('is_read', false);
+
+  if (unreadError) {
+    throw unreadError;
+  }
 
   // Average response time (last 7 days)
   const { data: avgResponseData } = await supabase.rpc(
@@ -1175,17 +1568,24 @@ export async function getPortalActivity(accountId: string): Promise<PortalActivi
     }
   );
 
-  // Resolved today
-  const { count: resolvedToday } = await supabase
-    .from('conversations')
-    .select('*', { count: 'exact', head: true })
-    .eq('account_id', accountId)
-    .eq('status', 'resolved')
-    .gte('updated_at', today.toISOString());
+  const uniqueSenderCount = (rows: Array<{ from_user_id?: string | null }> | null | undefined) => {
+    const senders = new Set<string>();
+    (rows || []).forEach((row) => {
+      const sender = (row as any)?.from_user_id;
+      if (typeof sender === 'string' && sender.length > 0) {
+        senders.add(sender);
+      }
+    });
+    return senders.size;
+  };
+
+  const messagesToday = uniqueSenderCount(messagesTodayRows as any[]);
+  const unreadMessages = uniqueSenderCount(unreadRows as any[]);
 
   return {
-    messagesToday: messagesToday || 0,
-    unreadMessages: unreadMessages || 0,
+    activeConversations,
+    messagesToday,
+    unreadMessages,
     avgResponseTimeMinutes: Math.round(avgResponseData || 0),
     resolvedToday: resolvedToday || 0,
   };
@@ -1243,14 +1643,50 @@ export async function sendOutboundMessage(
 
   if (error) throw error;
 
-  // TODO: Integrate with actual email/SMS provider
-  // For now, mark as sent immediately (stub)
+  let status: 'pending' | 'sent' | 'failed' = 'pending';
+  let provider = 'stub';
+  let providerMessageId: string | null = null;
+  let sentAt: string | null = null;
+  let failedAt: string | null = null;
+  let errorMessage: string | null = null;
+
+  if (data.channel === 'email') {
+    provider = 'resend';
+
+    if (!recipientEmail) {
+      status = 'failed';
+      failedAt = new Date().toISOString();
+      errorMessage = 'Recipient email missing';
+    } else {
+      try {
+        const result = await sendResendEmail({
+          to: recipientEmail,
+          subject: data.subject || 'New message',
+          text: data.body,
+        });
+        status = 'sent';
+        sentAt = new Date().toISOString();
+        providerMessageId = result.id || null;
+      } catch (sendError) {
+        status = 'failed';
+        failedAt = new Date().toISOString();
+        errorMessage = sendError instanceof Error ? sendError.message : 'Email send failed';
+      }
+    }
+  } else {
+    status = 'sent';
+    sentAt = new Date().toISOString();
+  }
+
   await supabase
     .from('outbound_messages')
     .update({
-      status: 'sent',
-      sent_at: new Date().toISOString(),
-      provider: 'stub',
+      status,
+      provider,
+      provider_message_id: providerMessageId,
+      sent_at: sentAt,
+      failed_at: failedAt,
+      error_message: errorMessage,
     })
     .eq('id', outbound.id);
 
@@ -1266,14 +1702,14 @@ export async function sendOutboundMessage(
     subject: outbound.subject,
     body: outbound.body,
     channel: outbound.channel,
-    status: 'sent',
-    provider: 'stub',
-    providerMessageId: null,
-    sentAt: new Date().toISOString(),
+    status,
+    provider,
+    providerMessageId,
+    sentAt,
     deliveredAt: null,
-    failedAt: null,
-    errorMessage: null,
-    retryCount: 0,
+    failedAt,
+    errorMessage,
+    retryCount: outbound.retry_count || 0,
   };
 }
 
@@ -1334,7 +1770,7 @@ export async function generateMessageSuggestion(
     conversationId: string;
     intent?: string;
   }
-): Promise<{ suggestion: string; provider: string | null }> {
+): Promise<{ suggestion: string; provider: string | null; error?: string | null }> {
   const { data: messages } = await supabase
     .from('messages')
     .select('id, subject, body, from_user_id, to_user_id, created_at')
@@ -1344,7 +1780,13 @@ export async function generateMessageSuggestion(
     .limit(10);
 
   const aiStatus = getAiStatus();
-  const fallbackSuggestion = buildFallbackSuggestion(messages || []);
+  if (!aiStatus.enabled) {
+    return {
+      suggestion: '',
+      provider: null,
+      error: `AI disabled. Missing: ${aiStatus.missingEnvVars.join(', ')}`,
+    };
+  }
 
   try {
     const suggestion = await generateText(
@@ -1363,27 +1805,57 @@ export async function generateMessageSuggestion(
       }
     );
 
+    if (!suggestion?.trim()) {
+      return {
+        suggestion: '',
+        provider: aiStatus.provider,
+        error: 'AI returned an empty suggestion.',
+      };
+    }
+
     return {
-      suggestion: suggestion || fallbackSuggestion,
-      provider: aiStatus.provider || (suggestion || fallbackSuggestion ? 'template' : null),
+      suggestion: suggestion.trim(),
+      provider: aiStatus.provider,
+      error: null,
     };
   } catch (error) {
+    const errorMessage = describeAiFailure(error);
     if (!(error instanceof AiDisabledError)) {
-      console.warn('[Communications] AI suggestion failed:', error);
+      console.warn('[Communications] AI suggestion failed:', errorMessage);
     }
     return {
-      suggestion: fallbackSuggestion,
-      provider: aiStatus.provider || (fallbackSuggestion ? 'template' : null),
+      suggestion: '',
+      provider: aiStatus.provider,
+      error: errorMessage,
     };
   }
 }
 
-function buildFallbackSuggestion(
-  messages: Array<{ subject?: string | null; body?: string | null }>
-): string {
-  if (!messages.length) {
-    return 'Thanks for reaching out. I received your message and will follow up shortly.';
+function describeAiFailure(error: unknown): string {
+  if (error instanceof AiDisabledError) {
+    if (error.missingEnvVars?.length) {
+      return `AI disabled. Missing: ${error.missingEnvVars.join(', ')}`;
+    }
+    return 'AI disabled.';
   }
 
-  return 'Thanks for the update. I will review this and get back to you shortly.';
+  if (error instanceof Error) {
+    const sanitized = error.message
+      .replace(/sk-[A-Za-z0-9-_]+/g, '[redacted]')
+      .replace(/Bearer\s+[A-Za-z0-9\-._~+/=]+/gi, 'Bearer [redacted]');
+
+    const quotaExceeded =
+      /\b429\b/.test(sanitized) ||
+      /insufficient_quota/i.test(sanitized) ||
+      /exceeded your current quota/i.test(sanitized) ||
+      /billing details/i.test(sanitized);
+
+    if (quotaExceeded) {
+      return 'AI provider quota exceeded. Add API credits/billing or switch providers, then retry.';
+    }
+
+    return sanitized || 'AI request failed.';
+  }
+
+  return 'AI request failed.';
 }

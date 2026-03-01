@@ -4,7 +4,15 @@
  */
 
 import { supabase } from '../supabaseClient';
-import { fetchJsonWithRetry, getCurrentAccountId, handleSupabaseError, getPaginationRange, calculatePaginationMeta, type PaginationParams } from './client';
+import {
+  fetchJsonWithRetry,
+  getAccessToken,
+  getCurrentAccountId,
+  handleSupabaseError,
+  getPaginationRange,
+  calculatePaginationMeta,
+  type PaginationParams,
+} from './client';
 import type { ShowingWithDetails, PaginatedResponse } from './types';
 
 // API base URL
@@ -20,20 +28,17 @@ export async function getUpcomingShowings(params: PaginationParams = {}) {
       throw new Error('No account ID found');
     }
 
-    // Get current user session for auth token
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session) {
-      throw new Error('No active session');
-    }
+    const accessToken = await getAccessToken();
+    if (!accessToken) throw new Error('No active session');
 
     const url = `${API_BASE}/api/showings?status=scheduled,confirmed&limit=50`;
     const response = await fetchJsonWithRetry<{ showings?: any[]; total?: number }>(url, {
       headers: {
-        'Authorization': `Bearer ${session.access_token}`,
+        'Authorization': `Bearer ${accessToken}`,
         'Content-Type': 'application/json',
       },
     }, {
-      cacheKey: `${url}|${session.access_token}`,
+      cacheKey: `${url}|${accessToken}`,
       cacheTtlMs: 10000,
       retries: 1,
     });
@@ -88,19 +93,17 @@ export async function getAvailableProperties() {
       throw new Error('No account ID found');
     }
 
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session) {
-      throw new Error('No active session');
-    }
+    const accessToken = await getAccessToken();
+    if (!accessToken) throw new Error('No active session');
 
     const url = `${API_BASE}/api/showings/available-units`;
     const response = await fetchJsonWithRetry<any[]>(url, {
       headers: {
-        'Authorization': `Bearer ${session.access_token}`,
+        'Authorization': `Bearer ${accessToken}`,
         'Content-Type': 'application/json',
       },
     }, {
-      cacheKey: `${url}|${session.access_token}`,
+      cacheKey: `${url}|${accessToken}`,
       cacheTtlMs: 10000,
       retries: 1,
     });
@@ -205,6 +208,7 @@ export async function createShowing(data: {
   visitor_phone?: string;
   showing_date: string;
   showing_type: 'self_guided' | 'agent_assisted' | 'virtual';
+  access_code?: string;
   notes?: string;
 }) {
   try {
@@ -231,6 +235,7 @@ export async function createShowing(data: {
         visitorName: data.visitor_name,
         visitorEmail: data.visitor_email,
         visitorPhone: data.visitor_phone,
+        accessCode: data.access_code?.trim() || undefined,
         notes: data.notes,
       }),
     });

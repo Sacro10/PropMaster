@@ -1,0 +1,128 @@
+-- Fixes requested:
+-- 1) auth_leaked_password_protection (manual dashboard action; not SQL-configurable in Postgres)
+-- 2) Drop unused indexes from the provided linter report
+--
+-- IMPORTANT:
+-- Dropping indexes can re-introduce unindexed_foreign_keys warnings and may degrade write/query performance.
+-- Apply only if you explicitly want to clear these current unused_index findings.
+
+BEGIN;
+
+DO $do$
+DECLARE
+  idx_name TEXT;
+BEGIN
+  FOREACH idx_name IN ARRAY ARRAY[
+    'idx_activity_events_user_id',
+    'idx_analytics_events_account_id',
+    'idx_audit_log_account_id',
+    'idx_expenses_account_id',
+    'idx_expenses_category_id',
+    'idx_expenses_property_id',
+    'idx_gmail_message_links_message_id',
+    'idx_hvac_delivery_schedules_account_id',
+    'idx_hvac_delivery_schedules_enrollment_id',
+    'idx_hvac_filter_subscriptions_account_id',
+    'idx_hvac_filter_subscriptions_unit_id',
+    'idx_hvac_program_enrollments_account_id',
+    'idx_hvac_program_enrollments_unit_id',
+    'idx_invoices_account_id',
+    'idx_maintenance_assignments_account_id',
+    'idx_maintenance_assignments_request_id',
+    'idx_maintenance_assignments_vendor_profile_id',
+    'idx_maintenance_attachments_account_id',
+    'idx_maintenance_comments_account_id',
+    'idx_maintenance_requests_created_by_user_id',
+    'idx_maintenance_requests_property_id',
+    'idx_maintenance_requests_unit_id',
+    'idx_notifications_account_id',
+    'idx_outbound_messages_conversation_id',
+    'idx_outbound_messages_message_id',
+    'idx_outbound_messages_reminder_id',
+    'idx_owner_entities_account_id',
+    'idx_owners_account_id',
+    'idx_payments_lease_id',
+    'idx_properties_manager_user_id',
+    'idx_property_owners_account_id',
+    'idx_reminder_logs_reminder_id',
+    'idx_reminder_runs_reminder_id',
+    'idx_reminder_schedules_reminder_id',
+    'idx_rental_applications_property_id',
+    'idx_screening_results_account_id',
+    'idx_screening_results_application_id',
+    'idx_showings_property_id',
+    'idx_showings_unit_id',
+    'idx_subscriptions_account_id',
+    'idx_tenant_invites_unit_id',
+    'idx_tenant_payment_methods_account_id',
+    'idx_tenants_account_id',
+    'idx_unit_hvac_status_account_id',
+    'idx_unit_hvac_status_unit_id',
+    'idx_user_oauth_tokens_user_id',
+    'idx_vendor_invites_account_id',
+    'idx_vendor_services_vendor_profile_id',
+    'idx_vendors_account_id',
+    'idx_vendors_properties_account_id',
+    'idx_account_members_invited_by',
+    'idx_analytics_events_user_id',
+    'idx_audit_log_actor_user_id',
+    'idx_automated_reminders_template_id',
+    'idx_conversation_satisfaction_user_id',
+    'idx_conversations_property_id',
+    'idx_conversations_unit_id',
+    'idx_expenses_unit_id',
+    'idx_expenses_vendor_profile_id',
+    'idx_gmail_message_links_user_id',
+    'idx_hvac_delivery_schedules_batch_id',
+    'idx_hvac_filter_deliveries_account_id',
+    'idx_hvac_filter_deliveries_subscription_id',
+    'idx_invoices_subscription_id',
+    'idx_lease_tenants_account_id',
+    'idx_lease_tenants_tenant_user_id',
+    'idx_maintenance_attachments_request_id',
+    'idx_maintenance_attachments_uploaded_by',
+    'idx_maintenance_comments_request_id',
+    'idx_maintenance_comments_user_id',
+    'idx_maintenance_updates_account_id',
+    'idx_maintenance_updates_request_id',
+    'idx_maintenance_updates_user_id',
+    'idx_messages_maintenance_request_id',
+    'idx_messages_parent_message_id',
+    'idx_messages_property_id',
+    'idx_messages_unit_id',
+    'idx_outbound_messages_recipient_id',
+    'idx_outbound_messages_recipient_user_id',
+    'idx_owner_disbursements_account_id',
+    'idx_owner_disbursements_owner_id',
+    'idx_owner_disbursements_property_id',
+    'idx_payments_unit_id',
+    'idx_property_owners_owner_id',
+    'idx_reminder_logs_account_id',
+    'idx_reminder_runs_account_id',
+    'idx_reminder_runs_schedule_id',
+    'idx_reminder_schedules_account_id',
+    'idx_reminder_schedules_template_id',
+    'idx_rental_applications_applicant_user_id',
+    'idx_rental_applications_reviewed_by',
+    'idx_rental_applications_unit_id',
+    'idx_showing_outcomes_account_id',
+    'idx_subscriptions_plan_id',
+    'idx_subscriptions_user_id',
+    'idx_tenant_invites_created_by',
+    'idx_tenant_invites_property_id',
+    'idx_tenants_user_id',
+    'idx_unit_hvac_status_created_by',
+    'idx_user_roles_role_id',
+    'idx_user_roles_user_id',
+    'idx_vendor_availability_account_id',
+    'idx_vendor_invites_created_by',
+    'idx_vendors_user_id',
+    'idx_vendors_properties_property_id'
+  ]
+  LOOP
+    EXECUTE format('DROP INDEX IF EXISTS public.%I;', idx_name);
+  END LOOP;
+END
+$do$;
+
+COMMIT;

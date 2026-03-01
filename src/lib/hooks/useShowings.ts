@@ -109,6 +109,7 @@ export function useCreateShowing() {
     visitor_phone?: string;
     showing_date: string;
     showing_type: 'self_guided' | 'agent_assisted' | 'virtual';
+    access_code?: string;
     notes?: string;
   }) => {
     try {

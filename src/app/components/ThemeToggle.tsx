@@ -1,35 +1,46 @@
-import { Sun, Moon } from 'lucide-react';
+import { Sun, Moon } from 'lucide-react'
+import { useThemeContext } from '../context/ThemeContext'
+
+type Theme = 'light' | 'dark'
 
 interface ThemeToggleProps {
-  theme: 'light' | 'dark';
-  onToggle: () => void;
+  theme?: Theme
+  onToggle?: () => void
+  variant?: 'default' | 'portal'
 }
 
-export function ThemeToggle({ theme, onToggle }: ThemeToggleProps) {
+export function ThemeToggle({ theme: explicitTheme, onToggle: explicitToggle, variant = 'default' }: ThemeToggleProps) {
+  const { theme: contextTheme, toggleTheme } = useThemeContext()
+  const theme = explicitTheme ?? contextTheme
+  const onToggle = explicitToggle ?? toggleTheme
+  const iconSize = variant === 'portal' ? 'h-6 w-6' : 'h-5 w-5'
+  const buttonClass =
+    variant === 'portal'
+      ? 'relative inline-flex h-12 w-12 items-center justify-center rounded-md border border-white/10 bg-[#0a1530] text-white transition-colors hover:bg-[#122247] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#ff6b35]/40'
+      : `relative inline-flex h-11 w-11 items-center justify-center rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#ff6b35]/40 ${
+          theme === 'dark' ? 'text-white hover:bg-white/5' : 'text-gray-700 hover:bg-black/5'
+        }`
+
   return (
     <button
+      type="button"
       onClick={onToggle}
-      className="p-3 hover:bg-white/5 rounded-lg transition-colors relative group"
+      className={buttonClass}
       aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}
+      aria-pressed={theme === 'dark'}
     >
-      <div className="relative w-5 h-5">
-        {/* Sun icon for dark mode (will switch to light) */}
+      <div className={`relative ${iconSize}`}>
         <Sun
-          className={`w-5 h-5 absolute inset-0 transition-all duration-300 ${
-            theme === 'dark'
-              ? 'rotate-0 scale-100 opacity-100'
-              : 'rotate-90 scale-0 opacity-0'
+          className={`absolute inset-0 h-full w-full transition-all duration-300 ${
+            theme === 'dark' ? 'rotate-0 scale-100 opacity-100' : 'rotate-90 scale-0 opacity-0'
           }`}
         />
-        {/* Moon icon for light mode (will switch to dark) */}
         <Moon
-          className={`w-5 h-5 absolute inset-0 transition-all duration-300 ${
-            theme === 'light'
-              ? 'rotate-0 scale-100 opacity-100'
-              : '-rotate-90 scale-0 opacity-0'
+          className={`absolute inset-0 h-full w-full transition-all duration-300 ${
+            theme === 'light' ? 'rotate-0 scale-100 opacity-100' : '-rotate-90 scale-0 opacity-0'
           }`}
         />
       </div>
     </button>
-  );
+  )
 }

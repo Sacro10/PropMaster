@@ -211,11 +211,12 @@ export async function getMaintenanceStats() {
  */
 export async function createMaintenanceRequest(request: {
   unit_id: string;
-  property_id: string;
+  property_id?: string | null;
   title: string;
   description: string;
   category: string;
   priority: 'low' | 'normal' | 'high' | 'emergency';
+  images?: string[];
 }) {
   try {
     const accountId = await getCurrentAccountId();

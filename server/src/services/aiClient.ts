@@ -5,6 +5,9 @@ type AiProvider = 'openai' | 'anthropic';
 
 const DEFAULT_OPENAI_MODEL = 'gpt-4o-mini';
 const DEFAULT_ANTHROPIC_MODEL = 'claude-3-5-sonnet-20240620';
+const OPENAI_KEY_ENV_KEYS = ['OPENAI_API_KEY', 'VITE_OPENAI_API_KEY'] as const;
+const ANTHROPIC_KEY_ENV_KEYS = ['ANTHROPIC_API_KEY', 'VITE_ANTHROPIC_API_KEY'] as const;
+const MODEL_ENV_KEYS = ['AI_MODEL_NAME', 'VITE_AI_MODEL_NAME'] as const;
 
 export class AiDisabledError extends Error {
   missingEnvVars: string[];
@@ -26,13 +29,14 @@ function getProvider(): {
   openAiKey?: string;
   anthropicKey?: string;
 } {
-  const openAiKey = process.env.OPENAI_API_KEY?.trim();
-  const anthropicKey = process.env.ANTHROPIC_API_KEY?.trim();
+  const openAiKey = readEnvValue(OPENAI_KEY_ENV_KEYS);
+  const anthropicKey = readEnvValue(ANTHROPIC_KEY_ENV_KEYS);
+  const modelNameFromEnv = readEnvValue(MODEL_ENV_KEYS);
 
   if (openAiKey) {
     return {
       provider: 'openai',
-      modelName: process.env.AI_MODEL_NAME || DEFAULT_OPENAI_MODEL,
+      modelName: modelNameFromEnv || DEFAULT_OPENAI_MODEL,
       openAiKey,
       anthropicKey,
     };
@@ -41,7 +45,7 @@ function getProvider(): {
   if (anthropicKey) {
     return {
       provider: 'anthropic',
-      modelName: process.env.AI_MODEL_NAME || DEFAULT_ANTHROPIC_MODEL,
+      modelName: modelNameFromEnv || DEFAULT_ANTHROPIC_MODEL,
       openAiKey,
       anthropicKey,
     };
@@ -49,16 +53,26 @@ function getProvider(): {
 
   return {
     provider: null,
-    modelName: process.env.AI_MODEL_NAME || DEFAULT_OPENAI_MODEL,
+    modelName: modelNameFromEnv || DEFAULT_OPENAI_MODEL,
     openAiKey,
     anthropicKey,
   };
 }
 
+function readEnvValue(keys: readonly string[]): string | undefined {
+  for (const key of keys) {
+    const value = process.env[key]?.trim();
+    if (value) {
+      return value;
+    }
+  }
+  return undefined;
+}
+
 export function getAiStatus() {
   const { provider } = getProvider();
   const missingEnvVars =
-    provider === null ? ['OPENAI_API_KEY', 'ANTHROPIC_API_KEY'] : [];
+    provider === null ? [...OPENAI_KEY_ENV_KEYS, ...ANTHROPIC_KEY_ENV_KEYS] : [];
 
   return {
     enabled: provider !== null,
@@ -71,8 +85,8 @@ function ensureEnabled(): ReturnType<typeof getProvider> {
   const config = getProvider();
   if (!config.provider) {
     const error = new AiDisabledError(
-      'AI is disabled: set OPENAI_API_KEY or ANTHROPIC_API_KEY to enable.',
-      ['OPENAI_API_KEY', 'ANTHROPIC_API_KEY']
+      'AI is disabled: set OPENAI_API_KEY (or VITE_OPENAI_API_KEY) or ANTHROPIC_API_KEY (or VITE_ANTHROPIC_API_KEY) to enable.',
+      [...OPENAI_KEY_ENV_KEYS, ...ANTHROPIC_KEY_ENV_KEYS]
     );
     throw error;
   }

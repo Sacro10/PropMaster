@@ -1,11 +1,12 @@
 import { supabaseAdmin as supabase } from '../supabase';
+import { notifyPaymentPaid } from '../services/paymentService';
 
 export async function processAutoPayPayments(): Promise<void> {
   const today = new Date().toISOString().split('T')[0];
 
   const { data: payments, error } = await supabase
     .from('payments')
-    .select('id, lease_id, due_date')
+    .select('id, account_id, lease_id, due_date')
     .eq('status', 'pending')
     .eq('payment_type', 'rent')
     .lte('due_date', today);
@@ -54,6 +55,25 @@ export async function processAutoPayPayments(): Promise<void> {
   if (updateError) {
     throw updateError;
   }
+
+  const paymentAccountMap = new Map(
+    (payments || []).map((payment: any) => [payment.id, payment.account_id])
+  );
+
+  await Promise.allSettled(
+    paymentIds
+      .map((paymentId) => ({
+        paymentId,
+        accountId: paymentAccountMap.get(paymentId),
+      }))
+      .filter((item): item is { paymentId: string; accountId: string } => Boolean(item.accountId))
+      .map((item) =>
+        notifyPaymentPaid({
+          accountId: item.accountId,
+          paymentId: item.paymentId,
+        })
+      )
+  );
 
   console.log(`  ✓ Auto-pay processed ${paymentIds.length} payments`);
 }

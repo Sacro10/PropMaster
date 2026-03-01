@@ -4,7 +4,7 @@
  */
 
 import { supabase } from '../supabaseClient';
-import { getCurrentAccountId, handleSupabaseError } from './client';
+import { getCurrentAccountId } from './client';
 
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3001';
 
@@ -30,61 +30,26 @@ export interface CreateApplicationData {
  */
 export async function createApplication(data: CreateApplicationData) {
   try {
-    const accountId = await getCurrentAccountId();
-    if (!accountId) {
-      throw new Error('No account ID found');
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) {
+      throw new Error('No active session');
     }
 
-    const screeningInputs = {
-      creditScore: data.creditScore ?? null,
-      backgroundCheckStatus: data.backgroundCheckStatus || null,
-      incomeVerificationStatus: data.incomeVerificationStatus || null,
-      evictionHistory: data.evictionHistory ?? null,
-      criminalHistory: data.criminalHistory ?? null,
-    };
-    const applicationData = {
-      ...screeningInputs,
-      firstName: data.firstName,
-      lastName: data.lastName,
-      currentEmployer: data.currentEmployer,
-      currentAddress: data.currentAddress,
-    };
-    const fullName = [data.firstName, data.lastName].filter(Boolean).join(' ').trim();
+    const response = await fetch(`${API_BASE}/api/applications`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${session.access_token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(data),
+    });
 
-    // Get unit's property_id
-    const { data: unit, error: unitError } = await supabase
-      .from('units')
-      .select('property_id')
-      .eq('id', data.unitId)
-      .single();
-
-    if (unitError) {
-      throw handleSupabaseError(unitError, 'fetch unit');
+    if (!response.ok) {
+      const error = await response.json().catch(() => null);
+      throw new Error(error?.error || 'Failed to create application');
     }
 
-    const { data: application, error } = await supabase
-      .from('rental_applications')
-      .insert({
-        account_id: accountId,
-        unit_id: data.unitId,
-        property_id: unit.property_id,
-        full_name: fullName,
-        email: data.email,
-        phone: data.phone,
-        desired_move_in_date: data.moveInDate,
-        monthly_income: data.monthlyIncome,
-        employer: data.currentEmployer,
-        application_data: applicationData,
-        status: 'submitted',
-      })
-      .select()
-      .single();
-
-    if (error) {
-      throw handleSupabaseError(error, 'create application');
-    }
-
-    return application;
+    return await response.json();
   } catch (error) {
     console.error('[Applications API] Error creating application:', error);
     throw error;

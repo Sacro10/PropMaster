@@ -21,6 +21,25 @@ export interface Job {
 const jobs: Job[] = [];
 const runningIntervals = new Map<string, NodeJS.Timeout>();
 
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isTransientNetworkError(error: any) {
+  const message = String(error?.message || '').toLowerCase();
+  const details = String(error?.details || '').toLowerCase();
+  const combined = `${message}\n${details}`;
+
+  return (
+    combined.includes('fetch failed') ||
+    combined.includes('enotfound') ||
+    combined.includes('eai_again') ||
+    combined.includes('etimedout') ||
+    combined.includes('econnreset') ||
+    combined.includes('socket hang up')
+  );
+}
+
 /**
  * Register a new job
  */
@@ -69,12 +88,33 @@ function startJob(job: Job): void {
  * Run a job once
  */
 async function runJob(job: Job): Promise<void> {
-  try {
-    console.log(`🔄 Running job: ${job.name}`);
-    await job.handler();
-    console.log(`✅ Completed job: ${job.name}`);
-  } catch (error) {
-    console.error(`❌ Job ${job.name} failed:`, error);
+  console.log(`🔄 Running job: ${job.name}`);
+
+  const maxAttempts = 3;
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      await job.handler();
+      console.log(`✅ Completed job: ${job.name}`);
+      return;
+    } catch (error) {
+      const transient = isTransientNetworkError(error);
+      const isLastAttempt = attempt >= maxAttempts;
+
+      if (!transient || isLastAttempt) {
+        if (transient) {
+          console.warn(`⚠️ Job ${job.name} skipped after transient network failures:`, error);
+        } else {
+          console.error(`❌ Job ${job.name} failed:`, error);
+        }
+        return;
+      }
+
+      const backoffMs = attempt * 1500;
+      console.warn(
+        `⚠️ Job ${job.name} transient network error (attempt ${attempt}/${maxAttempts}), retrying in ${backoffMs}ms...`
+      );
+      await sleep(backoffMs);
+    }
   }
 }
 
@@ -317,6 +357,8 @@ import { accessCodeExpirationJob } from './accessCodeExpirationJob';
 import { processReminders as processAutomatedReminders } from './remindersJob';
 import { processHVACFilterRenewals } from './hvacFilterRenewalJob';
 import { processAutoPayPayments } from './autoPayJob';
+import { processAutomatedRentReminders } from '../services/paymentService';
+import { processAutomatedShowingReminders } from '../services/showingsService';
 
 // Process automated reminders every 5 minutes
 registerJob({
@@ -363,6 +405,22 @@ registerJob({
   name: 'process-auto-payments',
   interval: 24 * 60 * 60 * 1000, // 24 hours
   handler: processAutoPayPayments,
+  enabled: true,
+});
+
+// Process rent reminders every hour so due/overdue reminders stay automated.
+registerJob({
+  name: 'process-rent-reminders',
+  interval: 60 * 60 * 1000, // 1 hour
+  handler: processAutomatedRentReminders,
+  enabled: true,
+});
+
+// Process showing reminders every 5 minutes to catch 24h and 1h reminder windows.
+registerJob({
+  name: 'process-showing-reminders',
+  interval: 5 * 60 * 1000, // 5 minutes
+  handler: processAutomatedShowingReminders,
   enabled: true,
 });
 

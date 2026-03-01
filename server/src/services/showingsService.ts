@@ -1,6 +1,6 @@
 import { supabaseAdmin as supabase } from '../supabase';
 import { logActivityEvent } from './activityService';
-import { sendGmailMessage } from './gmailService';
+import { sendResendEmail } from './emailService';
 
 function formatPropertyAddress(property: any) {
   if (!property) return '';
@@ -70,6 +70,7 @@ export interface CreateShowingData {
   visitorName: string;
   visitorEmail: string;
   visitorPhone?: string;
+  accessCode?: string;
   agentName?: string;
   notes?: string;
 }
@@ -240,9 +241,9 @@ export async function createShowing(
     throw new Error('Unit does not belong to your account');
   }
 
-  // Generate access code for self-guided showings
-  let accessCode = null;
-  if (data.showingType === 'self_guided') {
+  // Use provided access code when entered; otherwise auto-generate for self-guided showings.
+  let accessCode = data.accessCode?.trim() || null;
+  if (!accessCode && data.showingType === 'self_guided') {
     // Call database function to generate unique code
     const { data: codeData, error: codeError } = await supabase.rpc('generate_showing_access_code');
     if (codeError) {
@@ -566,15 +567,38 @@ export async function regenerateAccessCode(
   };
 }
 
-/**
- * Send showing reminder
- */
-export async function sendShowingReminder(
+async function hasShowingReminderActivity(
   accountId: string,
-  userId: string,
-  showingId: string
-): Promise<void> {
-  // Verify showing belongs to account
+  showingId: string,
+  eventType: string,
+  fromIso?: string
+) {
+  let query = supabase
+    .from('activity_events')
+    .select('id')
+    .eq('account_id', accountId)
+    .eq('entity_type', 'showing')
+    .eq('entity_id', showingId)
+    .eq('event_type', eventType);
+
+  if (fromIso) {
+    query = query.gte('created_at', fromIso);
+  }
+
+  const { data, error } = await query.limit(1);
+  if (error) {
+    throw error;
+  }
+
+  return (data || []).length > 0;
+}
+
+async function sendShowingReminderByStage(params: {
+  accountId: string;
+  userId: string | null;
+  showingId: string;
+  stage: 'manual' | '24h' | '1h';
+}) {
   const { data: showing, error: showingError } = await supabase
     .from('showings')
     .select(`
@@ -588,22 +612,20 @@ export async function sendShowingReminder(
       unit:units!inner(unit_number),
       property:properties!inner(name, address1, address2, city, state, zip)
     `)
-    .eq('id', showingId)
-    .eq('account_id', accountId)
+    .eq('id', params.showingId)
+    .eq('account_id', params.accountId)
     .single();
 
   if (showingError || !showing) {
     throw new Error('Showing not found');
   }
 
-  // TODO: Implement actual email/SMS sending
-  // For now, just log the activity and update the reminder timestamp
-
-  const reminderMessage = `Reminder sent to ${showing.visitor_name} (${showing.visitor_email})`;
   const scheduledAt = showing.scheduled_at;
   const propertyName = (showing as any).property?.name || 'Property';
   const unitNumber = (showing as any).unit?.unit_number ? ` #${(showing as any).unit.unit_number}` : '';
-  const subject = `Showing reminder: ${propertyName}${unitNumber}`;
+  const leadTimeLabel =
+    params.stage === '24h' ? '24-hour reminder' : params.stage === '1h' ? '1-hour reminder' : 'Showing reminder';
+  const subject = `${leadTimeLabel}: ${propertyName}${unitNumber}`;
   const body = `Reminder: Your showing is scheduled for ${new Date(scheduledAt).toLocaleString('en-US', {
     weekday: 'short',
     month: 'short',
@@ -612,83 +634,82 @@ export async function sendShowingReminder(
     minute: '2-digit',
   })} at ${propertyName}${unitNumber}. Access code: ${showing.access_code || 'N/A'}.`;
 
-  await sendGmailMessage({
-    accountId,
-    userId,
+  await sendResendEmail({
     to: showing.visitor_email,
     subject,
-    body,
+    text: body,
   });
 
-  // Update reminder_sent_at
   const { error: updateError } = await supabase
     .from('showings')
     .update({
       reminder_sent_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     })
-    .eq('id', showingId)
-    .eq('account_id', accountId);
+    .eq('id', params.showingId)
+    .eq('account_id', params.accountId);
 
   if (updateError) {
     console.error('Error updating reminder timestamp:', updateError);
   }
 
   try {
-    const { data: outbound, error: outboundError } = await supabase
-      .from('outbound_messages')
-      .insert({
-        account_id: accountId,
-        recipient_user_id: null,
-        recipient_email: showing.visitor_email,
-        recipient_phone: showing.visitor_phone,
-        subject,
-        body,
-        channel: 'email',
-        status: 'sent',
-        retry_count: 0,
-        provider: 'gmail',
-        sent_at: new Date().toISOString(),
-      })
-      .select()
-      .single();
-
-    if (outboundError) {
-      throw outboundError;
-    }
-
-    if (!outbound) {
-      return;
-    }
+    await supabase.from('outbound_messages').insert({
+      account_id: params.accountId,
+      recipient_user_id: null,
+      recipient_email: showing.visitor_email,
+      recipient_phone: showing.visitor_phone,
+      subject,
+      body,
+      channel: 'email',
+      status: 'sent',
+      retry_count: 0,
+      provider: 'resend',
+      sent_at: new Date().toISOString(),
+    });
   } catch (error) {
     console.error('Error logging outbound message:', error);
   }
 
-  // Log activity
+  const eventType =
+    params.stage === '24h'
+      ? 'showing_reminder_24h_sent'
+      : params.stage === '1h'
+        ? 'showing_reminder_1h_sent'
+        : 'showing_reminder_sent';
+
   await logActivityEvent(
-    accountId,
-    userId,
-    'showing_reminder_sent',
-    reminderMessage,
+    params.accountId,
+    params.userId,
+    eventType,
+    `${leadTimeLabel} sent to ${showing.visitor_name} (${showing.visitor_email})`,
     {
       entityType: 'showing',
-      entityId: showingId,
+      entityId: params.showingId,
       metadata: {
         visitor_name: showing.visitor_name,
         visitor_email: showing.visitor_email,
         showing_date: scheduledAt,
         access_code: showing.access_code,
+        reminderStage: params.stage,
       },
     }
   );
+}
 
-  console.log('[Showings] Reminder stub:', {
-    to: showing.visitor_email,
-    phone: showing.visitor_phone,
-    showing_date: scheduledAt,
-    access_code: showing.access_code,
-    property: (showing as any).property?.name,
-    unit: (showing as any).unit?.unit_number,
+/**
+ * Send showing reminder
+ */
+export async function sendShowingReminder(
+  accountId: string,
+  userId: string,
+  showingId: string
+): Promise<void> {
+  await sendShowingReminderByStage({
+    accountId,
+    userId,
+    showingId,
+    stage: 'manual',
   });
 }
 
@@ -731,6 +752,64 @@ export async function markShowingReminderSent(
       entityId: showingId,
     }
   );
+}
+
+export async function processAutomatedShowingReminders(): Promise<void> {
+  const now = new Date();
+  const windows = [
+    {
+      stage: '24h' as const,
+      from: new Date(now.getTime() + 23 * 60 * 60 * 1000),
+      to: new Date(now.getTime() + 25 * 60 * 60 * 1000),
+      eventType: 'showing_reminder_24h_sent',
+    },
+    {
+      stage: '1h' as const,
+      from: new Date(now.getTime() + 55 * 60 * 1000),
+      to: new Date(now.getTime() + 65 * 60 * 1000),
+      eventType: 'showing_reminder_1h_sent',
+    },
+  ];
+
+  for (const window of windows) {
+    const { data: showings, error } = await supabase
+      .from('showings')
+      .select('id, account_id')
+      .in('status', ['scheduled', 'confirmed'])
+      .gte('scheduled_at', window.from.toISOString())
+      .lte('scheduled_at', window.to.toISOString());
+
+    if (error) {
+      throw error;
+    }
+
+    for (const showing of showings || []) {
+      try {
+        const alreadySent = await hasShowingReminderActivity(
+          showing.account_id,
+          showing.id,
+          window.eventType
+        );
+
+        if (alreadySent) {
+          continue;
+        }
+
+        await sendShowingReminderByStage({
+          accountId: showing.account_id,
+          userId: null,
+          showingId: showing.id,
+          stage: window.stage,
+        });
+      } catch (error) {
+        console.warn('[Showings] Failed to send automated reminder:', {
+          showingId: showing.id,
+          stage: window.stage,
+          error,
+        });
+      }
+    }
+  }
 }
 
 /**
@@ -831,6 +910,23 @@ export async function expireOldAccessCodes(): Promise<number> {
   const { data, error } = await supabase.rpc('expire_old_access_codes');
 
   if (error) {
+    const message = String(error?.message || '').toLowerCase();
+    const details = String(error?.details || '').toLowerCase();
+    const transientNetworkError =
+      message.includes('fetch failed') ||
+      message.includes('enotfound') ||
+      message.includes('eai_again') ||
+      message.includes('etimedout') ||
+      details.includes('fetch failed') ||
+      details.includes('enotfound') ||
+      details.includes('eai_again') ||
+      details.includes('etimedout');
+
+    if (transientNetworkError) {
+      console.warn('Access code expiration skipped due to transient network error:', error);
+      return 0;
+    }
+
     console.error('Error expiring access codes:', error);
     return 0;
   }

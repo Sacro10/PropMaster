@@ -3,9 +3,13 @@
  * Handles conversations, messages, templates, and reminders
  */
 
-import { Router } from 'express';
+import { Router, Response, NextFunction } from 'express';
+import path from 'path';
+import crypto from 'crypto';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import { Permissions } from '../middleware/rbac';
+import { requirePlanAccess } from '../middleware/planAccess';
+import { supabaseAdmin as supabase } from '../supabase';
 import {
   getConversations,
   getConversation,
@@ -28,6 +32,175 @@ import {
 } from '../services/communicationsService';
 
 const router = Router();
+const STORAGE_BUCKET = process.env.SUPABASE_STORAGE_BUCKET || 'maintenance-attachments';
+let bucketEnsured = false;
+const MANAGER_ROLES = ['owner', 'admin', 'manager'];
+
+router.use(authenticate, requirePlanAccess('pro'));
+
+function sanitizeFileName(fileName: string) {
+  const baseName = path.basename(fileName || 'document');
+  return baseName.replace(/[^a-zA-Z0-9._-]/g, '_');
+}
+
+function allowVendorOrCreateMessages(
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+) {
+  if (req.user?.role === 'vendor') {
+    next();
+    return;
+  }
+
+  Permissions.createMessages(req, res, next);
+}
+
+async function validateVendorMessageScope(
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    if (req.user?.role !== 'vendor') {
+      next();
+      return;
+    }
+
+    const accountId = req.user.accountId;
+    const senderId = req.user.id;
+    const recipientId = String(req.body?.recipientId || '').trim();
+    const maintenanceRequestId = String(req.body?.maintenanceRequestId || '').trim();
+
+    if (!accountId || !senderId || !recipientId || !maintenanceRequestId) {
+      res.status(403).json({
+        error: 'Vendors can only message account managers for assigned maintenance requests',
+      });
+      return;
+    }
+
+    const { data: recipientMember, error: recipientError } = await supabase
+      .from('account_members')
+      .select('role, is_active')
+      .eq('account_id', accountId)
+      .eq('user_id', recipientId)
+      .limit(1)
+      .maybeSingle();
+
+    if (recipientError) {
+      res.status(500).json({
+        error: 'Failed to validate recipient',
+        details: recipientError.message,
+      });
+      return;
+    }
+
+    const recipientRole = String(recipientMember?.role || '').toLowerCase();
+    if (
+      !recipientMember ||
+      recipientMember.is_active === false ||
+      !MANAGER_ROLES.includes(recipientRole)
+    ) {
+      res.status(403).json({
+        error: 'Vendors can only send messages to owner/admin/manager recipients',
+      });
+      return;
+    }
+
+    const { data: vendorProfiles, error: vendorProfilesError } = await supabase
+      .from('vendor_profiles')
+      .select('id')
+      .eq('account_id', accountId)
+      .eq('user_id', senderId)
+      .limit(20);
+
+    if (vendorProfilesError) {
+      res.status(500).json({
+        error: 'Failed to validate vendor profile',
+        details: vendorProfilesError.message,
+      });
+      return;
+    }
+
+    const vendorProfileIds = (vendorProfiles || [])
+      .map((profile: any) => String(profile?.id || '').trim())
+      .filter((id: string) => Boolean(id));
+
+    if (vendorProfileIds.length === 0) {
+      res.status(403).json({
+        error: 'No vendor profile found for the authenticated user',
+      });
+      return;
+    }
+
+    const { data: assignment, error: assignmentError } = await supabase
+      .from('maintenance_assignments')
+      .select('id')
+      .eq('account_id', accountId)
+      .eq('request_id', maintenanceRequestId)
+      .in('vendor_profile_id', vendorProfileIds)
+      .limit(1)
+      .maybeSingle();
+
+    if (assignmentError) {
+      res.status(500).json({
+        error: 'Failed to validate maintenance assignment',
+        details: assignmentError.message,
+      });
+      return;
+    }
+
+    if (!assignment) {
+      res.status(403).json({
+        error: 'Vendor can only send messages for maintenance requests assigned to them',
+      });
+      return;
+    }
+
+    next();
+  } catch (error) {
+    console.error('Validate vendor message scope error:', error);
+    res.status(500).json({
+      error: 'Failed to validate vendor messaging permissions',
+      details: error instanceof Error ? error.message : 'Unknown error',
+    });
+  }
+}
+
+async function ensureStorageBucket() {
+  if (bucketEnsured) {
+    return;
+  }
+
+  const { data: bucket, error: getBucketError } = await supabase.storage.getBucket(STORAGE_BUCKET);
+  if (bucket && !getBucketError) {
+    bucketEnsured = true;
+    return;
+  }
+
+  const missingBucket =
+    String(getBucketError?.message || '').toLowerCase().includes('not found') ||
+    String(getBucketError?.message || '').toLowerCase().includes('does not exist');
+
+  if (!missingBucket && getBucketError) {
+    throw getBucketError;
+  }
+
+  const { error: createBucketError } = await supabase.storage.createBucket(STORAGE_BUCKET, {
+    public: true,
+  });
+
+  if (createBucketError) {
+    const alreadyExists = String(createBucketError.message || '')
+      .toLowerCase()
+      .includes('already exists');
+    if (!alreadyExists) {
+      throw createBucketError;
+    }
+  }
+
+  bucketEnsured = true;
+}
 
 // =========================================
 // CONVERSATIONS
@@ -168,14 +341,10 @@ router.get(
   }
 );
 
-/**
- * POST /api/communications/messages
- * Send a message
- */
 router.post(
-  '/messages',
+  '/uploads/sign',
   authenticate,
-  Permissions.createMessages,
+  allowVendorOrCreateMessages,
   async (req: AuthRequest, res) => {
     try {
       if (!req.user?.accountId || !req.user?.id) {
@@ -183,11 +352,89 @@ router.post(
         return;
       }
 
-      const { recipientId, subject, body, conversationId, propertyId, unitId } =
+      const fileName = String(req.body?.fileName || '').trim();
+      const contentType = String(req.body?.contentType || '').trim().toLowerCase();
+
+      if (!fileName) {
+        res.status(400).json({ error: 'fileName is required' });
+        return;
+      }
+
+      const isAllowedContentType =
+        contentType.startsWith('image/') ||
+        contentType === 'application/pdf' ||
+        contentType === 'application/msword' ||
+        contentType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
+        contentType === 'text/plain';
+
+      if (!isAllowedContentType) {
+        res.status(400).json({ error: 'Unsupported file type' });
+        return;
+      }
+
+      const safeName = sanitizeFileName(fileName);
+      const uniqueName = `${Date.now()}_${crypto.randomUUID().slice(0, 8)}_${safeName}`;
+      const objectPath = `communication-attachments/${req.user.accountId}/${req.user.id}/${uniqueName}`;
+
+      await ensureStorageBucket();
+
+      const { data, error } = await supabase.storage
+        .from(STORAGE_BUCKET)
+        .createSignedUploadUrl(objectPath);
+
+      if (error || !data?.token) {
+        res.status(500).json({
+          error: 'Failed to create signed upload URL',
+          details: error?.message,
+        });
+        return;
+      }
+
+      const { data: publicUrlData } = supabase.storage
+        .from(STORAGE_BUCKET)
+        .getPublicUrl(objectPath);
+
+      res.json({
+        bucket: STORAGE_BUCKET,
+        path: objectPath,
+        token: data.token,
+        signedUrl: data.signedUrl,
+        publicUrl: publicUrlData.publicUrl,
+      });
+    } catch (error) {
+      console.error('Create communications upload URL error:', error);
+      res.status(500).json({
+        error: 'Failed to create upload URL',
+        details: error instanceof Error ? error.message : 'Unknown error',
+      });
+    }
+  }
+);
+
+/**
+ * POST /api/communications/messages
+ * Send a message
+ */
+router.post(
+  '/messages',
+  authenticate,
+  allowVendorOrCreateMessages,
+  validateVendorMessageScope,
+  async (req: AuthRequest, res) => {
+    try {
+      if (!req.user?.accountId || !req.user?.id) {
+        res.status(400).json({ error: 'Account ID and User ID required' });
+        return;
+      }
+
+      const { recipientId, subject, body, conversationId, propertyId, unitId, maintenanceRequestId, attachments } =
         req.body;
 
-      if (!recipientId || !body) {
-        res.status(400).json({ error: 'Recipient ID and body are required' });
+      const hasBody = typeof body === 'string' && body.trim().length > 0;
+      const hasAttachments = Array.isArray(attachments) && attachments.length > 0;
+
+      if (!recipientId || (!hasBody && !hasAttachments)) {
+        res.status(400).json({ error: 'Recipient ID and either body or attachments are required' });
         return;
       }
 
@@ -198,6 +445,8 @@ router.post(
         conversationId,
         propertyId,
         unitId,
+        maintenanceRequestId,
+        attachments,
       });
 
       res.json(message);
@@ -640,12 +889,12 @@ router.get('/stats', authenticate, Permissions.readMessages, async (req: AuthReq
  */
 router.get('/activity', authenticate, Permissions.readMessages, async (req: AuthRequest, res) => {
   try {
-    if (!req.user?.accountId) {
-      res.status(400).json({ error: 'Account ID required' });
+    if (!req.user?.accountId || !req.user?.id) {
+      res.status(400).json({ error: 'Account ID and User ID required' });
       return;
     }
 
-    const activity = await getPortalActivity(req.user.accountId);
+    const activity = await getPortalActivity(req.user.accountId, req.user.id);
     res.json(activity);
   } catch (error) {
     console.error('Get portal activity error:', error);

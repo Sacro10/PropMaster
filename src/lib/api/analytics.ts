@@ -38,7 +38,7 @@ export async function getAnalyticsMetrics(timeframe: TimeframeOption = '30d'): P
     }, {
       cacheKey: `${url}|${session.access_token}`,
       cacheTtlMs: 15000,
-      retries: 1,
+      retries: 0,
     });
 
     if (!response.ok) {
@@ -144,7 +144,7 @@ export async function getRevenueTrend(timeframe: TimeframeOption = '30d'): Promi
     }, {
       cacheKey: `${url}|${session.access_token}`,
       cacheTtlMs: 15000,
-      retries: 1,
+      retries: 0,
     });
 
     if (!response.ok) {
@@ -185,7 +185,7 @@ export async function getOccupancyTrend(timeframe: TimeframeOption = '30d'): Pro
     }, {
       cacheKey: `${url}|${session.access_token}`,
       cacheTtlMs: 15000,
-      retries: 1,
+      retries: 0,
     });
 
     if (!response.ok) {
@@ -226,7 +226,7 @@ export async function getPropertyPerformance(timeframe: TimeframeOption = '30d')
     }, {
       cacheKey: `${url}|${session.access_token}`,
       cacheTtlMs: 15000,
-      retries: 1,
+      retries: 0,
     });
 
     if (!response.ok) {
@@ -271,7 +271,7 @@ export async function getExpenseBreakdown(timeframe: TimeframeOption = '30d'): P
     }, {
       cacheKey: `${url}|${session.access_token}`,
       cacheTtlMs: 15000,
-      retries: 1,
+      retries: 0,
     });
 
     if (!response.ok) {
@@ -315,17 +315,21 @@ export async function getAnalyticsInsights(timeframe: TimeframeOption = '30d'): 
     }, {
       cacheKey: `${url}|${session.access_token}`,
       cacheTtlMs: 15000,
-      retries: 1,
+      retries: 0,
     });
 
     if (!response.ok) {
       throw new Error('Failed to fetch analytics insights');
     }
 
-    return response.data ?? { summary: '', provider: null };
+    return response.data ?? { summary: '', provider: null, error: 'No analytics insight payload returned' };
   } catch (error) {
     console.error('[Analytics API] Failed to fetch analytics insights:', error);
-    return { summary: '', provider: null };
+    return {
+      summary: '',
+      provider: null,
+      error: error instanceof Error ? error.message : 'Failed to fetch analytics insights',
+    };
   }
 }
 

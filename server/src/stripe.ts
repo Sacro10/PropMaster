@@ -15,12 +15,12 @@ export interface PlanLimits {
 
 export const PLAN_LIMITS: Record<SubscriptionPlan, PlanLimits> = {
   basic: {
-    maxProperties: 1,
-    maxUnits: 3,
+    maxProperties: 10,
+    maxUnits: 10,
   },
   pro: {
-    maxProperties: 10,
-    maxUnits: 100,
+    maxProperties: 50,
+    maxUnits: 50,
   },
   premium: {
     maxProperties: 999999,

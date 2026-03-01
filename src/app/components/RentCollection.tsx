@@ -1,5 +1,5 @@
 import { DollarSign, TrendingUp, CircleCheck, Clock, Activity, RefreshCw, X } from 'lucide-react';
-import { useHasFeature } from '../hooks/usePlanGating';
+import { useHasFeature, useHasPlan } from '../hooks/usePlanGating';
 import { useThemeStyles } from '../hooks/useThemeStyles';
 import { FeatureGate } from './UpgradeCTA';
 import { LoadingPage } from './LoadingSpinner';
@@ -13,16 +13,19 @@ import {
 import { processDisbursement } from '../../lib/api/payments';
 import { formatCurrency, formatCurrencyCompact } from '../../lib/utils/currencyHelpers';
 import { formatDisplayDate } from '../../lib/utils/dateHelpers';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { useLocation } from 'react-router-dom';
 
 export function RentCollection() {
   const { isDark, text, border } = useThemeStyles();
+  const location = useLocation();
   const [processingDisbursement, setProcessingDisbursement] = useState<string | null>(null);
   const [showAllTransactions, setShowAllTransactions] = useState(false);
   const [showAllPendingPayments, setShowAllPendingPayments] = useState(false);
   const [selectedPendingPayment, setSelectedPendingPayment] = useState<any | null>(null);
 
   // Feature checks for plan gating
+  const rentCollectionAccess = useHasPlan('pro');
   const integratedAccounting = useHasFeature('integrated_accounting');
 
   // Fetch data
@@ -30,6 +33,15 @@ export function RentCollection() {
   const { data: pendingPayments, loading: pendingLoading, refetch: refetchPending } = usePendingPayments();
   const { data: disbursements, loading: disbursementsLoading, refetch: refetchDisbursements } = useOwnerDisbursements();
   const { data: stats, loading: statsLoading, refetch: refetchStats } = useCollectionStats();
+
+  const highlightedPaymentId = new URLSearchParams(location.search).get('payment');
+
+  useEffect(() => {
+    if (!highlightedPaymentId) return;
+    const element = document.getElementById(`rent-payment-${highlightedPaymentId}`);
+    if (!element) return;
+    element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }, [highlightedPaymentId, pendingPayments, recentPayments]);
 
   // Show loading state
   if (paymentsLoading || statsLoading) {
@@ -108,6 +120,12 @@ export function RentCollection() {
   // Note: auto-pay stats come directly from API via stats.auto_pay_enrolled
 
   return (
+    <FeatureGate
+      requiredPlan="pro"
+      hasAccess={rentCollectionAccess.hasAccess}
+      loading={rentCollectionAccess.loading}
+      variant="inline"
+    >
     <div className="space-y-6">
       {/* Header */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -188,7 +206,8 @@ export function RentCollection() {
                   return (
                     <div
                       key={payment.id}
-                      className={`flex items-center justify-between p-4 ${isDark ? 'bg-white/5 hover:bg-white/10' : 'bg-gray-50 hover:bg-gray-100'} rounded-lg transition-all border ${border.default}`}
+                      id={`rent-payment-${payment.id}`}
+                      className={`flex items-center justify-between p-4 ${isDark ? 'bg-white/5 hover:bg-white/10' : 'bg-gray-50 hover:bg-gray-100'} rounded-lg transition-all border ${highlightedPaymentId === payment.id ? 'border-[#ff6b35] shadow-[0_0_0_1px_rgba(255,107,53,0.4)]' : border.default}`}
                     >
                       <div className="flex items-center gap-4">
                         <div className="w-12 h-12 bg-gradient-to-br from-[#10b981] to-[#06b6d4] rounded-full flex items-center justify-center">
@@ -287,7 +306,8 @@ export function RentCollection() {
                 {visiblePendingPayments.map((payment) => (
                   <div
                     key={payment.id}
-                    className={`p-4 ${isDark ? 'bg-white/5' : 'bg-red-50'} rounded-lg border border-red-500/20 hover:border-red-500/40 transition-all`}
+                    id={`rent-payment-${payment.id}`}
+                    className={`p-4 ${isDark ? 'bg-white/5' : 'bg-red-50'} rounded-lg border ${highlightedPaymentId === payment.id ? 'border-[#ff6b35] shadow-[0_0_0_1px_rgba(255,107,53,0.4)]' : 'border-red-500/20'} hover:border-red-500/40 transition-all`}
                   >
                     <div className="flex items-start justify-between mb-3">
                       <div>
@@ -595,5 +615,6 @@ export function RentCollection() {
         </div>
       )}
     </div>
+    </FeatureGate>
   );
 }

@@ -152,11 +152,12 @@ export function useCreateMaintenanceRequest() {
 
   const create = useCallback(async (request: {
     unit_id: string;
-    property_id: string;
+    property_id?: string | null;
     title: string;
     description: string;
     category: string;
     priority: 'low' | 'normal' | 'high' | 'emergency';
+    images?: string[];
   }) => {
     try {
       setLoading(true);

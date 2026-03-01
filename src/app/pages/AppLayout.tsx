@@ -4,7 +4,9 @@ import { Outlet, useNavigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { useThemeContext } from '../context/ThemeContext'
 import { ThemeToggle } from '../components/ThemeToggle'
+import { useAccountPlan } from '../hooks/usePlanGating'
 import { supabase } from '@/lib/supabase'
+import { getCurrentAccountId as resolveCurrentAccountId } from '@/lib/api/client'
 
 interface Notification {
   id: string
@@ -12,6 +14,11 @@ interface Notification {
   title: string
   message: string
   action_url?: string
+  payload?: {
+    conversationId?: string
+    maintenanceRequestId?: string
+    senderId?: string
+  } | null
   is_read: boolean
   created_at: string
 }
@@ -28,9 +35,15 @@ export function AppLayout() {
   const unitsSummaryRef = useRef<HTMLDivElement>(null)
   const { user, signOut, profile } = useAuth()
   const { theme, toggleTheme } = useThemeContext()
+  const { plan: accountPlan, loading: accountPlanLoading } = useAccountPlan()
   const navigate = useNavigate()
   const location = useLocation()
   const isDark = theme === 'dark'
+  const resolvedPlanLabel = accountPlan?.plan
+    ? accountPlan.plan.toUpperCase()
+    : accountPlanLoading
+      ? '...'
+      : (profile?.subscription_tier || 'basic').toUpperCase()
 
   const navItems = [
     { id: 'dashboard', path: '/app/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
@@ -53,15 +66,9 @@ export function AppLayout() {
       try {
         setLoadingUnits(true)
 
-        // First, get the user's account_id from account_members
-        const { data: memberData, error: memberError } = await supabase
-          .from('account_members')
-          .select('account_id')
-          .eq('user_id', user.id)
-          .single()
-
-        if (memberError || !memberData) {
-          console.error('Error fetching account membership:', memberError)
+        const accountId = await resolveCurrentAccountId()
+        if (!accountId) {
+          console.error('Error fetching account membership: no account ID available')
           setUnitsCount(0)
           setLoadingUnits(false)
           return
@@ -72,16 +79,16 @@ export function AppLayout() {
           supabase
             .from('units')
             .select('id', { count: 'exact', head: true })
-            .eq('account_id', memberData.account_id),
+            .eq('account_id', accountId),
           supabase
             .from('units')
             .select('id', { count: 'exact', head: true })
-            .eq('account_id', memberData.account_id)
+            .eq('account_id', accountId)
             .eq('status', 'occupied'),
           supabase
             .from('units')
             .select('id', { count: 'exact', head: true })
-            .eq('account_id', memberData.account_id)
+            .eq('account_id', accountId)
             .eq('status', 'vacant'),
         ])
 
@@ -115,13 +122,17 @@ export function AppLayout() {
 
   // Fetch notifications
   useEffect(() => {
+    let isMounted = true
+    let channel: ReturnType<typeof supabase.channel> | null = null
+    let pollTimer: number | null = null
+
     const fetchNotifications = async () => {
       if (!user) return
 
       try {
         const { data, error } = await supabase
           .from('notifications')
-          .select('id, type, title, message, action_url, is_read, created_at')
+          .select('id, type, title, message, action_url, payload, is_read, created_at')
           .eq('user_id', user.id)
           .order('created_at', { ascending: false })
           .limit(10)
@@ -131,6 +142,7 @@ export function AppLayout() {
           return
         }
 
+        if (!isMounted) return
         setNotifications(data || [])
         setUnreadCount(data?.filter(n => !n.is_read).length || 0)
       } catch (error) {
@@ -138,29 +150,71 @@ export function AppLayout() {
       }
     }
 
-    fetchNotifications()
+    const startPolling = () => {
+      if (pollTimer) {
+        window.clearInterval(pollTimer)
+      }
+      pollTimer = window.setInterval(() => {
+        fetchNotifications()
+      }, 30000)
+    }
 
-    // Set up realtime subscription for new notifications
-    const channel = supabase
-      .channel('notifications')
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'notifications',
-          filter: `user_id=eq.${user?.id}`
-        },
-        () => {
-          fetchNotifications()
-        }
-      )
-      .subscribe()
+    const stopRealtime = () => {
+      if (channel) {
+        supabase.removeChannel(channel)
+        channel = null
+      }
+    }
+
+    const startRealtime = () => {
+      if (!user?.id || typeof navigator !== 'undefined' && !navigator.onLine) return
+      stopRealtime()
+      channel = supabase
+        .channel(`notifications:${user.id}`)
+        .on(
+          'postgres_changes',
+          {
+            event: '*',
+            schema: 'public',
+            table: 'notifications',
+            filter: `user_id=eq.${user.id}`
+          },
+          () => {
+            fetchNotifications()
+          }
+        )
+        .subscribe((status) => {
+          if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+            console.warn('[Notifications] Realtime unavailable, falling back to polling.');
+            stopRealtime()
+          }
+        })
+    }
+
+    fetchNotifications()
+    startPolling()
+    startRealtime()
+
+    const handleOnline = () => {
+      fetchNotifications()
+      startRealtime()
+    }
+    const handleOffline = () => {
+      stopRealtime()
+    }
+    window.addEventListener('online', handleOnline)
+    window.addEventListener('offline', handleOffline)
 
     return () => {
-      supabase.removeChannel(channel)
+      isMounted = false
+      if (pollTimer) {
+        window.clearInterval(pollTimer)
+      }
+      stopRealtime()
+      window.removeEventListener('online', handleOnline)
+      window.removeEventListener('offline', handleOffline)
     }
-  }, [user])
+  }, [user?.id])
 
   // Close notifications dropdown when clicking outside
   useEffect(() => {
@@ -250,8 +304,21 @@ export function AppLayout() {
     if (!notification.is_read) {
       markAsRead(notification.id)
     }
-    if (notification.action_url) {
-      navigate(notification.action_url)
+
+    const payloadConversationId = notification.payload?.conversationId
+    const normalizedActionUrl = payloadConversationId
+      ? `/app/communication?conversation=${encodeURIComponent(payloadConversationId)}`
+      : notification.action_url === '/communications'
+        ? '/app/communication'
+        : notification.action_url
+
+    if (normalizedActionUrl) {
+
+      if (/^https?:\/\//i.test(normalizedActionUrl)) {
+        window.open(normalizedActionUrl, '_blank', 'noopener,noreferrer')
+      } else {
+        navigate(normalizedActionUrl)
+      }
       setShowNotifications(false)
     }
   }
@@ -318,7 +385,7 @@ export function AppLayout() {
                   PROPMASTER
                 </h1>
                 <p className={`text-xs ${isDark ? 'text-white/50' : 'text-gray-500'} -mt-1`} style={{ fontFamily: 'Work Sans, sans-serif' }}>
-                  {profile?.subscription_tier ? profile.subscription_tier.toUpperCase() : 'BASIC'} PLAN
+                  {resolvedPlanLabel} PLAN
                 </p>
               </div>
             </div>
@@ -503,21 +570,6 @@ export function AppLayout() {
                       )}
                     </div>
 
-                    {/* Footer */}
-                    {notifications.length > 0 && (
-                      <div className={`border-t ${isDark ? 'border-white/10' : 'border-gray-200'} px-4 py-3`}>
-                        <button
-                          onClick={() => {
-                            navigate('/app/notifications')
-                            setShowNotifications(false)
-                          }}
-                          className="text-sm text-[#ff6b35] hover:text-[#f7931e] transition-colors w-full text-center"
-                          style={{ fontFamily: 'Work Sans, sans-serif' }}
-                        >
-                          View all notifications
-                        </button>
-                      </div>
-                    )}
                   </div>
                 )}
               </div>

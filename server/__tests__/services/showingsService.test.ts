@@ -193,6 +193,83 @@ describe('Showings Service', () => {
       );
     });
 
+    it('should use provided access code for self-guided showings', async () => {
+      const mockUnit = { property_id: mockPropertyId };
+      const mockProperty = { id: mockPropertyId };
+      const customAccessCode = 'LOCKBOX-204';
+
+      (supabase.from as jest.Mock).mockReturnValueOnce({
+        select: jest.fn().mockReturnValue({
+          eq: jest.fn().mockReturnValue({
+            single: jest.fn().mockResolvedValue({
+              data: mockUnit,
+              error: null,
+            }),
+          }),
+        }),
+      });
+
+      (supabase.from as jest.Mock).mockReturnValueOnce({
+        select: jest.fn().mockReturnValue({
+          eq: jest.fn().mockReturnValue({
+            eq: jest.fn().mockReturnValue({
+              single: jest.fn().mockResolvedValue({
+                data: mockProperty,
+                error: null,
+              }),
+            }),
+          }),
+        }),
+      });
+
+      const insertMock = jest.fn().mockReturnValue({
+        select: jest.fn().mockReturnValue({
+          single: jest.fn().mockResolvedValue({
+            data: {
+              id: mockShowingId,
+              account_id: mockAccountId,
+              unit_id: mockUnitId,
+              property_id: mockPropertyId,
+              showing_date: '2026-01-10T14:00:00Z',
+              duration_minutes: 30,
+              showing_type: 'self_guided',
+              visitor_name: 'Jane Doe',
+              visitor_email: 'jane@example.com',
+              access_code: customAccessCode,
+              access_code_expires_at: '2026-01-10T14:30:00Z',
+              status: 'scheduled',
+              created_at: '2026-01-08T10:00:00Z',
+              updated_at: '2026-01-08T10:00:00Z',
+              unit: { unit_number: '102', rent_amount: 1600 },
+              property: { name: 'Test Property', address: '456 Oak Ave' },
+            },
+            error: null,
+          }),
+        }),
+      });
+
+      (supabase.from as jest.Mock).mockReturnValueOnce({
+        insert: insertMock,
+      });
+
+      const result = await createShowing(mockAccountId, mockUserId, {
+        unitId: mockUnitId,
+        showingDate: '2026-01-10T14:00:00Z',
+        showingType: 'self_guided',
+        visitorName: 'Jane Doe',
+        visitorEmail: 'jane@example.com',
+        accessCode: ` ${customAccessCode} `,
+      });
+
+      expect(result.accessCode).toBe(customAccessCode);
+      expect(insertMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          access_code: customAccessCode,
+        })
+      );
+      expect(supabase.rpc).not.toHaveBeenCalled();
+    });
+
     it('should not generate access code for agent-assisted showings', async () => {
       const mockUnit = { property_id: mockPropertyId };
       const mockProperty = { id: mockPropertyId };

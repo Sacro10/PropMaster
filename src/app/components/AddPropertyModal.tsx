@@ -3,6 +3,7 @@ import { X, Loader2, Building2, MapPin } from 'lucide-react';
 import { useThemeStyles } from '../hooks/useThemeStyles';
 import { supabase } from '@/lib/supabaseClient';
 import { getCurrentAccountId } from '@/lib/api/client';
+import { getAccountPlan, getPlanDetails } from '@/lib/planGating';
 
 interface AddPropertyModalProps {
   isOpen: boolean;
@@ -22,6 +23,8 @@ interface PropertyFormData {
   country: string;
   propertyType: PropertyTypeValue;
   totalUnits: string;
+  defaultBedrooms: string;
+  defaultBathrooms: string;
   defaultRent: string;
   unitNumbers: string;
 }
@@ -54,6 +57,8 @@ export function AddPropertyModal({ isOpen, onClose, onSuccess }: AddPropertyModa
     country: 'USA',
     propertyType: 'residential',
     totalUnits: '1',
+    defaultBedrooms: '1',
+    defaultBathrooms: '1',
     defaultRent: '',
     unitNumbers: '',
   });
@@ -74,7 +79,19 @@ export function AddPropertyModal({ isOpen, onClose, onSuccess }: AddPropertyModa
         throw new Error('No account found');
       }
 
+      const planInfo = await getAccountPlan();
+      const activePlan = planInfo?.plan || 'basic';
+      const planDetails = getPlanDetails(activePlan);
+      const propertyLimit = activePlan === 'premium' ? Number.MAX_SAFE_INTEGER : planDetails.maxUnits;
+
+      if ((planInfo?.current_properties || 0) >= propertyLimit) {
+        setFormError(`Your ${planDetails.displayName} plan allows up to ${planDetails.maxUnits} properties.`);
+        return;
+      }
+
       const totalUnits = Math.max(1, Number(formData.totalUnits) || 1);
+      const defaultBedrooms = Math.max(0, Number(formData.defaultBedrooms) || 0);
+      const defaultBathrooms = Math.max(0, Number(formData.defaultBathrooms) || 0);
       const defaultRent = Number(formData.defaultRent) || 0;
       const unitNumbers = formData.unitNumbers
         .split(',')
@@ -115,6 +132,8 @@ export function AddPropertyModal({ isOpen, onClose, onSuccess }: AddPropertyModa
           account_id: accountId,
           property_id: property.id,
           unit_number: unitNumbers[index] || String(index + 1),
+          bedrooms: defaultBedrooms,
+          bathrooms: defaultBathrooms,
           rent_amount: defaultRent,
         }));
 
@@ -139,6 +158,8 @@ export function AddPropertyModal({ isOpen, onClose, onSuccess }: AddPropertyModa
         country: 'USA',
         propertyType: 'residential',
         totalUnits: '1',
+        defaultBedrooms: '1',
+        defaultBathrooms: '1',
         defaultRent: '',
         unitNumbers: '',
       });
@@ -353,6 +374,46 @@ export function AddPropertyModal({ isOpen, onClose, onSuccess }: AddPropertyModa
               } border rounded-lg focus:outline-none focus:border-[#ff6b35]/50`}
               style={{ fontFamily: 'Work Sans, sans-serif' }}
             />
+          </div>
+
+          {/* Default Bedrooms & Bathrooms */}
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className={`block text-sm font-medium mb-2 ${text.primary}`}>
+                Bedrooms (per unit)
+              </label>
+              <input
+                type="number"
+                name="defaultBedrooms"
+                value={formData.defaultBedrooms}
+                onChange={handleChange}
+                min={0}
+                step={1}
+                placeholder="1"
+                className={`w-full px-4 py-3 ${
+                  isDark ? 'bg-white/5 border-white/10' : 'bg-gray-50 border-gray-300'
+                } border rounded-lg focus:outline-none focus:border-[#ff6b35]/50`}
+                style={{ fontFamily: 'Work Sans, sans-serif' }}
+              />
+            </div>
+            <div>
+              <label className={`block text-sm font-medium mb-2 ${text.primary}`}>
+                Bathrooms (per unit)
+              </label>
+              <input
+                type="number"
+                name="defaultBathrooms"
+                value={formData.defaultBathrooms}
+                onChange={handleChange}
+                min={0}
+                step={0.5}
+                placeholder="1"
+                className={`w-full px-4 py-3 ${
+                  isDark ? 'bg-white/5 border-white/10' : 'bg-gray-50 border-gray-300'
+                } border rounded-lg focus:outline-none focus:border-[#ff6b35]/50`}
+                style={{ fontFamily: 'Work Sans, sans-serif' }}
+              />
+            </div>
           </div>
 
           {/* Default Rent */}

@@ -1,6 +1,15 @@
 import { supabaseAdmin as supabase } from '../supabase';
 import { logActivityEvent } from './activityService';
 import { AiDisabledError, generateStructuredJson, getAiStatus } from './aiClient';
+import { sendResendEmail } from './emailService';
+import { stripe } from '../stripe';
+import { config } from '../config';
+import {
+  buildMaintenanceActionUrl,
+  createNotifications,
+  getAccountRoleMap,
+  getAccountUsersByRoles,
+} from './notificationService';
 
 function formatPropertyAddress(property: any) {
   if (!property) return '';
@@ -8,6 +17,135 @@ function formatPropertyAddress(property: any) {
   const cityStateZip = [property.city, property.state, property.zip].filter(Boolean).join(' ');
   if (cityStateZip) parts.push(cityStateZip);
   return parts.join(', ');
+}
+
+function normalizeRelation<T>(value: T | T[] | null | undefined): T | null {
+  if (!value) return null;
+  if (Array.isArray(value)) return value[0] || null;
+  return value;
+}
+
+function normalizeImageUrls(value: any): string[] {
+  if (!value) return [];
+
+  const list = Array.isArray(value) ? value : typeof value === 'string' ? (() => {
+    try {
+      const parsed = JSON.parse(value);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return value.startsWith('http') ? [value] : [];
+    }
+  })() : [];
+
+  const seen = new Set<string>();
+  const urls: string[] = [];
+  for (const item of list) {
+    if (typeof item !== 'string') continue;
+    const trimmed = item.trim();
+    if (!trimmed || seen.has(trimmed)) continue;
+    seen.add(trimmed);
+    urls.push(trimmed);
+  }
+
+  return urls;
+}
+
+function formatPhotoLines(title: string, urls: string[]) {
+  if (urls.length === 0) return [];
+  return [title, ...urls.map((url) => `- ${url}`), ''];
+}
+
+function formatUsdAmount(value: number) {
+  return `$${value.toFixed(2)}`;
+}
+
+function isMissingColumnError(error: any, column: string) {
+  const code = String(error?.code || '');
+  const message = String(error?.message || '').toLowerCase();
+  const field = column.toLowerCase();
+  return (
+    code === '42703' ||
+    code === 'PGRST204' ||
+    message.includes(`column "${field}"`) ||
+    message.includes(`column '${field}'`) ||
+    message.includes(`'${field}' column`) ||
+    (message.includes(field) && message.includes('does not exist'))
+  );
+}
+
+function buildMaintenanceLocationLabel(request: {
+  property?: { name?: string | null } | null;
+  unit?: { unit_number?: string | null } | null;
+}) {
+  const propertyName = request.property?.name || 'Property';
+  const unitLabel = request.unit?.unit_number ? ` #${request.unit.unit_number}` : '';
+  return `${propertyName}${unitLabel}`;
+}
+
+async function notifyMaintenanceUsers(params: {
+  accountId: string;
+  recipientIds: string[];
+  requestId: string;
+  title: string;
+  message: string;
+  payload?: Record<string, any>;
+}) {
+  const recipientIds = Array.from(new Set(params.recipientIds.filter(Boolean)));
+  if (recipientIds.length === 0) {
+    return;
+  }
+
+  const roleMap = await getAccountRoleMap(params.accountId, recipientIds);
+  await createNotifications(
+    recipientIds.map((recipientId) => ({
+      accountId: params.accountId,
+      userId: recipientId,
+      type: 'maintenance_update',
+      title: params.title,
+      message: params.message,
+      actionUrl: buildMaintenanceActionUrl(roleMap.get(recipientId), params.requestId),
+      relatedEntityType: 'maintenance_request',
+      relatedEntityId: params.requestId,
+      payload: params.payload,
+    }))
+  );
+}
+
+async function findVendorStripeAccountIdByMetadata(params: {
+  accountId: string;
+  vendorProfileId: string;
+  vendorUserId: string;
+}): Promise<string | null> {
+  try {
+    let startingAfter: string | undefined = undefined;
+    for (let page = 0; page < 10; page += 1) {
+      const accountPage: Awaited<ReturnType<typeof stripe.accounts.list>> = await stripe.accounts.list({
+        limit: 100,
+        ...(startingAfter ? { starting_after: startingAfter } : {}),
+      });
+
+      const match = (accountPage.data || []).find((account: any) => {
+        const metadata = account?.metadata || {};
+        const profileMatch = String(metadata.vendor_profile_id || '') === params.vendorProfileId;
+        const userMatch = String(metadata.user_id || '') === params.vendorUserId;
+        const accountMatch = !metadata.account_id || String(metadata.account_id) === params.accountId;
+        return (profileMatch || userMatch) && accountMatch;
+      });
+
+      if (match?.id) {
+        return match.id;
+      }
+
+      if (!accountPage.has_more || accountPage.data.length === 0) {
+        break;
+      }
+      startingAfter = accountPage.data[accountPage.data.length - 1]?.id;
+    }
+  } catch (error) {
+    console.warn('[Maintenance] Failed to resolve vendor Stripe account by metadata:', error);
+  }
+
+  return null;
 }
 
 export interface MaintenanceRequest {
@@ -39,6 +177,7 @@ export interface CreateMaintenanceData {
   category: string;
   unitId: string;
   reportedBy?: string;
+  images?: string[];
 }
 
 export interface UpdateMaintenanceData {
@@ -172,27 +311,44 @@ export async function createMaintenanceRequest(
     throw new Error('Unit does not belong to your account');
   }
 
-  const { data: request, error } = await supabase
-    .from('maintenance_requests')
-    .insert({
-      account_id: accountId,
-      property_id: unit.property_id,
-      unit_id: data.unitId,
-      title: data.title,
-      description: data.description,
-      priority: data.priority,
-      category: data.category,
-      status: 'open',
-      reported_by: data.reportedBy || userId,
-    })
-    .select(
-      `
+  const basePayload = {
+    account_id: accountId,
+    property_id: unit.property_id,
+    unit_id: data.unitId,
+    title: data.title,
+    description: data.description,
+    priority: data.priority,
+    category: data.category,
+    status: 'open',
+    reported_by: data.reportedBy || userId,
+  };
+
+  const requestSelect = `
       *,
       property:properties!inner(name, address1, address2, city, state, zip),
       unit:units!inner(unit_number)
-    `
-    )
-    .single();
+    `;
+
+  let request: any = null;
+  let error: any = null;
+
+  ({ data: request, error } = await supabase
+    .from('maintenance_requests')
+    .insert({
+      ...basePayload,
+      images: normalizeImageUrls(data.images),
+    })
+    .select(requestSelect)
+    .single());
+
+  // Older schemas may not have maintenance_requests.images yet.
+  if (error && isMissingColumnError(error, 'images')) {
+    ({ data: request, error } = await supabase
+      .from('maintenance_requests')
+      .insert(basePayload)
+      .select(requestSelect)
+      .single());
+  }
 
   if (error) throw error;
 
@@ -255,6 +411,67 @@ export async function createMaintenanceRequest(
     }
   );
 
+  // In-app owner/manager/admin notification for tenant-submitted requests.
+  const requesterUserId = request.reported_by || userId;
+  if (requesterUserId) {
+    try {
+      const { data: requesterMembership } = await supabase
+        .from('account_members')
+        .select('role')
+        .eq('account_id', accountId)
+        .eq('user_id', requesterUserId)
+        .eq('is_active', true)
+        .maybeSingle();
+
+      if (requesterMembership?.role === 'tenant') {
+        const recipients = await getAccountUsersByRoles(accountId, ['owner', 'manager', 'admin'], {
+          excludeUserIds: [requesterUserId],
+        });
+
+        await notifyMaintenanceUsers({
+          accountId,
+          recipientIds: recipients,
+          requestId: request.id,
+          title: 'New tenant maintenance request',
+          message: [
+            `A tenant submitted a new maintenance request.`,
+            `Title: ${request.title}`,
+            `Priority: ${request.priority}`,
+            `Location: ${buildMaintenanceLocationLabel(request)}`,
+          ].join('\n'),
+          payload: {
+            requestId: request.id,
+            priority: request.priority,
+            category: request.category,
+            status: request.status,
+          },
+        });
+
+        await notifyMaintenanceUsers({
+          accountId,
+          recipientIds: [requesterUserId],
+          requestId: request.id,
+          title: 'Maintenance request submitted',
+          message: [
+            `Your maintenance request has been submitted.`,
+            `Title: ${request.title}`,
+            `Priority: ${request.priority}`,
+            `Location: ${buildMaintenanceLocationLabel(request)}`,
+            `Status: ${request.status}`,
+          ].join('\n'),
+          payload: {
+            requestId: request.id,
+            priority: request.priority,
+            category: request.category,
+            status: request.status,
+          },
+        });
+      }
+    } catch (notificationError) {
+      console.warn('[Maintenance] Unexpected notification error after request create:', notificationError);
+    }
+  }
+
   return {
     id: request.id,
     title: request.title,
@@ -284,6 +501,13 @@ export async function updateMaintenanceRequest(
   requestId: string,
   updates: UpdateMaintenanceData
 ): Promise<MaintenanceRequest> {
+  const { data: existingRequest } = await supabase
+    .from('maintenance_requests')
+    .select('id, status, reported_by')
+    .eq('id', requestId)
+    .eq('account_id', accountId)
+    .maybeSingle();
+
   const updateData: any = {};
   if (updates.status) updateData.status = updates.status;
   if (updates.assignedTo !== undefined) updateData.assigned_to = updates.assignedTo;
@@ -320,6 +544,37 @@ export async function updateMaintenanceRequest(
         metadata: { newStatus: updates.status },
       }
     );
+
+    try {
+      const ownerRecipients = await getAccountUsersByRoles(accountId, ['owner', 'manager', 'admin'], {
+        excludeUserIds: userId ? [userId] : [],
+      });
+      const tenantRecipients =
+        data.reported_by && data.reported_by !== userId ? [data.reported_by] : [];
+      const recipients = [...ownerRecipients, ...tenantRecipients];
+
+      await notifyMaintenanceUsers({
+        accountId,
+        recipientIds: recipients,
+        requestId,
+        title: 'Maintenance status updated',
+        message: [
+          `Maintenance request updated: ${data.title}`,
+          existingRequest?.status ? `Previous status: ${existingRequest.status}` : null,
+          `Current status: ${updates.status}`,
+          `Location: ${buildMaintenanceLocationLabel(data)}`,
+        ]
+          .filter(Boolean)
+          .join('\n'),
+        payload: {
+          requestId,
+          previousStatus: existingRequest?.status || null,
+          status: updates.status,
+        },
+      });
+    } catch (notificationError) {
+      console.warn('[Maintenance] Failed to create status notifications:', notificationError);
+    }
   }
 
   return {
@@ -537,6 +792,27 @@ export async function getAvailableVendors(
   let data: any = null;
   let error: any = null;
 
+  const { data: vendorMembers, error: membersError } = await supabase
+    .from('account_members')
+    .select('user_id, role, is_active')
+    .eq('account_id', accountId)
+    .eq('role', 'vendor')
+    .eq('is_active', true);
+
+  if (membersError) {
+    throw membersError;
+  }
+
+  const vendorUserIds = new Set(
+    (vendorMembers || [])
+      .map((member: any) => member.user_id)
+      .filter(Boolean)
+  );
+
+  if (vendorUserIds.size === 0) {
+    return [];
+  }
+
   if (typeof radiusMiles === 'number') {
     ({ data, error } = await supabase.rpc('find_available_vendors', {
       p_account_id: accountId,
@@ -568,29 +844,32 @@ export async function getAvailableVendors(
     const vendorIds = (data || []).map((v: any) => v.vendor_id).filter(Boolean);
     const { data: vendorProfiles } = await supabase
       .from('vendor_profiles')
-      .select('id, email, business_name')
+      .select('id, email, business_name, user_id')
       .eq('account_id', accountId)
       .in('id', vendorIds);
+    const invitedProfiles = (vendorProfiles || []).filter((v: any) => vendorUserIds.has(v.user_id));
     const vendorEmailMap = new Map(
-      (vendorProfiles || []).map((v: any) => [v.id, { email: v.email || null, businessName: v.business_name }])
+      invitedProfiles.map((v: any) => [v.id, { email: v.email || null, businessName: v.business_name }])
     );
 
     return (
-      data?.map((v: any) => ({
-        id: v.vendor_id,
-        businessName: vendorEmailMap.get(v.vendor_id)?.businessName || v.business_name,
-        rating: v.rating ?? 0,
-        jobsCompleted: v.jobs_completed ?? 0,
-        hourlyRate: v.hourly_rate ?? 85,
-        email: vendorEmailMap.get(v.vendor_id)?.email || null,
-      })) || []
+      data
+        ?.filter((v: any) => vendorEmailMap.has(v.vendor_id))
+        .map((v: any) => ({
+          id: v.vendor_id,
+          businessName: vendorEmailMap.get(v.vendor_id)?.businessName || v.business_name,
+          rating: v.rating ?? 0,
+          jobsCompleted: v.jobs_completed ?? 0,
+          hourlyRate: v.hourly_rate ?? 85,
+          email: vendorEmailMap.get(v.vendor_id)?.email || null,
+        })) || []
     );
   }
 
   // Fallback: fetch vendors directly when RPC is unavailable or misconfigured.
   const { data: vendorProfiles, error: vendorError } = await supabase
     .from('vendor_profiles')
-    .select('id, business_name, email, avg_rating, total_jobs_completed, is_active')
+    .select('id, business_name, email, avg_rating, total_jobs_completed, is_active, user_id')
     .eq('account_id', accountId)
     .eq('is_active', true);
 
@@ -598,7 +877,9 @@ export async function getAvailableVendors(
     throw vendorError;
   }
 
-  let eligibleVendorIds = new Set<string>((vendorProfiles || []).map((v) => v.id));
+  const invitedProfiles = (vendorProfiles || []).filter((v) => vendorUserIds.has(v.user_id));
+
+  let eligibleVendorIds = new Set<string>((invitedProfiles || []).map((v) => v.id));
 
   if (category) {
     const { data: vendorServices, error: servicesError } = await supabase
@@ -616,7 +897,7 @@ export async function getAvailableVendors(
     }
   }
 
-  return (vendorProfiles || [])
+  return (invitedProfiles || [])
     .filter((v) => eligibleVendorIds.has(v.id))
     .map((v) => ({
       id: v.id,
@@ -672,17 +953,33 @@ export async function assignVendorToRequest(
   const scheduledFor = new Date();
   scheduledFor.setHours(scheduledFor.getHours() + etaHours);
 
-  // Update request status
-  const { error: updateError } = await supabase
+  const assignmentTimestamp = new Date().toISOString();
+  const updatePayload = {
+    status: 'assigned',
+    assigned_at: assignmentTimestamp,
+    eta_hours: etaHours,
+    scheduled_for: scheduledFor.toISOString(),
+  };
+
+  // Update request status (fallback for schemas without eta_hours).
+  let updateError: any = null;
+  ({ error: updateError } = await supabase
     .from('maintenance_requests')
-    .update({
-      status: 'assigned',
-      assigned_at: new Date().toISOString(),
-      eta_hours: etaHours,
-      scheduled_for: scheduledFor.toISOString(),
-    })
+    .update(updatePayload)
     .eq('id', requestId)
-    .eq('account_id', accountId);
+    .eq('account_id', accountId));
+
+  if (updateError && isMissingColumnError(updateError, 'eta_hours')) {
+    ({ error: updateError } = await supabase
+      .from('maintenance_requests')
+      .update({
+        status: 'assigned',
+        assigned_at: assignmentTimestamp,
+        scheduled_for: scheduledFor.toISOString(),
+      })
+      .eq('id', requestId)
+      .eq('account_id', accountId));
+  }
 
   if (updateError) throw updateError;
 
@@ -711,16 +1008,19 @@ export async function assignVendorToRequest(
     if (!vendorError && vendorProfile?.user_id) {
       const { data: requestDetails } = await supabase
         .from('maintenance_requests')
-        .select('title, description, priority, category, property_id, unit_id, requested_at, properties(name, address1, address2, city, state, zip), units(unit_number)')
+        .select('title, description, priority, category, property_id, unit_id, requested_at, reported_by, images, properties(name, address1, address2, city, state, zip), units(unit_number)')
         .eq('id', requestId)
         .eq('account_id', accountId)
         .single();
 
       const subject = `Maintenance assignment: ${requestDetails?.title || 'New request'}`;
-      const propertyName = requestDetails?.properties?.[0]?.name || 'Property';
-      const propertyAddress = formatPropertyAddress(requestDetails?.properties?.[0]);
-      const unitNumber = requestDetails?.units?.[0]?.unit_number
-        ? ` #${requestDetails.units[0].unit_number}`
+      const property = normalizeRelation<any>(requestDetails?.properties);
+      const unit = normalizeRelation<any>(requestDetails?.units);
+      const issueImageUrls = normalizeImageUrls(requestDetails?.images);
+      const propertyName = property?.name || 'Property';
+      const propertyAddress = formatPropertyAddress(property);
+      const unitNumber = unit?.unit_number
+        ? ` #${unit.unit_number}`
         : '';
       const body = [
         `You have been assigned a maintenance request.`,
@@ -730,6 +1030,7 @@ export async function assignVendorToRequest(
         `Priority: ${requestDetails?.priority || 'normal'}`,
         `Category: ${requestDetails?.category || 'general'}`,
         `Description: ${requestDetails?.description || 'N/A'}`,
+        ...formatPhotoLines('Issue photos uploaded by tenant:', issueImageUrls),
       ].join('\n');
 
       const { sendMessage } = await import('./communicationsService');
@@ -754,13 +1055,59 @@ export async function assignVendorToRequest(
           requestDescription: requestDetails?.description || undefined,
           propertyName,
           propertyAddress: propertyAddress || undefined,
-          unitNumber: requestDetails?.units?.[0]?.unit_number || undefined,
+          unitNumber: unit?.unit_number || undefined,
           priority: requestDetails?.priority || undefined,
           category: requestDetails?.category || undefined,
           requestedAt: requestDetails?.requested_at || undefined,
+          issueImageUrls,
           requestId,
         });
       }
+
+      await notifyMaintenanceUsers({
+        accountId,
+        recipientIds: [vendorProfile.user_id],
+        requestId,
+        title: 'New maintenance assignment',
+        message: [
+          'You have been assigned a maintenance request.',
+          `Title: ${requestDetails?.title || 'N/A'}`,
+          `Priority: ${requestDetails?.priority || 'normal'}`,
+          `Location: ${propertyName}${unitNumber}`,
+        ].join('\n'),
+        payload: {
+          requestId,
+          vendorProfileId,
+          status: 'assigned',
+        },
+      });
+
+      const ownerRecipients = await getAccountUsersByRoles(accountId, ['owner', 'manager', 'admin'], {
+        excludeUserIds: userId ? [userId] : [],
+      });
+      const tenantRecipientIds =
+        typeof (requestDetails as any)?.reported_by === 'string' && (requestDetails as any).reported_by !== userId
+          ? [(requestDetails as any).reported_by]
+          : [];
+
+      await notifyMaintenanceUsers({
+        accountId,
+        recipientIds: [...ownerRecipients, ...tenantRecipientIds],
+        requestId,
+        title: 'Vendor assigned to maintenance request',
+        message: [
+          `${vendorProfile.business_name || 'A vendor'} has been assigned.`,
+          `Title: ${requestDetails?.title || 'N/A'}`,
+          `Location: ${propertyName}${unitNumber}`,
+          `Estimated response window: ${etaHours} hour${etaHours === 1 ? '' : 's'}`,
+        ].join('\n'),
+        payload: {
+          requestId,
+          vendorProfileId,
+          etaHours,
+          status: 'assigned',
+        },
+      });
     }
   } catch (error) {
     console.warn('[assignVendorToRequest] Failed to notify vendor:', error);
@@ -778,15 +1125,9 @@ async function sendVendorAssignmentEmail(payload: {
   priority?: string;
   category?: string;
   requestedAt?: string;
+  issueImageUrls?: string[];
   requestId: string;
 }): Promise<void> {
-  const apiKey = process.env.RESEND_API_KEY;
-  const fromEmail = process.env.RESEND_FROM_EMAIL;
-
-  if (!apiKey || !fromEmail) {
-    throw new Error('RESEND_API_KEY/RESEND_FROM_EMAIL not configured');
-  }
-
   const unitLabel = payload.unitNumber ? `#${payload.unitNumber}` : 'N/A';
   const lines = [
     `Hello${payload.vendorName ? ` ${payload.vendorName}` : ''},`,
@@ -802,25 +1143,626 @@ async function sendVendorAssignmentEmail(payload: {
     `Priority: ${payload.priority || 'normal'}`,
     `Category: ${payload.category || 'general'}`,
     `Reported: ${payload.requestedAt || 'N/A'}`,
+    ...formatPhotoLines('Issue photos uploaded by tenant:', normalizeImageUrls(payload.issueImageUrls)),
   ];
 
-  const response = await fetch('https://api.resend.com/emails', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      from: fromEmail,
-      to: [payload.vendorEmail],
-      subject: `Maintenance Assignment: ${payload.requestTitle || payload.requestId}`,
-      text: lines.join('\n'),
-    }),
+  await sendResendEmail({
+    to: payload.vendorEmail,
+    subject: `Maintenance Assignment: ${payload.requestTitle || payload.requestId}`,
+    text: lines.join('\n'),
+  });
+}
+
+async function resolveAssigningOwnerUserId(accountId: string, requestId: string): Promise<string | null> {
+  try {
+    const { data: events, error: eventsError } = await supabase
+      .from('activity_events')
+      .select('user_id, created_at')
+      .eq('account_id', accountId)
+      .eq('event_type', 'maintenance_assigned')
+      .eq('entity_type', 'maintenance_request')
+      .eq('entity_id', requestId)
+      .not('user_id', 'is', null)
+      .order('created_at', { ascending: false })
+      .limit(10);
+
+    if (eventsError) {
+      const message = String(eventsError.message || '').toLowerCase();
+      if (!message.includes('does not exist')) {
+        throw eventsError;
+      }
+    } else if (events && events.length > 0) {
+      for (const event of events) {
+        if (!event.user_id) continue;
+        const { data: member } = await supabase
+          .from('account_members')
+          .select('role, is_active')
+          .eq('account_id', accountId)
+          .eq('user_id', event.user_id)
+          .maybeSingle();
+
+        if (member?.is_active !== false && ['owner', 'manager', 'admin'].includes(member?.role || '')) {
+          return event.user_id;
+        }
+      }
+    }
+  } catch (error) {
+    console.warn('[Maintenance] Failed to resolve assigning owner from activity events:', error);
+  }
+
+  const { data: owners, error: ownerError } = await supabase
+    .from('account_members')
+    .select('user_id, role, joined_at, created_at')
+    .eq('account_id', accountId)
+    .eq('is_active', true)
+    .in('role', ['owner', 'manager', 'admin'])
+    .order('joined_at', { ascending: false });
+
+  if (ownerError || !owners || owners.length === 0) {
+    return null;
+  }
+
+  const sorted = [...owners].sort((a, b) => {
+    const dateA = new Date(a.joined_at || a.created_at || 0).getTime();
+    const dateB = new Date(b.joined_at || b.created_at || 0).getTime();
+    return dateB - dateA;
   });
 
-  if (!response.ok) {
-    throw new Error(`Vendor email failed with status ${response.status}`);
+  return sorted[0]?.user_id || null;
+}
+
+export async function updateMaintenanceAssignmentPhotosAndNotify(
+  accountId: string,
+  actorUserId: string,
+  params: {
+    assignmentId: string;
+    requestId: string;
+    beforeImages?: string[] | null;
+    afterImages?: string[] | null;
   }
+): Promise<{
+  beforeImages: string[];
+  afterImages: string[];
+  notifiedRecipients: string[];
+}> {
+  const { assignmentId, requestId, beforeImages, afterImages } = params;
+
+  const { data: assignment, error: assignmentError } = await supabase
+    .from('maintenance_assignments')
+    .select('id, request_id, vendor_profile_id, before_images, after_images')
+    .eq('id', assignmentId)
+    .eq('request_id', requestId)
+    .eq('account_id', accountId)
+    .single();
+
+  if (assignmentError || !assignment) {
+    throw new Error('Maintenance assignment not found');
+  }
+
+  const existingBefore = normalizeImageUrls(assignment.before_images);
+  const existingAfter = normalizeImageUrls(assignment.after_images);
+  const nextBefore = Array.isArray(beforeImages)
+    ? normalizeImageUrls(beforeImages)
+    : existingBefore;
+  const nextAfter = Array.isArray(afterImages)
+    ? normalizeImageUrls(afterImages)
+    : existingAfter;
+
+  const updates: Record<string, any> = {};
+  if (Array.isArray(beforeImages)) updates.before_images = nextBefore;
+  if (Array.isArray(afterImages)) updates.after_images = nextAfter;
+
+  if (Object.keys(updates).length > 0) {
+    const { error: updateError } = await supabase
+      .from('maintenance_assignments')
+      .update(updates)
+      .eq('id', assignmentId)
+      .eq('request_id', requestId)
+      .eq('account_id', accountId);
+
+    if (updateError) {
+      throw updateError;
+    }
+  }
+
+  const addedBefore = Array.isArray(beforeImages)
+    ? nextBefore.filter((url) => !existingBefore.includes(url))
+    : [];
+  const addedAfter = Array.isArray(afterImages)
+    ? nextAfter.filter((url) => !existingAfter.includes(url))
+    : [];
+
+  const newlyAdded = [...addedBefore, ...addedAfter];
+  if (newlyAdded.length === 0) {
+    return {
+      beforeImages: nextBefore,
+      afterImages: nextAfter,
+      notifiedRecipients: [],
+    };
+  }
+
+  const [{ data: request }, { data: vendorProfile }] = await Promise.all([
+    supabase
+      .from('maintenance_requests')
+      .select('id, title, property_id, unit_id, created_by_user_id, properties(name, address1, address2, city, state, zip), units(unit_number)')
+      .eq('id', requestId)
+      .eq('account_id', accountId)
+      .single(),
+    assignment.vendor_profile_id
+      ? supabase
+          .from('vendor_profiles')
+          .select('id, user_id, business_name')
+          .eq('id', assignment.vendor_profile_id)
+          .eq('account_id', accountId)
+          .maybeSingle()
+      : Promise.resolve({ data: null, error: null } as any),
+  ]);
+
+  const recipients = new Set<string>();
+  if (request?.created_by_user_id && request.created_by_user_id !== actorUserId) {
+    recipients.add(request.created_by_user_id);
+  }
+
+  const assigningOwnerUserId = await resolveAssigningOwnerUserId(accountId, requestId);
+  if (assigningOwnerUserId && assigningOwnerUserId !== actorUserId) {
+    recipients.add(assigningOwnerUserId);
+  }
+
+  const recipientIds = [...recipients];
+  if (recipientIds.length === 0) {
+    return {
+      beforeImages: nextBefore,
+      afterImages: nextAfter,
+      notifiedRecipients: [],
+    };
+  }
+
+  const property = normalizeRelation<any>(request?.properties);
+  const unit = normalizeRelation<any>(request?.units);
+  const propertyName = property?.name || 'Property';
+  const unitLabel = unit?.unit_number ? ` #${unit.unit_number}` : '';
+  const vendorName = vendorProfile?.business_name || 'Assigned vendor';
+  const subject = `Maintenance photo update: ${request?.title || requestId}`;
+  const bodyLines = [
+    `${vendorName} uploaded new work photos for a maintenance request.`,
+    `Title: ${request?.title || 'N/A'}`,
+    `Property: ${propertyName}${unitLabel}`,
+    `Address: ${formatPropertyAddress(property) || 'N/A'}`,
+    ...formatPhotoLines('New before-work photos:', addedBefore),
+    ...formatPhotoLines('New after-work photos:', addedAfter),
+  ];
+
+  const { sendMessage } = await import('./communicationsService');
+  const notifiedRecipients: string[] = [];
+  for (const recipientId of recipientIds) {
+    try {
+      await sendMessage(accountId, actorUserId, {
+        recipientId,
+        subject,
+        body: bodyLines.join('\n'),
+        propertyId: request?.property_id || undefined,
+        unitId: request?.unit_id || undefined,
+      });
+      notifiedRecipients.push(recipientId);
+    } catch (error) {
+      console.warn('[Maintenance] Failed to notify photo update recipient:', {
+        requestId,
+        assignmentId,
+        recipientId,
+        error,
+      });
+    }
+  }
+
+  await logActivityEvent(
+    accountId,
+    actorUserId,
+    'maintenance_photo_update',
+    `Vendor uploaded maintenance photos`,
+    {
+      entityType: 'maintenance_request',
+      entityId: requestId,
+      metadata: {
+        assignmentId,
+        beforeCount: addedBefore.length,
+        afterCount: addedAfter.length,
+        recipientsNotified: notifiedRecipients,
+      },
+    }
+  );
+
+  return {
+    beforeImages: nextBefore,
+    afterImages: nextAfter,
+    notifiedRecipients,
+  };
+}
+
+export async function completeMaintenanceAssignmentAndCreatePaymentLink(
+  accountId: string,
+  actorUserId: string,
+  params: {
+    assignmentId: string;
+    requestId: string;
+    actualCost: number;
+    notes?: string | null;
+  }
+): Promise<{
+  checkoutSessionId: string;
+  paymentUrl: string;
+  notifiedRecipients: string[];
+}> {
+  const { assignmentId, requestId } = params;
+  const normalizedCost = Number(params.actualCost);
+
+  if (!Number.isFinite(normalizedCost) || normalizedCost <= 0) {
+    throw new Error('actualCost must be a number greater than 0');
+  }
+
+  const { data: assignment, error: assignmentError } = await supabase
+    .from('maintenance_assignments')
+    .select('id, request_id, vendor_profile_id, status, before_images, after_images')
+    .eq('id', assignmentId)
+    .eq('request_id', requestId)
+    .eq('account_id', accountId)
+    .single();
+
+  if (assignmentError || !assignment) {
+    throw new Error('Maintenance assignment not found');
+  }
+
+  if (!assignment.vendor_profile_id) {
+    throw new Error('No vendor is assigned to this maintenance request');
+  }
+
+  let vendorProfile: any = null;
+  let vendorError: any = null;
+
+  ({ data: vendorProfile, error: vendorError } = await supabase
+    .from('vendor_profiles')
+    .select('id, user_id, business_name, email, stripe_connected_account_id')
+    .eq('id', assignment.vendor_profile_id)
+    .eq('account_id', accountId)
+    .single());
+
+  if (vendorError && isMissingColumnError(vendorError, 'stripe_connected_account_id')) {
+    ({ data: vendorProfile, error: vendorError } = await supabase
+      .from('vendor_profiles')
+      .select('id, user_id, business_name, email')
+      .eq('id', assignment.vendor_profile_id)
+      .eq('account_id', accountId)
+      .single());
+  }
+
+  if (vendorError || !vendorProfile) {
+    throw new Error('Assigned vendor profile was not found');
+  }
+
+  if (vendorProfile.user_id !== actorUserId) {
+    throw new Error('You are not assigned to this maintenance request');
+  }
+
+  let vendorStripeAccountId = String(vendorProfile.stripe_connected_account_id || '').trim();
+  if (!vendorStripeAccountId) {
+    const discoveredStripeAccountId = await findVendorStripeAccountIdByMetadata({
+      accountId,
+      vendorProfileId: vendorProfile.id,
+      vendorUserId: vendorProfile.user_id,
+    });
+    vendorStripeAccountId = String(discoveredStripeAccountId || '').trim();
+  }
+
+  if (!vendorStripeAccountId) {
+    throw new Error('Vendor Stripe account is not connected. Complete Stripe onboarding in the vendor portal before requesting payout.');
+  }
+  if (!vendorStripeAccountId.startsWith('acct_')) {
+    throw new Error('Vendor Stripe account ID is invalid. Expected value starting with acct_.');
+  }
+
+  try {
+    const stripeAccount = await stripe.accounts.retrieve(vendorStripeAccountId);
+    if (!stripeAccount?.charges_enabled || !stripeAccount?.payouts_enabled) {
+      throw new Error('Vendor Stripe account is not fully enabled for charges/payouts.');
+    }
+  } catch (error) {
+    if (error instanceof Error) {
+      throw new Error(`Unable to verify vendor Stripe account: ${error.message}`);
+    }
+    throw new Error('Unable to verify vendor Stripe account');
+  }
+
+  const { data: request, error: requestError } = await supabase
+    .from('maintenance_requests')
+    .select(
+      `
+      id,
+      title,
+      description,
+      property_id,
+      unit_id,
+      requested_at,
+      images,
+      reported_by,
+      properties(name, address1, address2, city, state, zip),
+      units(unit_number)
+    `
+    )
+    .eq('id', requestId)
+    .eq('account_id', accountId)
+    .single();
+
+  if (requestError || !request) {
+    throw new Error('Maintenance request not found');
+  }
+
+  const amountInCents = Math.round(normalizedCost * 100);
+  if (!Number.isFinite(amountInCents) || amountInCents <= 0) {
+    throw new Error('Invalid maintenance completion cost');
+  }
+
+  const property = normalizeRelation<any>(request.properties);
+  const unit = normalizeRelation<any>(request.units);
+  const propertyName = property?.name || 'Property';
+  const unitLabel = unit?.unit_number ? `Unit ${unit.unit_number}` : null;
+  const vendorName = vendorProfile.business_name || 'Assigned vendor';
+
+  const metadata: Record<string, string> = {
+    account_id: accountId,
+    request_id: requestId,
+    assignment_id: assignmentId,
+    vendor_profile_id: assignment.vendor_profile_id,
+    vendor_user_id: vendorProfile.user_id,
+    payment_type: 'vendor_maintenance_payout',
+    vendor_stripe_account_id: vendorStripeAccountId,
+  };
+
+  const checkoutSession = await stripe.checkout.sessions.create({
+    mode: 'payment',
+    payment_method_types: ['card'],
+    line_items: [
+      {
+        quantity: 1,
+        price_data: {
+          currency: 'usd',
+          unit_amount: amountInCents,
+          product_data: {
+            name: `Vendor Bill - ${request.title || 'Maintenance Request'}`,
+            description: [propertyName, unitLabel].filter(Boolean).join(' • ') || undefined,
+          },
+        },
+      },
+    ],
+    success_url: `${config.frontendUrl}/app/maintenance?vendor_bill=paid&request_id=${encodeURIComponent(requestId)}&session_id={CHECKOUT_SESSION_ID}`,
+    cancel_url: `${config.frontendUrl}/app/maintenance?vendor_bill=cancelled&request_id=${encodeURIComponent(requestId)}`,
+    metadata,
+    payment_intent_data: {
+      metadata,
+      transfer_data: {
+        destination: vendorStripeAccountId,
+      },
+    },
+  });
+
+  if (!checkoutSession.url) {
+    throw new Error('Stripe checkout URL was not returned');
+  }
+
+  const nowIso = new Date().toISOString();
+  const completionNotes = params.notes?.trim() || null;
+
+  const { error: updateAssignmentError } = await supabase
+    .from('maintenance_assignments')
+    .update({
+      status: 'completed',
+      completed_at: nowIso,
+      completion_notes: completionNotes,
+    })
+    .eq('id', assignmentId)
+    .eq('request_id', requestId)
+    .eq('account_id', accountId);
+
+  if (updateAssignmentError) {
+    throw updateAssignmentError;
+  }
+
+  const { error: updateRequestError } = await supabase
+    .from('maintenance_requests')
+    .update({
+      status: 'completed',
+      completed_at: nowIso,
+      actual_cost: normalizedCost,
+    })
+    .eq('id', requestId)
+    .eq('account_id', accountId);
+
+  if (updateRequestError) {
+    throw updateRequestError;
+  }
+
+  await logActivityEvent(
+    accountId,
+    actorUserId,
+    'maintenance_completed',
+    `Maintenance request completed by vendor: ${request.title || requestId}`,
+    {
+      entityType: 'maintenance_request',
+      entityId: requestId,
+      metadata: {
+        assignmentId,
+        actualCost: normalizedCost,
+        checkoutSessionId: checkoutSession.id,
+      },
+    }
+  );
+
+  const recipients = new Set<string>();
+  const assigningOwnerUserId = await resolveAssigningOwnerUserId(accountId, requestId);
+  if (assigningOwnerUserId && assigningOwnerUserId !== actorUserId) {
+    recipients.add(assigningOwnerUserId);
+  }
+
+  const { data: ownerMembers, error: ownerMembersError } = await supabase
+    .from('account_members')
+    .select('user_id')
+    .eq('account_id', accountId)
+    .eq('is_active', true)
+    .in('role', ['owner', 'manager', 'admin']);
+
+  if (!ownerMembersError) {
+    (ownerMembers || []).forEach((member: any) => {
+      if (member.user_id && member.user_id !== actorUserId) {
+        recipients.add(member.user_id);
+      }
+    });
+  }
+
+  if (recipients.size === 0) {
+    const fallbackUserId = request.reported_by || null;
+    if (fallbackUserId && fallbackUserId !== actorUserId) {
+      recipients.add(fallbackUserId);
+    }
+  }
+
+  if (request.reported_by && request.reported_by !== actorUserId) {
+    recipients.add(request.reported_by);
+  }
+
+  const recipientIds = Array.from(recipients);
+  if (recipientIds.length === 0) {
+    return {
+      checkoutSessionId: checkoutSession.id,
+      paymentUrl: checkoutSession.url,
+      notifiedRecipients: [],
+    };
+  }
+
+  const issueImages = normalizeImageUrls(request.images);
+  const beforeImages = normalizeImageUrls(assignment.before_images);
+  const afterImages = normalizeImageUrls(assignment.after_images);
+  const subject = `Job completed: ${request.title || requestId}`;
+  const messageLines = [
+    `${vendorName} marked this maintenance job as completed.`,
+    `Title: ${request.title || 'N/A'}`,
+    `Property: ${propertyName}${unit?.unit_number ? ` #${unit.unit_number}` : ''}`,
+    `Address: ${formatPropertyAddress(property) || 'N/A'}`,
+    `Total Cost: ${formatUsdAmount(normalizedCost)}`,
+    ...(completionNotes ? [`Completion Notes: ${completionNotes}`] : []),
+    ...formatPhotoLines('Tenant issue photos:', issueImages),
+    ...formatPhotoLines('Vendor before-work photos:', beforeImages),
+    ...formatPhotoLines('Vendor after-work photos:', afterImages),
+    `Pay vendor via Stripe: ${checkoutSession.url}`,
+  ];
+
+  const notificationMessage = [
+    `Job completed: ${request.title || 'Maintenance request'}`,
+    `Vendor: ${vendorName}`,
+    `Cost: ${formatUsdAmount(normalizedCost)}`,
+    ...(completionNotes ? [`Notes: ${completionNotes}`] : []),
+    ...formatPhotoLines('Before-work photos:', beforeImages),
+    ...formatPhotoLines('After-work photos:', afterImages),
+    `Pay vendor: ${checkoutSession.url}`,
+  ].join('\n');
+
+  const { sendMessage } = await import('./communicationsService');
+  const notifiedRecipients: string[] = [];
+  for (const recipientId of recipientIds) {
+    try {
+      await sendMessage(accountId, actorUserId, {
+        recipientId,
+        subject,
+        body: messageLines.join('\n'),
+        propertyId: request.property_id || undefined,
+        unitId: request.unit_id || undefined,
+      });
+      notifiedRecipients.push(recipientId);
+    } catch (error) {
+      console.warn('[Maintenance] Failed to send completion message to recipient:', {
+        requestId,
+        assignmentId,
+        recipientId,
+        error,
+      });
+    }
+  }
+
+  try {
+    await notifyMaintenanceUsers({
+      accountId,
+      recipientIds,
+      requestId,
+      title: subject,
+      message: notificationMessage,
+      payload: {
+        requestId,
+        assignmentId,
+        paymentUrl: checkoutSession.url,
+        actualCost: normalizedCost,
+        status: 'completed',
+      },
+    });
+  } catch (notificationError) {
+    console.warn('[Maintenance] Failed to create completion notifications:', notificationError);
+  }
+
+  return {
+    checkoutSessionId: checkoutSession.id,
+    paymentUrl: checkoutSession.url,
+    notifiedRecipients,
+  };
+}
+
+export async function notifyVendorPayoutCompleted(params: {
+  accountId: string;
+  requestId: string;
+  assignmentId?: string | null;
+  vendorUserId: string;
+  amount?: number | null;
+  checkoutSessionId?: string | null;
+}): Promise<void> {
+  const { accountId, requestId, assignmentId, vendorUserId, amount, checkoutSessionId } = params;
+
+  const { data: request } = await supabase
+    .from('maintenance_requests')
+    .select('title')
+    .eq('id', requestId)
+    .eq('account_id', accountId)
+    .maybeSingle();
+
+  await notifyMaintenanceUsers({
+    accountId,
+    recipientIds: [vendorUserId],
+    requestId,
+    title: 'Vendor payment completed',
+    message: [
+      `Payment for ${request?.title || 'your maintenance job'} has been completed.`,
+      amount ? `Amount: ${formatUsdAmount(amount)}` : null,
+    ]
+      .filter(Boolean)
+      .join('\n'),
+    payload: {
+      requestId,
+      assignmentId: assignmentId || null,
+      checkoutSessionId: checkoutSessionId || null,
+      amount: amount ?? null,
+      paymentStatus: 'paid',
+    },
+  });
+
+  await logActivityEvent(
+    accountId,
+    vendorUserId,
+    'vendor_payment_completed',
+    `Vendor payment completed for maintenance request ${requestId}`,
+    {
+      entityType: 'maintenance_request',
+      entityId: requestId,
+      metadata: {
+        assignmentId: assignmentId || null,
+        checkoutSessionId: checkoutSessionId || null,
+        amount: amount ?? null,
+      },
+    }
+  );
 }
 
 export async function getMaintenanceRequestVendorContext(
@@ -1421,42 +2363,18 @@ async function sendEmailEmergency(payload: {
   unitId: string;
   notificationEmail?: string | null;
 }): Promise<EmergencyNotificationResult> {
-  const apiKey = process.env.RESEND_API_KEY;
-  const fromEmail = process.env.RESEND_FROM_EMAIL;
-
-  if (!apiKey || !fromEmail) {
-    return { channel: 'email', sent: false, error: 'RESEND_API_KEY/RESEND_FROM_EMAIL not configured' };
-  }
-
   if (!payload.notificationEmail) {
     return { channel: 'email', sent: false, error: 'No emergency notification email configured' };
   }
 
   try {
-    const response = await fetch('https://api.resend.com/emails', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        from: fromEmail,
-        to: [payload.notificationEmail],
-        subject: `Emergency Maintenance: ${payload.title}`,
-        text: buildEmergencyMessage(payload),
-      }),
+    await sendResendEmail({
+      to: payload.notificationEmail,
+      subject: `Emergency Maintenance: ${payload.title}`,
+      text: buildEmergencyMessage(payload),
     });
 
-    if (!response.ok) {
-      return {
-        channel: 'email',
-        sent: false,
-        status: response.status,
-        error: `Email notification failed with status ${response.status}`,
-      };
-    }
-
-    return { channel: 'email', sent: true, status: response.status };
+    return { channel: 'email', sent: true };
   } catch (error) {
     return {
       channel: 'email',

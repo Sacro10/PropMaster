@@ -6,6 +6,7 @@
 import { Router } from 'express';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import { Permissions } from '../middleware/rbac';
+import { requirePlanAccess } from '../middleware/planAccess';
 import {
   getRecentPayments,
   getOverduePayments,
@@ -16,11 +17,13 @@ import {
 
 const router = Router();
 
+router.use(authenticate, requirePlanAccess('pro'));
+
 /**
  * GET /api/payments/recent
  * Get recent payments
  */
-router.get('/recent', authenticate, Permissions.readPayments, async (req: AuthRequest, res) => {
+router.get('/recent', Permissions.readPayments, async (req: AuthRequest, res) => {
   try {
     if (!req.user?.accountId) {
       res.status(400).json({ error: 'Account ID required' });
@@ -44,7 +47,7 @@ router.get('/recent', authenticate, Permissions.readPayments, async (req: AuthRe
  * GET /api/payments/overdue
  * Get overdue/pending payments
  */
-router.get('/overdue', authenticate, Permissions.readPayments, async (req: AuthRequest, res) => {
+router.get('/overdue', Permissions.readPayments, async (req: AuthRequest, res) => {
   try {
     if (!req.user?.accountId) {
       res.status(400).json({ error: 'Account ID required' });
@@ -66,7 +69,7 @@ router.get('/overdue', authenticate, Permissions.readPayments, async (req: AuthR
  * GET /api/payments/stats
  * Get collection statistics
  */
-router.get('/stats', authenticate, Permissions.readPayments, async (req: AuthRequest, res) => {
+router.get('/stats', Permissions.readPayments, async (req: AuthRequest, res) => {
   try {
     if (!req.user?.accountId) {
       res.status(400).json({ error: 'Account ID required' });
@@ -91,7 +94,6 @@ router.get('/stats', authenticate, Permissions.readPayments, async (req: AuthReq
  */
 router.post(
   '/:id/send-reminder',
-  authenticate,
   Permissions.updatePayments,
   async (req: AuthRequest, res) => {
     try {
@@ -116,7 +118,7 @@ router.post(
  * POST /api/payments
  * Record a payment
  */
-router.post('/', authenticate, Permissions.createPayments, async (req: AuthRequest, res) => {
+router.post('/', Permissions.createPayments, async (req: AuthRequest, res) => {
   try {
     if (!req.user?.accountId) {
       res.status(400).json({ error: 'Account ID required' });

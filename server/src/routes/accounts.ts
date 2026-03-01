@@ -10,24 +10,68 @@ import { stripe } from '../stripe';
 
 const router = Router();
 
+async function resolveAccountId(req: AuthRequest): Promise<string | null> {
+  const directAccountId = req.user?.accountId?.trim();
+  if (directAccountId) {
+    return directAccountId;
+  }
+
+  const userId = req.user?.id;
+  if (!userId) {
+    return null;
+  }
+
+  const { data, error } = await supabase
+    .from('account_members')
+    .select('account_id, joined_at, created_at, is_active')
+    .eq('user_id', userId)
+    .eq('is_active', true)
+    .not('account_id', 'is', null);
+
+  if (error) {
+    console.warn('Resolve account ID failed:', error);
+    return null;
+  }
+
+  const rows = Array.isArray(data) ? data : data ? [data] : [];
+  if (rows.length === 0) {
+    return null;
+  }
+
+  const sorted = [...rows].sort((a: any, b: any) => {
+    const dateA = new Date(a.joined_at || a.created_at || 0).getTime();
+    const dateB = new Date(b.joined_at || b.created_at || 0).getTime();
+    return dateB - dateA;
+  });
+
+  return sorted[0]?.account_id || null;
+}
+
 router.get(
   '/stripe-connect',
   authenticate,
   requireRole(['owner', 'manager', 'admin']),
   async (req: AuthRequest, res) => {
     try {
-      if (!req.user?.accountId) {
-        res.status(400).json({ error: 'Account ID required' });
+      const accountId = await resolveAccountId(req);
+      if (!accountId) {
+        res.json({
+          stripeConnectedAccountId: null,
+          chargesEnabled: null,
+          payoutsEnabled: null,
+        });
         return;
       }
 
       const { data: account, error } = await supabase
         .from('accounts')
         .select('stripe_connected_account_id')
-        .eq('id', req.user.accountId)
-        .single();
+        .eq('id', accountId)
+        .maybeSingle();
 
-      if (error) throw error;
+      if (error) {
+        throw error;
+      }
 
       const stripeAccountId = account?.stripe_connected_account_id || null;
       let chargesEnabled: boolean | null = null;
@@ -64,8 +108,9 @@ router.post(
   requireRole(['owner', 'manager', 'admin']),
   async (req: AuthRequest, res) => {
     try {
-      if (!req.user?.accountId) {
-        res.status(400).json({ error: 'Account ID required' });
+      const accountId = await resolveAccountId(req);
+      if (!accountId) {
+        res.status(400).json({ error: 'User account not found' });
         return;
       }
 
@@ -83,7 +128,7 @@ router.post(
       const { data: updated, error } = await supabase
         .from('accounts')
         .update({ stripe_connected_account_id: stripeAccountId })
-        .eq('id', req.user.accountId)
+        .eq('id', accountId)
         .select('stripe_connected_account_id')
         .single();
 

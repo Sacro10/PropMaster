@@ -6,6 +6,7 @@
 /// <reference types="vite/client" />
 
 import { supabase } from '../supabaseClient';
+import { fetchWithAuthRetry } from './client';
 
 // API base URL
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3001';
@@ -18,14 +19,11 @@ async function apiRequest<T>(
   options: RequestInit = {}
 ): Promise<T> {
   const { data: { session } } = await supabase.auth.getSession();
-  if (!session) {
-    throw new Error('No active session');
-  }
+  if (!session) throw new Error('No active session');
 
-  const response = await fetch(`${API_BASE}/api${endpoint}`, {
+  const response = await fetchWithAuthRetry(`${API_BASE}/api${endpoint}`, {
     ...options,
     headers: {
-      'Authorization': `Bearer ${session.access_token}`,
       'Content-Type': 'application/json',
       ...options.headers,
     },
@@ -63,6 +61,7 @@ export interface Conversation {
   createdAt: string;
   updatedAt: string;
   lastMessage?: string;
+  lastMessageAttachments?: any[];
   unreadCount?: number;
 }
 
@@ -72,6 +71,7 @@ export interface Message {
   conversationId: string | null;
   fromUserId: string;
   toUserId: string | null;
+  maintenanceRequestId?: string | null;
   subject: string | null;
   body: string;
   isRead: boolean;
@@ -122,6 +122,7 @@ export interface CommunicationStats {
 }
 
 export interface PortalActivity {
+  activeConversations: number;
   messagesToday: number;
   unreadMessages: number;
   avgResponseTimeMinutes: number;
@@ -131,6 +132,7 @@ export interface PortalActivity {
 export interface MessageSuggestion {
   suggestion: string;
   provider: string | null;
+  error?: string | null;
 }
 
 // =========================================
@@ -189,6 +191,13 @@ export async function sendMessage(data: {
   conversationId?: string;
   propertyId?: string;
   unitId?: string;
+  maintenanceRequestId?: string;
+  attachments?: Array<{
+    url: string;
+    fileName: string;
+    contentType?: string | null;
+    size?: number | null;
+  }>;
 }): Promise<Message> {
   return apiRequest('/communications/messages', {
     method: 'POST',
@@ -352,6 +361,7 @@ export async function getPortalActivity(): Promise<PortalActivity> {
   } catch (error) {
     console.error('[Communications API] Error fetching portal activity:', error);
     return {
+      activeConversations: 0,
       messagesToday: 0,
       unreadMessages: 0,
       avgResponseTimeMinutes: 0,
